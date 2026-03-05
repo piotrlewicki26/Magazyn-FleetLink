@@ -168,31 +168,61 @@ function sendAppEmail($to, $toName, $subject, $body, $replyTo = null) {
 
 function sendSmtpEmail($to, $toName, $subject, $body, $replyTo = null) {
     // Simple SMTP implementation using fsockopen
-    $host = defined('MAIL_HOST') ? MAIL_HOST : 'localhost';
-    $port = defined('MAIL_PORT') ? (int)MAIL_PORT : 587;
-    $user = defined('MAIL_USER') ? MAIL_USER : '';
-    $pass = defined('MAIL_PASS') ? MAIL_PASS : '';
-    $from = defined('MAIL_FROM') ? MAIL_FROM : '';
+    // Supports port 465 (implicit SSL/TLS) and port 587 (STARTTLS)
+    $host     = defined('MAIL_HOST') ? MAIL_HOST : 'localhost';
+    $port     = defined('MAIL_PORT') ? (int)MAIL_PORT : 587;
+    $user     = defined('MAIL_USER') ? MAIL_USER : '';
+    $pass     = defined('MAIL_PASS') ? MAIL_PASS : '';
+    $from     = defined('MAIL_FROM') ? MAIL_FROM : '';
     $fromName = defined('MAIL_FROM_NAME') ? MAIL_FROM_NAME : 'FleetLink';
 
     try {
-        $smtp = fsockopen('ssl://' . $host, $port === 587 ? 465 : $port, $errno, $errstr, 10);
+        // Port 465 uses implicit SSL; port 587/25 use plain + optional STARTTLS
+        $useImplicitSsl = ($port === 465);
+        $socketHost = $useImplicitSsl ? 'ssl://' . $host : $host;
+
+        $smtp = fsockopen($socketHost, $port, $errno, $errstr, 10);
         if (!$smtp) {
-            // Fall back to port 587 with STARTTLS or plain mail()
             logEmail($to, $subject, 'failed: ' . $errstr);
-            return mail($to, $subject, $body);
+            return false;
         }
-        fgets($smtp, 515);
-        fputs($smtp, "EHLO " . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "\r\n");
+
+        $ehlo = ($_SERVER['HTTP_HOST'] ?? 'localhost');
+
+        fgets($smtp, 515); // Server greeting
+        fputs($smtp, "EHLO $ehlo\r\n");
+        $ehloResp = '';
         while ($line = fgets($smtp, 515)) {
-            if ($line[3] === ' ') break;
+            $ehloResp .= $line;
+            if (isset($line[3]) && $line[3] === ' ') break;
         }
-        fputs($smtp, "AUTH LOGIN\r\n");
-        fgets($smtp, 515);
-        fputs($smtp, base64_encode($user) . "\r\n");
-        fgets($smtp, 515);
-        fputs($smtp, base64_encode($pass) . "\r\n");
-        fgets($smtp, 515);
+
+        // STARTTLS for port 587
+        if (!$useImplicitSsl && strpos($ehloResp, 'STARTTLS') !== false) {
+            fputs($smtp, "STARTTLS\r\n");
+            fgets($smtp, 515);
+            stream_socket_enable_crypto($smtp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+            fputs($smtp, "EHLO $ehlo\r\n");
+            while ($line = fgets($smtp, 515)) {
+                if (isset($line[3]) && $line[3] === ' ') break;
+            }
+        }
+
+        // AUTH LOGIN
+        if (!empty($user)) {
+            fputs($smtp, "AUTH LOGIN\r\n");
+            fgets($smtp, 515);
+            fputs($smtp, base64_encode($user) . "\r\n");
+            fgets($smtp, 515);
+            fputs($smtp, base64_encode($pass) . "\r\n");
+            $authResp = fgets($smtp, 515);
+            if (strpos($authResp, '235') === false) {
+                fclose($smtp);
+                logEmail($to, $subject, 'failed: SMTP AUTH error');
+                return false;
+            }
+        }
+
         fputs($smtp, "MAIL FROM: <$from>\r\n");
         fgets($smtp, 515);
         fputs($smtp, "RCPT TO: <$to>\r\n");

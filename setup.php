@@ -279,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </div>
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Port</label>
-                            <input type="number" name="mail_port" class="form-control" value="<?= htmlspecialchars($_POST['mail_port'] ?? '465') ?>">
+                            <input type="number" name="mail_port" class="form-control" value="<?= htmlspecialchars($_POST['mail_port'] ?? '587') ?>">
                         </div>
                     </div>
                     <div class="mb-3">
