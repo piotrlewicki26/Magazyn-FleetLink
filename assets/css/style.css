@@ -1,0 +1,242 @@
+/* FleetLink Magazyn - Custom Styles */
+
+:root {
+    --sidebar-width: 240px;
+    --primary-color: #0d6efd;
+    --success-color: #198754;
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+/* Navbar */
+.navbar-brand {
+    font-size: 1.25rem;
+    letter-spacing: 0.5px;
+}
+
+/* Cards */
+.card {
+    border: none;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    border-radius: 8px;
+}
+
+.card-header {
+    background: #fff;
+    border-bottom: 1px solid #e9ecef;
+    font-weight: 600;
+}
+
+/* Stats cards */
+.stat-card {
+    border-radius: 10px;
+    border: none;
+    transition: transform 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+}
+
+.stat-card .stat-icon {
+    font-size: 2.5rem;
+    opacity: 0.7;
+}
+
+.stat-card .stat-number {
+    font-size: 2.2rem;
+    font-weight: 700;
+}
+
+/* Tables */
+.table th {
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6c757d;
+    border-top: none;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.04);
+}
+
+/* Buttons */
+.btn-action {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+/* Breadcrumb */
+.breadcrumb {
+    background: none;
+    padding: 0;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+}
+
+/* Page header */
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.page-header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #212529;
+    margin: 0;
+}
+
+/* Status badges */
+.badge {
+    font-size: 0.75rem;
+    padding: 0.35em 0.65em;
+}
+
+/* Calendar */
+#calendar {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.fc-event {
+    cursor: pointer;
+    border-radius: 4px !important;
+}
+
+/* Login page */
+.login-wrapper {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    background: linear-gradient(135deg, #0d6efd 0%, #0dcaf0 100%);
+}
+
+.login-card {
+    max-width: 420px;
+    width: 100%;
+    margin: 0 auto;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+
+.login-logo {
+    font-size: 3rem;
+    color: #0d6efd;
+}
+
+/* Print styles */
+@media print {
+    .navbar, .btn, .breadcrumb, footer, .no-print {
+        display: none !important;
+    }
+    .container-fluid {
+        padding: 0 !important;
+    }
+    .card {
+        box-shadow: none;
+        border: 1px solid #dee2e6;
+    }
+    .print-header {
+        display: block !important;
+    }
+}
+
+.print-header {
+    display: none;
+}
+
+/* Offer/Protocol print layout */
+.document-header {
+    border-bottom: 3px solid #0d6efd;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+}
+
+.document-company {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+/* Alerts */
+.alert {
+    border-radius: 8px;
+}
+
+/* Forms */
+.form-label {
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.required-star::after {
+    content: ' *';
+    color: #dc3545;
+}
+
+/* Inventory low stock warning */
+.low-stock {
+    color: #dc3545;
+    font-weight: 600;
+}
+
+/* Timeline for installations/services */
+.timeline {
+    position: relative;
+    padding-left: 30px;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #dee2e6;
+}
+
+.timeline-item {
+    position: relative;
+    padding-bottom: 20px;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -24px;
+    top: 5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #0d6efd;
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px #0d6efd;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .stat-card .stat-number {
+        font-size: 1.8rem;
+    }
+
+    .table-responsive {
+        font-size: 0.875rem;
+    }
+}
