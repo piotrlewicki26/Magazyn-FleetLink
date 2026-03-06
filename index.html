@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FleetLink – Magazyn &amp; Generator Ofert GPS</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: #0B2545;
+      color: #ECF0F1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    .site-header {
+      background: linear-gradient(135deg, #0B2545 0%, #0D3464 60%, #1A4B8C 100%);
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(91, 164, 245, 0.15);
+      flex-shrink: 0;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .header-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, #27AE60, #5BA4F5);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      color: #FFFFFF;
+      line-height: 1;
+    }
+
+    .header-subtitle {
+      color: #5BA4F5;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 3px;
+    }
+
+    .header-nav {
+      display: flex;
+      gap: 10px;
+    }
+
+    .header-link {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .header-link:hover, .header-link.active {
+      color: #FFFFFF;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .header-link.active {
+      background: rgba(91, 164, 245, 0.15);
+      color: #5BA4F5;
+    }
+
+    /* ── MAIN CONTENT ── */
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .embed-frame {
+      flex: 1;
+      width: 100%;
+      border: none;
+      display: block;
+      background: #0B2545;
+    }
+
+    /* ── FOOTER ── */
+    .site-footer {
+      background: linear-gradient(135deg, #0D3464, #0B2545);
+      padding: 12px 32px;
+      text-align: center;
+      border-top: 1px solid rgba(91, 164, 245, 0.1);
+      flex-shrink: 0;
+    }
+
+    .site-footer p {
+      color: rgba(255, 255, 255, 0.35);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      .site-header {
+        flex-direction: column;
+        gap: 12px;
+        padding: 14px 16px;
+      }
+
+      .header-nav {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="header-brand">
+      <div class="header-icon">📡</div>
+      <div>
+        <div class="header-title">FleetLink</div>
+        <div class="header-subtitle">Magazyn urządzeń &amp; Generator Ofert GPS</div>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html" class="header-link active">🏠 Strona główna</a>
+      <a href="FleetLink_Generator_Ofert_umowa_18_3.html" class="header-link" target="_blank">🔗 Otwórz w nowej karcie</a>
+    </nav>
+  </header>
+
+  <main class="content">
+    <iframe
+      src="FleetLink_Generator_Ofert_umowa_18_3.html"
+      class="embed-frame"
+      title="FleetLink – Generator Ofert GPS"
+      allow="clipboard-write"
+      sandbox="allow-scripts allow-same-origin allow-downloads allow-forms allow-modals allow-popups"
+    ></iframe>
+  </main>
+
+  <footer class="site-footer">
+    <p>&copy; 2025 FleetLink – System zarządzania flotą GPS</p>
+  </footer>
+
+</body>
+</html>
