@@ -5,6 +5,7 @@
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/functions.php';
 
@@ -12,6 +13,7 @@ requireLogin();
 
 $currentUser = getCurrentUser();
 $userName = htmlspecialchars($currentUser['name'] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+$createOfferUrl = htmlspecialchars(getBaseUrl() . 'offers.php?action=add', ENT_QUOTES | ENT_HTML5, 'UTF-8');
 $backUrl      = htmlspecialchars(getBaseUrl() . 'offers.php',    ENT_QUOTES | ENT_HTML5, 'UTF-8');
 $dashboardUrl = htmlspecialchars(getBaseUrl() . 'dashboard.php', ENT_QUOTES | ENT_HTML5, 'UTF-8');
 $logoutUrl    = htmlspecialchars(getBaseUrl() . 'logout.php',    ENT_QUOTES | ENT_HTML5, 'UTF-8');
@@ -45,7 +47,14 @@ $navBar = '<div id="fl-app-bar" style="'
     . 'padding:7px 16px;display:flex;align-items:center;gap:14px;'
     . 'font-family:\'DM Sans\',\'Segoe UI\',Arial,sans-serif;font-size:12px;">'
     . '<a href="' . $backUrl . '" style="color:#5BA4F5;text-decoration:none;display:flex;align-items:center;gap:6px;font-weight:600;">'
-    .   '<span style="font-size:15px;">&#8592;</span> Wróć do Ofert w systemie FleetLink'
+    .   '<span style="font-size:15px;">&#8592;</span> Wróć do Ofert'
+    . '</a>'
+    . '<span style="color:rgba(255,255,255,.2);margin:0 4px;">|</span>'
+    . '<a href="' . $createOfferUrl . '" style="'
+    .   'background:linear-gradient(135deg,#27AE60,#2E7BCE);color:#fff;text-decoration:none;'
+    .   'display:flex;align-items:center;gap:5px;font-weight:700;'
+    .   'padding:4px 12px;border-radius:8px;font-size:11px;">'
+    .   '&#43; Nowa oferta w systemie'
     . '</a>'
     . '<span style="color:rgba(255,255,255,.2);margin:0 4px;">|</span>'
     . '<a href="' . $dashboardUrl . '" style="color:rgba(255,255,255,.5);text-decoration:none;">Panel główny</a>'
