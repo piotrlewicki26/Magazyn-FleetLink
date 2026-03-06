@@ -740,7 +740,7 @@ function switchImpTab(name) {
 function parsePaste() {
   const raw=document.getElementById('imp-paste').value.trim(); if(!raw){document.getElementById('imp-map-wrap').style.display='none'  ;return;}
   const lines=raw.split(/\r?\n/).filter(l=>l.trim()); if(lines.length<2) return;
-  const sep=lines[0].includes('\t') ? '\t' : ','  ;
+  const sep=lines[0].includes('\t') ? '\t' : ',';
   impHeaders=lines[0].split(sep).map(h=>h.trim());
   impRows=lines.slice(1).map(l=>l.split(sep).map(c=>c.trim()));
   showMapping();
@@ -755,7 +755,7 @@ function handleFile(file) {
   if(ext==='csv') {
     const r=new FileReader(); r.onload=e=>{
       const lines=e.target.result.split(/\r?\n/).filter(l=>l.trim()); if(lines.length<2)return;
-      const sep=lines[0].includes('\t')?'\t':'  ,'  ;
+      const sep=lines[0].includes('\t')?'\t':',';
       impHeaders=lines[0].split(sep).map(h=>h.trim());
       impRows=lines.slice(1).map(l=>l.split(sep).map(c=>c.trim()));
       showMapping();
