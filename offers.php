@@ -160,7 +160,10 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-file-invoice-dollar me-2 text-primary"></i>Oferty</h1>
     <?php if ($action === 'list'): ?>
-    <a href="offers.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowa oferta</a>
+    <div class="d-flex gap-2">
+        <a href="offer_generator.php" class="btn btn-outline-info"><i class="fas fa-magic me-2"></i>Generator ofert GPS</a>
+        <a href="offers.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowa oferta</a>
+    </div>
     <?php else: ?>
     <a href="offers.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>

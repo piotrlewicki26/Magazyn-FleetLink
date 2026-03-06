@@ -72,12 +72,13 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['clients','offers']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['clients','offers','offer_generator']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
                         <i class="fas fa-file-contract me-1"></i>CRM
                     </a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>clients.php"><i class="fas fa-users me-2"></i>Klienci</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offers.php"><i class="fas fa-file-invoice-dollar me-2"></i>Oferty</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offer_generator.php"><i class="fas fa-magic me-2"></i>Generator ofert GPS</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>contracts.php"><i class="fas fa-file-signature me-2"></i>Umowy</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php"><i class="fas fa-clipboard-check me-2"></i>Protokoły</a></li>
                     </ul>
