@@ -20,8 +20,8 @@
     --fl-shadow-hover: 0 6px 24px rgba(13,110,253,.14);
     --fl-text: #1a2236;
     --fl-text-muted: #6b7a99;
-    --fl-nav-bg: rgba(13,27,60,.97);
-    --fl-nav-border: rgba(255,255,255,.08);
+    --fl-nav-bg: rgba(10,12,20,.97);
+    --fl-nav-border: rgba(255,255,255,.10);
     --fl-header-bg: #ffffff;
     --fl-header-border: rgba(0,0,0,.06);
     --fl-footer-bg: #f7fafc;
@@ -38,8 +38,8 @@
     --fl-shadow-hover: 0 6px 28px rgba(99,163,255,.18);
     --fl-text: #e8edf7;
     --fl-text-muted: #8a9bc0;
-    --fl-nav-bg: rgba(10,18,42,.98);
-    --fl-nav-border: rgba(255,255,255,.06);
+    --fl-nav-bg: rgba(8,10,16,.98);
+    --fl-nav-border: rgba(255,255,255,.08);
     --fl-header-bg: #1a2340;
     --fl-header-border: rgba(255,255,255,.07);
     --fl-footer-bg: #141c35;
