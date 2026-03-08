@@ -30,7 +30,7 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
 <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
     <div class="container-fluid">
         <a class="navbar-brand fw-bold" href="<?= getBaseUrl() ?>dashboard.php">
-            <img src="<?= getBaseUrl() ?>assets/fleetlink-logo-v2.svg" alt="FleetLink" height="34" style="display:block">
+            <img src="<?= getBaseUrl() ?>assets/fleetlink-logo-v2.png" alt="FleetLink" height="34" style="display:block">
         </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
             <span class="navbar-toggler-icon"></span>
