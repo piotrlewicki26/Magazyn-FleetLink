@@ -25,7 +25,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $installationDate   = sanitize($_POST['installation_date'] ?? '');
     $uninstallationDate = sanitize($_POST['uninstallation_date'] ?? '') ?: null;
     $status             = sanitize($_POST['status'] ?? 'aktywna');
-    $locationInVehicle  = sanitize($_POST['location_in_vehicle'] ?? '');
+    // $locationInVehicle is used for the 'edit' action (single string field).
+    // For 'add', location_in_vehicle[] is an array processed per device row.
+    $locationInVehicle  = is_array($_POST['location_in_vehicle'] ?? null) ? '' : sanitize($_POST['location_in_vehicle'] ?? '');
     $notes              = sanitize($_POST['notes'] ?? '');
     $currentUser        = getCurrentUser();
 
@@ -47,24 +49,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'add') {
-        // New add flow: model_id + vehicle_registration
-        $modelId             = (int)($_POST['model_id'] ?? 0);
+        // New multi-device add flow
         $vehicleRegistration = strtoupper(trim(sanitize($_POST['vehicle_registration'] ?? '')));
 
-        if (!$modelId || empty($vehicleRegistration) || empty($installationDate)) {
-            flashError('Model urządzenia, numer rejestracyjny pojazdu i data montażu są wymagane.');
+        if (empty($vehicleRegistration) || empty($installationDate)) {
+            flashError('Numer rejestracyjny pojazdu i data montażu są wymagane.');
             redirect(getBaseUrl() . 'installations.php?action=add');
         }
 
-        // Find first available device of this model
-        $devStmt = $db->prepare("SELECT id FROM devices WHERE model_id=? AND status IN ('nowy','sprawny') LIMIT 1");
-        $devStmt->execute([$modelId]);
-        $devRow = $devStmt->fetch();
-        if (!$devRow) {
-            flashError('Brak dostępnych urządzeń dla wybranego modelu. Sprawdź stan magazynu.');
+        // Arrays of per-device row data
+        // device_mode[] values are validated to 'auto'/'manual' in the loop; model/device IDs are cast to int.
+        $deviceModes     = is_array($_POST['device_mode'] ?? null)         ? $_POST['device_mode']         : ['auto'];
+        $modelIds        = is_array($_POST['model_id'] ?? null)            ? $_POST['model_id']            : [0];
+        $deviceIdsManual = is_array($_POST['device_id_manual'] ?? null)    ? $_POST['device_id_manual']    : [0];
+        $locationRows    = is_array($_POST['location_in_vehicle'] ?? null) ? $_POST['location_in_vehicle'] : [''];
+
+        if (empty($deviceModes)) {
+            flashError('Wybierz co najmniej jedno urządzenie.');
             redirect(getBaseUrl() . 'installations.php?action=add');
         }
-        $deviceId = $devRow['id'];
 
         // Find or auto-create vehicle by registration plate
         $vStmt = $db->prepare("SELECT id FROM vehicles WHERE registration=? LIMIT 1");
@@ -78,23 +81,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $vehicleId = $db->lastInsertId();
         }
 
-        // Check device not already installed
-        $checkStmt = $db->prepare("SELECT id FROM installations WHERE device_id=? AND status='aktywna' LIMIT 1");
-        $checkStmt->execute([$deviceId]);
-        if ($checkStmt->fetch()) {
-            flashError('Wybrane urządzenie jest już zamontowane (aktywny montaż). Wybierz inny model lub sprawdź stan urządzeń.');
-            redirect(getBaseUrl() . 'installations.php?action=add');
-        }
+        $allocatedDeviceIds = []; // track devices allocated in this batch
         $db->beginTransaction();
         try {
-            $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, notes) VALUES (?,?,?,?,?,?,?,?,?)")
-               ->execute([$deviceId, $vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes]);
-            $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$deviceId]);
+            foreach ($deviceModes as $idx => $mode) {
+                $mode   = ($mode === 'manual') ? 'manual' : 'auto';
+                $locRow = sanitize($locationRows[$idx] ?? '');
+
+                if ($mode === 'manual') {
+                    $dId = (int)($deviceIdsManual[$idx] ?? 0);
+                    if (!$dId) {
+                        throw new Exception('Wiersz ' . ($idx + 1) . ': nie wybrano urządzenia.');
+                    }
+                    $devStmt = $db->prepare("SELECT id, model_id, status FROM devices WHERE id=? AND status IN ('nowy','sprawny') LIMIT 1");
+                    $devStmt->execute([$dId]);
+                    $devRow = $devStmt->fetch();
+                    if (!$devRow) {
+                        throw new Exception('Wiersz ' . ($idx + 1) . ': wybrane urządzenie jest niedostępne lub zmieniło status.');
+                    }
+                    if (in_array($dId, $allocatedDeviceIds)) {
+                        throw new Exception('Wiersz ' . ($idx + 1) . ': to urządzenie zostało już wybrane w tym montażu.');
+                    }
+                } else {
+                    $mId = (int)($modelIds[$idx] ?? 0);
+                    if (!$mId) {
+                        throw new Exception('Wiersz ' . ($idx + 1) . ': nie wybrano modelu urządzenia.');
+                    }
+                    if (!empty($allocatedDeviceIds)) {
+                        $placeholders = implode(',', array_fill(0, count($allocatedDeviceIds), '?'));
+                        $devStmt = $db->prepare("SELECT id, model_id, status FROM devices WHERE model_id=? AND status IN ('nowy','sprawny') AND id NOT IN ($placeholders) LIMIT 1");
+                        $devStmt->execute(array_merge([$mId], $allocatedDeviceIds));
+                    } else {
+                        $devStmt = $db->prepare("SELECT id, model_id, status FROM devices WHERE model_id=? AND status IN ('nowy','sprawny') LIMIT 1");
+                        $devStmt->execute([$mId]);
+                    }
+                    $devRow = $devStmt->fetch();
+                    if (!$devRow) {
+                        throw new Exception('Wiersz ' . ($idx + 1) . ': brak dostępnych urządzeń dla wybranego modelu.');
+                    }
+                    $dId = $devRow['id'];
+                }
+
+                // Check not already actively installed
+                $checkStmt = $db->prepare("SELECT id FROM installations WHERE device_id=? AND status='aktywna' LIMIT 1");
+                $checkStmt->execute([$dId]);
+                if ($checkStmt->fetch()) {
+                    throw new Exception('Wiersz ' . ($idx + 1) . ': urządzenie jest już aktywnie zamontowane.');
+                }
+
+                // Create installation record
+                $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, notes) VALUES (?,?,?,?,?,?,?,?,?)")
+                   ->execute([$dId, $vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locRow, $notes]);
+
+                // Update device status + auto inventory adjust
+                $oldStatus = $devRow['status'];
+                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$dId]);
+                adjustInventoryForStatusChange($db, $devRow['model_id'], $oldStatus, 'zamontowany');
+
+                $allocatedDeviceIds[] = $dId;
+            }
             $db->commit();
-            flashSuccess('Montaż zarejestrowany pomyślnie.');
+            $n = count($allocatedDeviceIds);
+            flashSuccess('Zarejestrowano ' . $n . ' montaż' . ($n === 1 ? '' : 'e') . ' pomyślnie.');
         } catch (Exception $e) {
             $db->rollBack();
-            flashError('Błąd podczas zapisu: ' . $e->getMessage());
+            flashError('Błąd: ' . $e->getMessage());
+            redirect(getBaseUrl() . 'installations.php?action=add');
         }
         redirect(getBaseUrl() . 'installations.php');
 
@@ -184,9 +236,9 @@ $availableModels = $db->query("
     ORDER BY mf.name, m.name
 ")->fetchAll();
 
-// Individual available devices (for the edit form — keep existing device select)
+// Individual available devices (for manual selection in the add form)
 $availableDevices = $db->query("
-    SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name
+    SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name
     FROM devices d
     JOIN models m ON m.id=d.model_id
     JOIN manufacturers mf ON mf.id=m.manufacturer_id
@@ -380,29 +432,94 @@ include __DIR__ . '/includes/header.php';
             <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $installation['id'] ?>"><input type="hidden" name="vehicle_id" value="<?= $installation['vehicle_id'] ?? 0 ?>"><?php endif; ?>
             <div class="row g-3">
                 <?php if ($action === 'add'): ?>
-                <div class="col-md-6">
-                    <label class="form-label required-star">Model urządzenia GPS</label>
-                    <select name="model_id" class="form-select" required>
-                        <option value="">— wybierz model —</option>
-                        <?php foreach ($availableModels as $m): ?>
-                        <option value="<?= $m['model_id'] ?>">
-                            <?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (dostępne: <?= (int)$m['available_count'] ?>)
-                        </option>
-                        <?php endforeach; ?>
-                        <?php if (empty($availableModels)): ?>
-                        <option value="" disabled>Brak dostępnych urządzeń w magazynie</option>
-                        <?php endif; ?>
-                    </select>
-                    <div class="form-text">System automatycznie przypisze pierwsze dostępne urządzenie wybranego modelu.</div>
-                </div>
+                <!-- Vehicle registration -->
                 <div class="col-md-6">
                     <label class="form-label required-star">Numer rejestracyjny pojazdu</label>
                     <input type="text" name="vehicle_registration" class="form-control"
                            required placeholder="np. KR 12345"
                            value="<?= h($_POST['vehicle_registration'] ?? '') ?>"
                            style="text-transform:uppercase">
-                    <div class="form-text">Wpisz numer rejestracyjny. Pojazd zostanie automatycznie zarejestrowany jeśli nie istnieje.</div>
+                    <div class="form-text">Pojazd zostanie automatycznie zarejestrowany jeśli nie istnieje.</div>
                 </div>
+                <div class="col-md-6"></div>
+
+                <!-- Multi-device selection rows -->
+                <div class="col-12">
+                    <label class="form-label required-star">Urządzenia GPS do montażu</label>
+                    <?php if (empty($availableModels) && empty($availableDevices)): ?>
+                    <div class="alert alert-warning py-2 mb-2">
+                        <i class="fas fa-exclamation-triangle me-2"></i>Brak dostępnych urządzeń w magazynie.
+                        <a href="devices.php?action=add">Dodaj urządzenia</a> lub sprawdź stan magazynu.
+                    </div>
+                    <?php endif; ?>
+
+                    <div id="deviceRowsContainer" class="d-flex flex-column gap-2 mb-2">
+                        <!-- First device row (index 0), pre-populated from ?device=X if provided -->
+                        <?php
+                        $preDeviceId = (int)($_GET['device'] ?? 0);
+                        $preMode     = ($preDeviceId > 0) ? 'manual' : 'auto';
+                        ?>
+                        <div class="device-row border rounded p-2 bg-light" data-row-idx="0">
+                            <div class="row g-2 align-items-center">
+                                <div class="col-auto">
+                                    <span class="row-num badge bg-secondary">1</span>
+                                </div>
+                                <div class="col-auto">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <input type="radio" class="btn-check" name="device_mode[0]" id="dm_auto_0" value="auto"
+                                               <?= $preMode === 'auto' ? 'checked' : '' ?>>
+                                        <label class="btn btn-outline-secondary" for="dm_auto_0"><i class="fas fa-magic me-1"></i>Auto</label>
+                                        <input type="radio" class="btn-check" name="device_mode[0]" id="dm_manual_0" value="manual"
+                                               <?= $preMode === 'manual' ? 'checked' : '' ?>>
+                                        <label class="btn btn-outline-primary" for="dm_manual_0"><i class="fas fa-hand-pointer me-1"></i>Ręczny wybór</label>
+                                    </div>
+                                </div>
+                                <div class="col col-mode-auto" <?= $preMode === 'manual' ? 'style="display:none"' : '' ?>>
+                                    <select name="model_id[0]" class="form-select form-select-sm">
+                                        <option value="">— wybierz model —</option>
+                                        <?php foreach ($availableModels as $m): ?>
+                                        <option value="<?= $m['model_id'] ?>">
+                                            <?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col col-mode-manual" <?= $preMode === 'auto' ? 'style="display:none"' : '' ?>>
+                                    <select name="device_id_manual[0]" class="form-select form-select-sm">
+                                        <option value="">— wybierz urządzenie —</option>
+                                        <?php
+                                        $currentGroup = '';
+                                        foreach ($availableDevices as $dev):
+                                            $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
+                                            if ($grp !== $currentGroup) {
+                                                if ($currentGroup) echo '</optgroup>';
+                                                echo '<optgroup label="' . h($grp) . '">';
+                                                $currentGroup = $grp;
+                                            }
+                                        ?>
+                                        <option value="<?= $dev['id'] ?>" <?= $preDeviceId === $dev['id'] ? 'selected' : '' ?>>
+                                            <?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?><?= $dev['sim_number'] ? ' (' . h($dev['sim_number']) . ')' : '' ?>
+                                        </option>
+                                        <?php endforeach; if ($currentGroup) echo '</optgroup>'; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" name="location_in_vehicle[0]" class="form-control form-control-sm"
+                                           placeholder="Miejsce montażu (opcjonalnie)">
+                                </div>
+                                <div class="col-auto">
+                                    <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" style="display:none"
+                                            title="Usuń urządzenie z montażu"><i class="fas fa-times"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div><!-- #deviceRowsContainer -->
+
+                    <button type="button" id="addDeviceRowBtn" class="btn btn-sm btn-outline-success"
+                            <?= (empty($availableModels) && empty($availableDevices)) ? 'disabled' : '' ?>>
+                        <i class="fas fa-plus me-1"></i>Dodaj kolejne urządzenie
+                    </button>
+                </div><!-- .col-12 device section -->
                 <?php endif; ?>
                 <div class="col-md-6">
                     <label class="form-label">Klient</label>
@@ -450,10 +567,12 @@ include __DIR__ . '/includes/header.php';
                         <option value="anulowana" <?= ($installation['status'] ?? '') === 'anulowana' ? 'selected' : '' ?>>Anulowana</option>
                     </select>
                 </div>
+                <?php if ($action === 'edit'): ?>
                 <div class="col-md-6">
                     <label class="form-label">Miejsce montażu w pojeździe</label>
                     <input type="text" name="location_in_vehicle" class="form-control" value="<?= h($installation['location_in_vehicle'] ?? '') ?>" placeholder="np. pod deską rozdzielczą">
                 </div>
+                <?php endif; ?>
                 <div class="col-12">
                     <label class="form-label">Uwagi</label>
                     <textarea name="notes" class="form-control" rows="3"><?= h($installation['notes'] ?? '') ?></textarea>
@@ -580,5 +699,129 @@ function showUninstallModal(id, deviceId, serial) {
     });
 }());
 </script>
+
+<!-- Hidden template for new device rows — cloned by JavaScript -->
+<?php if ($action === 'add'): ?>
+<template id="deviceRowTemplate">
+    <div class="device-row border rounded p-2 bg-light" data-row-idx="__IDX__">
+        <div class="row g-2 align-items-center">
+            <div class="col-auto">
+                <span class="row-num badge bg-secondary">__NUM__</span>
+            </div>
+            <div class="col-auto">
+                <div class="btn-group btn-group-sm" role="group">
+                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="dm_auto___IDX__" value="auto" checked>
+                    <label class="btn btn-outline-secondary" for="dm_auto___IDX__"><i class="fas fa-magic me-1"></i>Auto</label>
+                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="dm_manual___IDX__" value="manual">
+                    <label class="btn btn-outline-primary" for="dm_manual___IDX__"><i class="fas fa-hand-pointer me-1"></i>Ręczny wybór</label>
+                </div>
+            </div>
+            <div class="col col-mode-auto">
+                <select name="model_id[__IDX__]" class="form-select form-select-sm">
+                    <option value="">— wybierz model —</option>
+                    <?php foreach ($availableModels as $m): ?>
+                    <option value="<?= $m['model_id'] ?>"><?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col col-mode-manual" style="display:none">
+                <select name="device_id_manual[__IDX__]" class="form-select form-select-sm">
+                    <option value="">— wybierz urządzenie —</option>
+                    <?php
+                    $tplGroup = '';
+                    foreach ($availableDevices as $dev):
+                        $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
+                        if ($grp !== $tplGroup) {
+                            if ($tplGroup) echo '</optgroup>';
+                            echo '<optgroup label="' . h($grp) . '">';
+                            $tplGroup = $grp;
+                        }
+                    ?>
+                    <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?><?= $dev['sim_number'] ? ' (' . h($dev['sim_number']) . ')' : '' ?></option>
+                    <?php endforeach; if ($tplGroup) echo '</optgroup>'; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <input type="text" name="location_in_vehicle[__IDX__]" class="form-control form-control-sm"
+                       placeholder="Miejsce montażu (opcjonalnie)">
+            </div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn"
+                        title="Usuń urządzenie z montażu"><i class="fas fa-times"></i></button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+(function () {
+    var container = document.getElementById('deviceRowsContainer');
+    var addBtn    = document.getElementById('addDeviceRowBtn');
+    if (!container || !addBtn) return;
+
+    var rowCounter = 1; // Row 0 is already rendered by PHP
+
+    function updateRowNumbers() {
+        var rows = container.querySelectorAll('.device-row');
+        rows.forEach(function (row, i) {
+            var numEl = row.querySelector('.row-num');
+            if (numEl) numEl.textContent = i + 1;
+            var removeBtn = row.querySelector('.remove-row-btn');
+            if (removeBtn) removeBtn.style.display = rows.length > 1 ? '' : 'none';
+        });
+    }
+
+    function applyModeToRow(row, mode) {
+        var autoCol   = row.querySelector('.col-mode-auto');
+        var manualCol = row.querySelector('.col-mode-manual');
+        if (autoCol)   autoCol.style.display   = (mode === 'auto')   ? '' : 'none';
+        if (manualCol) manualCol.style.display = (mode === 'manual') ? '' : 'none';
+    }
+
+    // Event delegation – mode toggle
+    container.addEventListener('change', function (e) {
+        if (e.target.type === 'radio' && e.target.name && e.target.name.startsWith('device_mode')) {
+            applyModeToRow(e.target.closest('.device-row'), e.target.value);
+        }
+    });
+
+    // Event delegation – remove row
+    container.addEventListener('click', function (e) {
+        var btn = e.target.closest('.remove-row-btn');
+        if (btn) {
+            btn.closest('.device-row').remove();
+            updateRowNumbers();
+        }
+    });
+
+    // Add new device row
+    addBtn.addEventListener('click', function () {
+        var tpl = document.getElementById('deviceRowTemplate');
+        if (!tpl) return;
+        var idx   = rowCounter++;
+        var clone = tpl.content.cloneNode(true);
+        // Replace __IDX__ and __NUM__ in all relevant attributes
+        clone.querySelectorAll('[name]').forEach(function (el) {
+            el.name = el.name.replace(/__IDX__/g, idx);
+        });
+        clone.querySelectorAll('[id]').forEach(function (el) {
+            el.id = el.id.replace(/__IDX__/g, idx);
+        });
+        clone.querySelectorAll('[for]').forEach(function (el) {
+            el.htmlFor = el.htmlFor.replace(/__IDX__/g, idx);
+        });
+        container.appendChild(clone);
+        updateRowNumbers();
+    });
+
+    // Init: apply mode to first row and update remove-button visibility
+    container.querySelectorAll('.device-row').forEach(function (row) {
+        var checked = row.querySelector('.btn-check:checked');
+        if (checked) applyModeToRow(row, checked.value);
+    });
+    updateRowNumbers();
+}());
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
