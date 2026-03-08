@@ -49,6 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'add') {
+        if (isTechnician()) { flashError('Rola Technik nie może dodawać zleceń montażu.'); redirect(getBaseUrl() . 'installations.php'); }
         // Per-row arrays
         $deviceModes          = is_array($_POST['device_mode'] ?? null)          ? $_POST['device_mode']          : ['auto'];
         $modelIds             = is_array($_POST['model_id'] ?? null)             ? $_POST['model_id']             : [0];
@@ -482,7 +483,9 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-car me-2 text-primary"></i>Montaże / Demontaże</h1>
     <?php if ($action === 'list'): ?>
+    <?php if (!isTechnician()): ?>
     <a href="installations.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowy montaż</a>
+    <?php endif; ?>
     <?php else: ?>
     <a href="installations.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>

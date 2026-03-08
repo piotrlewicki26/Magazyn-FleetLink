@@ -63,7 +63,7 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         <i class="fas fa-warehouse me-1"></i>Magazyn
                     </a>
                     <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php"><i class="fas fa-boxes me-2"></i>Stany magazynowe</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php"><i class="fas fa-microchip me-2"></i>Urządzenia</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php?action=accessories"><i class="fas fa-toolbox me-2"></i>Akcesoria</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php?action=movements"><i class="fas fa-history me-2"></i>Historia ruchów</a></li>
                     </ul>
@@ -79,7 +79,9 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php"><i class="fas fa-list me-2"></i>Lista montaży</a></li>
+                        <?php if (!isTechnician()): ?>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php?action=add"><i class="fas fa-plus me-2"></i>Nowy montaż</a></li>
+                        <?php endif; ?>
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
@@ -88,7 +90,9 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php"><i class="fas fa-list me-2"></i>Lista serwisów</a></li>
+                        <?php if (!isTechnician()): ?>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php?action=add"><i class="fas fa-plus me-2"></i>Nowy serwis</a></li>
+                        <?php endif; ?>
                     </ul>
                 </li>
                 <li class="nav-item">

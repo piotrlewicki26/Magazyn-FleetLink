@@ -43,6 +43,10 @@ function isAdmin() {
     return isLoggedIn() && ($_SESSION['user_role'] ?? '') === 'admin';
 }
 
+function isTechnician() {
+    return isLoggedIn() && ($_SESSION['user_role'] ?? '') === 'technician';
+}
+
 function getCurrentUser() {
     if (!isLoggedIn()) return null;
     return [

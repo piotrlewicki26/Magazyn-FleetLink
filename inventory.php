@@ -30,6 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!in_array($type, ['in','out','correction'])) $type = 'in';
 
     if ($postAction === 'sync_inventory') {
+        if (!isAdmin()) { flashError('Synchronizacja jest dostępna tylko dla Administratora.'); redirect(getBaseUrl() . 'inventory.php'); }
         $db->beginTransaction();
         try {
             // Ensure inventory rows exist for all active models
@@ -70,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'adjustment' && $modelId && $quantity != 0) {
+        if (!isAdmin()) { flashError('Korekta stanów jest dostępna tylko dla Administratora.'); redirect(getBaseUrl() . 'inventory.php'); }
         // Update inventory
         $db->beginTransaction();
         try {
@@ -139,6 +141,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("DELETE FROM accessories WHERE id=?")->execute([$accId]);
             flashSuccess('Akcesorium usunięte.');
         } catch (PDOException $e) { flashError('Nie można usunąć — akcesorium jest powiązane z wydaniami.'); }
+        redirect(getBaseUrl() . 'inventory.php?action=accessories');
+
+    } elseif ($postAction === 'accessory_pickup') {
+        // Standalone warehouse pickup (no installation_id)
+        $accId   = (int)($_POST['accessory_id'] ?? 0);
+        $qty     = max(1, (int)($_POST['quantity'] ?? 1));
+        $notes   = sanitize($_POST['notes'] ?? '');
+        $curUser = getCurrentUser();
+        if (!$accId) { flashError('Wybierz akcesorium.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        try {
+            $remStmt = $db->prepare("SELECT a.quantity_initial, COALESCE((SELECT SUM(ai.quantity) FROM accessory_issues ai WHERE ai.accessory_id = a.id),0) AS issued FROM accessories a WHERE a.id=?");
+            $remStmt->execute([$accId]);
+            $accRow = $remStmt->fetch();
+            if (!$accRow) { throw new Exception('Akcesorium nie istnieje.'); }
+            $remaining = (int)$accRow['quantity_initial'] - (int)$accRow['issued'];
+            if ($qty > $remaining) { throw new Exception('Niewystarczający stan: dostępne ' . max(0,$remaining) . ' szt.'); }
+            $db->prepare("INSERT INTO accessory_issues (accessory_id, installation_id, user_id, quantity, notes) VALUES (?,NULL,?,?,?)")
+               ->execute([$accId, $curUser['id'], $qty, $notes]);
+            // Return the new issue ID for W/Z redirect
+            $wzId = (int)$db->lastInsertId();
+            flashSuccess('Pobrano ' . $qty . ' szt. z magazynu.');
+            redirect(getBaseUrl() . 'inventory.php?action=wz_print&id=' . $wzId);
+        } catch (Exception $e) {
+            flashError($e->getMessage());
+        }
         redirect(getBaseUrl() . 'inventory.php?action=accessories');
     }
 }
@@ -228,6 +255,36 @@ if ($action === 'sim_cards') {
     ")->fetchAll();
 }
 
+// W/Z print data (single accessory issue record)
+$wzIssue = null;
+$wzCompanyName = '';
+$wzCompanyAddr = '';
+if ($action === 'wz_print') {
+    $wzId = (int)($_GET['id'] ?? 0);
+    if ($wzId) {
+        try {
+            $wzStmt = $db->prepare("
+                SELECT ai.id, ai.quantity, ai.notes, ai.issued_at,
+                       a.name AS accessory_name, a.id AS accessory_id,
+                       u.name AS user_name
+                FROM accessory_issues ai
+                JOIN accessories a ON a.id = ai.accessory_id
+                JOIN users u ON u.id = ai.user_id
+                WHERE ai.id = ?
+            ");
+            $wzStmt->execute([$wzId]);
+            $wzIssue = $wzStmt->fetch();
+        } catch (Exception $e) { $wzIssue = null; }
+    }
+    try {
+        $cfg = [];
+        $settingsStmt = $db->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('company_name','company_address','company_city','company_postal_code','company_phone')");
+        foreach ($settingsStmt->fetchAll() as $s) { $cfg[$s['key']] = $s['value']; }
+        $wzCompanyName = $cfg['company_name'] ?? '';
+        $wzCompanyAddr = trim(($cfg['company_address'] ?? '') . ', ' . ($cfg['company_postal_code'] ?? '') . ' ' . ($cfg['company_city'] ?? ''), ', ');
+    } catch (Exception $e) {}
+}
+
 $models = $db->query("SELECT m.id, m.name, mf.name as manufacturer_name FROM models m JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE m.active=1 ORDER BY mf.name, m.name")->fetchAll();
 
 $activePage = 'inventory';
@@ -239,7 +296,7 @@ include __DIR__ . '/includes/header.php';
     <h1><i class="fas fa-warehouse me-2 text-primary"></i>Stan magazynowy</h1>
     <div>
         <a href="inventory.php" class="btn <?= $action === 'list' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
-            <i class="fas fa-boxes me-1"></i>Stany
+            <i class="fas fa-microchip me-1"></i>Urządzenia
         </a>
         <a href="inventory.php?action=accessories" class="btn <?= $action === 'accessories' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
             <i class="fas fa-toolbox me-1"></i>Akcesoria
@@ -250,6 +307,7 @@ include __DIR__ . '/includes/header.php';
         <a href="inventory.php?action=sim_cards" class="btn <?= $action === 'sim_cards' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
             <i class="fas fa-sim-card me-1"></i>Karty SIM
         </a>
+        <?php if (isAdmin()): ?>
         <form method="POST" class="d-inline me-1">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="sync_inventory">
@@ -262,6 +320,7 @@ include __DIR__ . '/includes/header.php';
         <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#adjustModal">
             <i class="fas fa-plus-minus me-1"></i>Koryguj stan
         </button>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -401,11 +460,16 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria magazynowe (<?= count($accessories) ?>)</span>
-                <?php if (isAdmin()): ?>
-                <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addAccessoryModal">
-                    <i class="fas fa-plus me-1"></i>Dodaj akcesorium
-                </button>
-                <?php endif; ?>
+                <div class="d-flex gap-1">
+                    <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#pickupModal">
+                        <i class="fas fa-hand-holding me-1"></i>Pobierz z magazynu
+                    </button>
+                    <?php if (isAdmin()): ?>
+                    <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addAccessoryModal">
+                        <i class="fas fa-plus me-1"></i>Dodaj akcesorium
+                    </button>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
@@ -490,7 +554,7 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
     <div class="table-responsive">
         <table class="table table-sm mb-0">
             <thead>
-                <tr><th>Data wydania</th><th>Akcesorium</th><th>Ilość</th><th>Zlecenie montażu</th><th>Wydał</th><th>Uwagi</th></tr>
+                <tr><th>Data wydania</th><th>Akcesorium</th><th>Ilość</th><th>Zlecenie / Pobranie</th><th>Wydał</th><th>Uwagi</th><th></th></tr>
             </thead>
             <tbody>
                 <?php foreach ($accHistory as $ah): ?>
@@ -502,15 +566,20 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
                         <?php if ($ah['inst_id']): ?>
                         <a href="installations.php?action=view&id=<?= $ah['inst_id'] ?>"><?= h($ah['order_num']) ?></a>
                         <?php else: ?>
-                        <span class="text-muted">—</span>
+                        <span class="badge bg-secondary">Pobranie</span>
                         <?php endif; ?>
                     </td>
                     <td><?= h($ah['user_name']) ?></td>
                     <td class="text-muted small"><?= h($ah['notes'] ?? '') ?></td>
+                    <td>
+                        <a href="inventory.php?action=wz_print&id=<?= $ah['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj W/Z">
+                            <i class="fas fa-print"></i>
+                        </a>
+                    </td>
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($accHistory)): ?>
-                <tr><td colspan="6" class="text-center text-muted p-3">Brak historii wydań.</td></tr>
+                <tr><td colspan="7" class="text-center text-muted p-3">Brak historii wydań.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -600,6 +669,154 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 <?php endif; ?>
+
+<!-- Pickup Modal (available to all logged-in users) -->
+<div class="modal fade" id="pickupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="accessory_pickup">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-hand-holding me-2 text-warning"></i>Pobierz akcesorium z magazynu</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <?php if (empty($accessories)): ?>
+                    <div class="alert alert-warning mb-0">Brak dostępnych akcesoriów w magazynie.</div>
+                    <?php else: ?>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Akcesorium</label>
+                        <select name="accessory_id" class="form-select" required>
+                            <option value="">— wybierz —</option>
+                            <?php foreach ($accessories as $acc2):
+                                $rem2 = (int)$acc2['quantity_initial'] - (int)$acc2['issued'];
+                            ?>
+                            <option value="<?= $acc2['id'] ?>" <?= $rem2 <= 0 ? 'disabled' : '' ?>>
+                                <?= h($acc2['name']) ?> (dostępne: <?= max(0,$rem2) ?> szt.)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Ilość (szt.)</label>
+                        <input type="number" name="quantity" class="form-control" required min="1" value="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cel / Uwagi</label>
+                        <input type="text" name="notes" class="form-control" placeholder="np. remont, naprawa pojazdu...">
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <?php if (!empty($accessories)): ?>
+                    <button type="submit" class="btn btn-warning"><i class="fas fa-check me-2"></i>Pobierz i drukuj W/Z</button>
+                    <?php endif; ?>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<?php elseif ($action === 'wz_print'): ?>
+<?php
+// W/Z document print view
+$wzNum = $wzIssue ? sprintf('WZ/%s/%04d', date('Y', strtotime($wzIssue['issued_at'])), $wzIssue['id']) : '—';
+?>
+<style>
+.wz-doc { background:#fff; color:#1a1a2e; font-family:'DM Sans','Segoe UI',system-ui,sans-serif; max-width:800px; margin:0 auto; }
+.wz-header { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:16px; margin-bottom:20px; border-bottom:3px solid #2563eb; }
+.wz-title { font-size:1.3rem; font-weight:700; color:#2563eb; letter-spacing:1px; text-transform:uppercase; }
+.wz-meta { font-size:.83rem; color:#666; margin-top:2px; }
+.wz-logo { font-size:1.4rem; font-weight:800; color:#1a1a2e; letter-spacing:-.5px; }
+.wz-logo span { color:#2563eb; }
+.wz-section-label { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#2563eb; margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+.wz-section-label::after { content:''; flex:1; height:1px; background:#e0e7ff; }
+.wz-table { width:100%; border-collapse:collapse; margin-bottom:22px; font-size:.85rem; }
+.wz-table thead th { background:#2563eb; color:#fff; font-weight:700; padding:8px 10px; text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:.5px; }
+.wz-table tbody td { padding:8px 10px; border-bottom:1px solid #e0e7ff; }
+.wz-sig-row { display:flex; gap:32px; margin-top:40px; }
+.wz-sig-box { flex:1; text-align:center; }
+.wz-sig-line { border-top:2px solid #1a1a2e; padding-top:6px; margin-top:48px; font-size:.78rem; color:#444; }
+@media print { .no-print { display:none !important; } body { background:#fff !important; } .navbar, footer { display:none !important; } .container-fluid { padding:0 !important; } .wz-doc { max-width:100%; } }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 no-print">
+    <h5 class="mb-0"><i class="fas fa-file-alt me-2 text-warning"></i>Dokument W/Z — podgląd wydruku</h5>
+    <div>
+        <button type="button" class="btn btn-primary me-2" onclick="window.print()">
+            <i class="fas fa-print me-2"></i>Drukuj / PDF
+        </button>
+        <a href="inventory.php?action=accessories" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-1"></i>Powrót
+        </a>
+    </div>
+</div>
+
+<div class="wz-doc p-4 card">
+    <div class="wz-header">
+        <div>
+            <?php if ($wzCompanyName): ?>
+            <div class="wz-logo"><?= h($wzCompanyName) ?></div>
+            <?php if ($wzCompanyAddr): ?><div style="font-size:.82rem;color:#666;margin-top:3px"><?= h($wzCompanyAddr) ?></div><?php endif; ?>
+            <?php else: ?>
+            <div class="wz-logo">Fleet<span>Link</span></div>
+            <?php endif; ?>
+        </div>
+        <div style="text-align:right">
+            <div class="wz-title">Wydanie z Magazynu (W/Z)</div>
+            <div class="wz-meta">Nr dokumentu: <strong><?= h($wzNum) ?></strong></div>
+            <?php if ($wzIssue): ?>
+            <div class="wz-meta">Data: <strong><?= formatDateTime($wzIssue['issued_at']) ?></strong></div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <?php if ($wzIssue): ?>
+    <div class="wz-section-label">Dane wydania</div>
+    <table style="width:100%;margin-bottom:20px;font-size:.87rem">
+        <tr><th style="width:35%;color:#888;font-weight:600;padding:4px 0">Wydał</th><td><?= h($wzIssue['user_name']) ?></td></tr>
+        <tr><th style="color:#888;font-weight:600;padding:4px 0">Data i godzina</th><td><?= formatDateTime($wzIssue['issued_at']) ?></td></tr>
+        <?php if ($wzIssue['notes']): ?>
+        <tr><th style="color:#888;font-weight:600;padding:4px 0">Cel / Uwagi</th><td><?= h($wzIssue['notes']) ?></td></tr>
+        <?php endif; ?>
+    </table>
+
+    <div class="wz-section-label">Wydane pozycje</div>
+    <table class="wz-table">
+        <thead>
+            <tr>
+                <th style="width:40px">#</th>
+                <th>Nazwa akcesorium</th>
+                <th style="width:120px;text-align:center">Ilość</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="color:#2563eb;font-weight:700">1</td>
+                <td style="font-weight:600"><?= h($wzIssue['accessory_name']) ?></td>
+                <td style="text-align:center;font-weight:700"><?= (int)$wzIssue['quantity'] ?> szt.</td>
+            </tr>
+        </tbody>
+    </table>
+    <?php else: ?>
+    <div class="alert alert-warning">Dokument W/Z nie został znaleziony.</div>
+    <?php endif; ?>
+
+    <div class="wz-sig-row">
+        <div class="wz-sig-box">
+            <div class="wz-sig-line">Podpis wydającego<br><strong><?= h($wzIssue['user_name'] ?? '—') ?></strong></div>
+        </div>
+        <div class="wz-sig-box">
+            <div class="wz-sig-line">Podpis odbierającego<br>&nbsp;</div>
+        </div>
+    </div>
+
+    <div style="text-align:center;font-size:.72rem;color:#999;margin-top:28px;padding-top:12px;border-top:1px solid #e0e7ff">
+        Dokument wygenerowany przez <?= $wzCompanyName ? h($wzCompanyName) : 'FleetLink Magazyn' ?> &mdash; <?= date('d.m.Y H:i') ?>
+    </div>
+</div>
 
 <?php elseif ($action === 'sim_cards'): ?>
 <div class="card">

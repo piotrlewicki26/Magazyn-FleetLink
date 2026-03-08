@@ -37,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!in_array($status, $validStatuses)) $status = 'nowy';
 
     if ($postAction === 'add') {
+        if (!isAdmin()) { flashError('Dodawanie urządzeń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'devices.php'); }
         if (empty($serialNumber) || !$modelId) {
             flashError('Numer seryjny i model są wymagane.');
             redirect(getBaseUrl() . 'devices.php?action=add');
@@ -124,6 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'devices.php');
 
     } elseif ($postAction === 'delete') {
+        if (!isAdmin()) { flashError('Usuwanie urządzeń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'devices.php'); }
         $delId = (int)($_POST['id'] ?? 0);
         // Fetch device for inventory restore
         $delRow = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
@@ -235,8 +237,10 @@ include __DIR__ . '/includes/header.php';
     <h1><i class="fas fa-microchip me-2 text-primary"></i>Urządzenia GPS</h1>
     <?php if ($action === 'list'): ?>
     <div class="d-flex gap-2">
+        <?php if (isAdmin()): ?>
         <a href="devices.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a>
         <a href="device_import.php" class="btn btn-outline-secondary"><i class="fas fa-file-import me-2"></i>Importuj</a>
+        <?php endif; ?>
     </div>
     <?php else: ?>
     <a href="devices.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
@@ -310,6 +314,7 @@ include __DIR__ . '/includes/header.php';
                     </td>
                     <td>
                         <a href="devices.php?action=view&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Podgląd"><i class="fas fa-eye"></i></a>
+                        <?php if (isAdmin()): ?>
                         <a href="devices.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
@@ -318,6 +323,7 @@ include __DIR__ . '/includes/header.php';
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
                                     data-confirm="Usuń urządzenie <?= h($d['serial_number']) ?>?"><i class="fas fa-trash"></i></button>
                         </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>
