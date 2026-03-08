@@ -283,7 +283,7 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data zakupu / montażu</th><th>Akcje</th>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th><th>Akcje</th>
                 </tr>
             </thead>
             <tbody>
@@ -299,11 +299,13 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $d['sim_number'] ? h($d['sim_number']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?php $clientLabel = $d['company_name'] ?: ($d['contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
                     <td>
-                        <?php if ($d['status'] === 'zamontowany' && $d['installation_date']): ?>
+                        <?php if ($d['installation_date']): ?>
                             <?= formatDate($d['installation_date']) ?>
-                            <br><small class="text-muted">montaż</small>
-                        <?php else: ?>
+                        <?php elseif ($d['purchase_date']): ?>
                             <?= formatDate($d['purchase_date']) ?>
+                            <br><small class="text-muted">zakup</small>
+                        <?php else: ?>
+                            <span class="text-muted">—</span>
                         <?php endif; ?>
                     </td>
                     <td>

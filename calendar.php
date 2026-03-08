@@ -57,25 +57,54 @@ if (isset($_GET['json'])) {
         ];
     }
 
-    // Installations
+    // Installations — group by (date, client) so multiple installs for same customer show as one event
     $stmt = $db->prepare("
         SELECT i.id, i.installation_date, i.status,
                d.serial_number, m.name as model_name,
-               v.registration, v.make
+               v.registration, v.make,
+               c.contact_name, c.company_name
         FROM installations i
         JOIN devices d ON d.id=i.device_id
         JOIN models m ON m.id=d.model_id
         JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN clients c ON c.id=i.client_id
         WHERE i.installation_date BETWEEN ? AND ?
     ");
     $stmt->execute([$start, $end]);
-    foreach ($stmt->fetchAll() as $inst) {
+    $installRows = $stmt->fetchAll();
+
+    // Group by date + client key
+    $installGroups = [];
+    foreach ($installRows as $inst) {
+        $clientKey = $inst['company_name'] ?: ($inst['contact_name'] ?: '—');
+        $groupKey  = $inst['installation_date'] . '|' . $clientKey;
+        if (!isset($installGroups[$groupKey])) {
+            $installGroups[$groupKey] = [
+                'date'       => $inst['installation_date'],
+                'client'     => $clientKey,
+                'count'      => 0,
+                'first_id'   => $inst['id'],
+                'regs'       => [],
+            ];
+        }
+        $installGroups[$groupKey]['count']++;
+        $installGroups[$groupKey]['regs'][] = $inst['registration'];
+    }
+
+    foreach ($installGroups as $grp) {
+        if ($grp['count'] >= 2) {
+            $title = '🚗 Montaż: ' . $grp['client'] . ' (' . $grp['count'] . ' urządzeń)';
+        } else {
+            $title = '🚗 Montaż: ' . $grp['regs'][0] . ' (' . ($grp['client'] !== '—' ? $grp['client'] : 'brak klienta') . ')';
+        }
         $events[] = [
-            'id'    => 'i_' . $inst['id'],
-            'title' => '🚗 Montaż: ' . $inst['registration'] . ' (' . $inst['model_name'] . ')',
-            'start' => $inst['installation_date'],
+            'id'    => 'ig_' . $grp['first_id'],
+            'title' => $title,
+            'start' => $grp['date'],
             'color' => '#0d6efd',
-            'url'   => 'installations.php?action=view&id=' . $inst['id'],
+            'url'   => $grp['count'] >= 2
+                ? 'installations.php?search=' . urlencode($grp['client'])
+                : 'installations.php?action=view&id=' . $grp['first_id'],
             'extendedProps' => ['type' => 'installation'],
         ];
     }

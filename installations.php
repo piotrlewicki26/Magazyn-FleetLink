@@ -805,129 +805,191 @@ $firstRow       = $batchInstallations[0] ?? [];
 $clientLabel    = $firstRow ? ($firstRow['company_name'] ?: ($firstRow['contact_name'] ?: '—')) : '—';
 $technicianName = $firstRow['technician_name'] ?? '—';
 $installDate    = $firstRow['installation_date'] ?? date('Y-m-d');
-// Order number: ZM/YEAR/first_id-count (unique and descriptive)
 $batchFirstId   = $firstRow['id'] ?? 0;
 $batchCount     = count($batchInstallations);
-$orderNumber    = sprintf('ZM/%s/%d-%d', date('Y', strtotime($installDate ?: 'now')), $batchFirstId, $batchCount);
-// Client address
+$orderNumber    = sprintf('ZM/%s/%04d-%d', date('Y', strtotime($installDate ?: 'now')), $batchFirstId, $batchCount);
+$companyName    = '';
+$companyAddr    = '';
+$companyPhone   = '';
+try {
+    $cfg = [];
+    $settingsStmt = $db->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('company_name','company_address','company_city','company_postal_code','company_phone')");
+    foreach ($settingsStmt->fetchAll() as $s) { $cfg[$s['key']] = $s['value']; }
+    $companyName  = $cfg['company_name'] ?? '';
+    $companyAddr  = trim(($cfg['company_address'] ?? '') . ', ' . ($cfg['company_postal_code'] ?? '') . ' ' . ($cfg['company_city'] ?? ''), ', ');
+    $companyPhone = $cfg['company_phone'] ?? '';
+} catch (Exception $e) {}
 $clientAddrParts = array_filter([
     $firstRow['client_address'] ?? '',
     trim(($firstRow['client_postal_code'] ?? '') . ' ' . ($firstRow['client_city'] ?? '')),
 ]);
 $clientAddrFull = implode(', ', $clientAddrParts);
-// Installation address (from first row)
 $installAddr = $firstRow['installation_address'] ?? '';
 ?>
 <style>
+/* ── Print order styles ─────────────────────────── */
+.print-doc {
+    background: #fff;
+    color: #1a1a2e;
+    font-family: 'DM Sans','Segoe UI',system-ui,sans-serif;
+    max-width: 900px;
+    margin: 0 auto;
+}
+.print-doc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: 18px;
+    margin-bottom: 22px;
+    border-bottom: 3px solid #2563eb;
+}
+.print-doc-logo { font-size: 1.5rem; font-weight: 800; color: #1a1a2e; letter-spacing: -0.5px; }
+.print-doc-logo span { color: #2563eb; }
+.print-doc-title { font-size: 1.25rem; font-weight: 700; color: #2563eb; letter-spacing: 1px; text-transform: uppercase; }
+.print-doc-meta { font-size: 0.83rem; color: #666; margin-top: 2px; }
+.print-section-label {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+    color: #2563eb; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+}
+.print-section-label::after { content:''; flex:1; height:1px; background: #e0e7ff; }
+.print-info-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; margin-bottom: 24px; }
+.print-info-box { background: #f8faff; border: 1px solid #e0e7ff; border-radius: 8px; padding: 12px 14px; }
+.print-info-box .label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #2563eb; margin-bottom: 4px; }
+.print-info-box .value { font-size: 0.9rem; font-weight: 600; color: #1a1a2e; }
+.print-info-box .sub   { font-size: 0.78rem; color: #666; margin-top: 2px; }
+.print-device-table { width:100%; border-collapse: collapse; margin-bottom: 24px; font-size: 0.82rem; }
+.print-device-table thead th {
+    background: #2563eb; color: #fff; font-weight: 700; padding: 9px 10px;
+    text-align: left; font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.print-device-table thead th:first-child { border-radius: 6px 0 0 0; }
+.print-device-table thead th:last-child  { border-radius: 0 6px 0 0; }
+.print-device-table tbody tr:nth-child(even) { background: #f8faff; }
+.print-device-table tbody td { padding: 8px 10px; border-bottom: 1px solid #e0e7ff; vertical-align: top; }
+.print-device-table tbody tr:last-child td { border-bottom: none; }
+.print-sig-row { display: flex; gap: 32px; margin-top: 40px; }
+.print-sig-box { flex:1; text-align: center; }
+.print-sig-line { border-top: 2px solid #1a1a2e; padding-top: 6px; margin-top: 52px; font-size: 0.78rem; color: #444; }
+.print-footer { text-align: center; font-size: 0.72rem; color: #999; margin-top: 30px; padding-top: 12px; border-top: 1px solid #e0e7ff; }
 @media print {
     .no-print { display: none !important; }
-    .card { border: none !important; box-shadow: none !important; }
-    body { font-size: 12pt; }
-    .table th, .table td { font-size: 11pt; }
+    body { background: #fff !important; }
+    .navbar, footer { display: none !important; }
+    .container-fluid { padding: 0 !important; }
+    .print-doc { max-width: 100%; }
 }
 </style>
-<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+
+<div class="d-flex justify-content-between align-items-center mb-4 no-print">
     <h5 class="mb-0"><i class="fas fa-file-alt me-2 text-primary"></i>Zlecenie montażu — podgląd wydruku</h5>
     <div>
-        <button type="button" class="btn btn-primary me-2" onclick="window.print()"><i class="fas fa-print me-2"></i>Drukuj</button>
-        <a href="installations.php" class="btn btn-outline-secondary"><i class="fas fa-list me-1"></i>Lista montaży</a>
+        <button type="button" class="btn btn-primary me-2" onclick="window.print()">
+            <i class="fas fa-print me-2"></i>Drukuj / PDF
+        </button>
+        <a href="installations.php" class="btn btn-outline-secondary">
+            <i class="fas fa-list me-1"></i>Lista montaży
+        </a>
     </div>
 </div>
 
-<div class="card" id="printArea">
-    <div class="card-body">
-        <!-- Header -->
-        <div class="d-flex justify-content-between align-items-start mb-4">
-            <div>
-                <h4 class="fw-bold mb-1"><?= defined('APP_NAME') ? h(APP_NAME) : 'FleetLink Magazyn' ?></h4>
-                <div class="text-muted small">System zarządzania urządzeniami GPS</div>
-            </div>
-            <div class="text-end">
-                <h5 class="fw-bold mb-1">ZLECENIE MONTAŻU</h5>
-                <div class="text-muted small">Nr: <strong><?= h($orderNumber) ?></strong></div>
-                <div class="text-muted small">Data: <strong><?= formatDate($installDate) ?></strong></div>
-            </div>
+<div class="print-doc p-4 card">
+    <!-- ── Header ─────────────────────────── -->
+    <div class="print-doc-header">
+        <div>
+            <?php if ($companyName): ?>
+            <div class="print-doc-logo"><?= h($companyName) ?></div>
+            <?php if ($companyAddr): ?><div style="font-size:.82rem;color:#666;margin-top:3px"><?= h($companyAddr) ?></div><?php endif; ?>
+            <?php if ($companyPhone): ?><div style="font-size:.82rem;color:#666">Tel: <?= h($companyPhone) ?></div><?php endif; ?>
+            <?php else: ?>
+            <div class="print-doc-logo">Fleet<span>Link</span></div>
+            <div style="font-size:.82rem;color:#666">System zarządzania urządzeniami GPS</div>
+            <?php endif; ?>
         </div>
-        <hr>
-
-        <!-- Client & install address & technician info -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-5">
-                <div class="fw-semibold text-muted small text-uppercase mb-1">Klient</div>
-                <div class="fw-bold"><?= h($clientLabel) ?></div>
-                <?php if ($firstRow && $firstRow['client_phone']): ?>
-                <div class="text-muted small"><i class="fas fa-phone me-1"></i><?= h($firstRow['client_phone']) ?></div>
-                <?php endif; ?>
-                <?php if ($clientAddrFull): ?>
-                <div class="text-muted small"><i class="fas fa-map-marker-alt me-1"></i><?= h($clientAddrFull) ?></div>
-                <?php endif; ?>
-            </div>
-            <div class="col-md-4">
-                <div class="fw-semibold text-muted small text-uppercase mb-1">Adres instalacji</div>
-                <div><?= $installAddr ? h($installAddr) : '<span class="text-muted">—</span>' ?></div>
-            </div>
-            <div class="col-md-2">
-                <div class="fw-semibold text-muted small text-uppercase mb-1">Technik</div>
-                <div><?= h($technicianName) ?></div>
-            </div>
-            <div class="col-md-1">
-                <div class="fw-semibold text-muted small text-uppercase mb-1">Urządzeń</div>
-                <div class="fw-bold fs-5"><?= count($batchInstallations) ?></div>
-            </div>
+        <div style="text-align:right">
+            <div class="print-doc-title">Zlecenie montażu</div>
+            <div class="print-doc-meta">Nr zlecenia: <strong><?= h($orderNumber) ?></strong></div>
+            <div class="print-doc-meta">Data: <strong><?= formatDate($installDate) ?></strong></div>
+            <div class="print-doc-meta">Urządzeń: <strong><?= $batchCount ?></strong></div>
         </div>
+    </div>
 
-        <!-- Devices table -->
-        <div class="fw-semibold text-muted small text-uppercase mb-2">Urządzenia</div>
-        <table class="table table-bordered table-sm mb-4">
-            <thead class="table-light">
-                <tr>
-                    <th>#</th>
-                    <th>Model</th>
-                    <th>Nr seryjny</th>
-                    <th>IMEI</th>
-                    <th>SIM</th>
-                    <th>Pojazd (rejestracja)</th>
-                    <th>Marka / model pojazdu</th>
-                    <th>Miejsce montażu</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($batchInstallations as $i => $bi): ?>
-                <tr>
-                    <td><?= $i + 1 ?></td>
-                    <td><?= h($bi['manufacturer_name'] . ' ' . $bi['model_name']) ?></td>
-                    <td class="fw-semibold"><?= h($bi['serial_number']) ?></td>
-                    <td class="text-muted small"><?= h($bi['imei'] ?? '—') ?></td>
-                    <td class="text-muted small"><?= h($bi['sim_number'] ?? '—') ?></td>
-                    <td class="fw-semibold"><?= h($bi['registration']) ?></td>
-                    <td class="text-muted small"><?= h(trim($bi['make'] . ' ' . $bi['vehicle_model'])) ?: '—' ?></td>
-                    <td class="text-muted small"><?= h($bi['location_in_vehicle'] ?? '—') ?></td>
-                </tr>
-                <?php endforeach; ?>
-                <?php if (empty($batchInstallations)): ?>
-                <tr><td colspan="8" class="text-center text-muted">Brak danych.</td></tr>
-                <?php endif; ?>
-            </tbody>
-        </table>
-
-        <!-- Notes -->
-        <?php if ($firstRow && $firstRow['notes']): ?>
-        <div class="mb-4">
-            <div class="fw-semibold text-muted small text-uppercase mb-1">Uwagi</div>
-            <div><?= h($firstRow['notes']) ?></div>
+    <!-- ── Info grid ──────────────────────── -->
+    <div class="print-info-grid">
+        <div class="print-info-box">
+            <div class="label">Klient</div>
+            <div class="value"><?= h($clientLabel) ?></div>
+            <?php if ($firstRow && $firstRow['client_phone']): ?>
+            <div class="sub"><i class="fas fa-phone me-1" style="color:#2563eb;font-size:.7rem"></i><?= h($firstRow['client_phone']) ?></div>
+            <?php endif; ?>
+            <?php if ($clientAddrFull): ?>
+            <div class="sub"><i class="fas fa-map-marker-alt me-1" style="color:#2563eb;font-size:.7rem"></i><?= h($clientAddrFull) ?></div>
+            <?php endif; ?>
         </div>
-        <?php endif; ?>
-
-        <!-- Signatures -->
-        <div class="row g-4 mt-4">
-            <div class="col-md-5">
-                <div style="border-top:1px solid #333;padding-top:4px" class="text-muted small text-center">Podpis technika</div>
-            </div>
-            <div class="col-md-2"></div>
-            <div class="col-md-5">
-                <div style="border-top:1px solid #333;padding-top:4px" class="text-muted small text-center">Podpis klienta / odbiór</div>
-            </div>
+        <div class="print-info-box">
+            <div class="label">Adres instalacji</div>
+            <div class="value"><?= $installAddr ? h($installAddr) : '<span style="color:#999">—</span>' ?></div>
         </div>
+        <div class="print-info-box">
+            <div class="label">Technik</div>
+            <div class="value"><?= h($technicianName) ?></div>
+            <div class="sub">Data montażu: <?= formatDate($installDate) ?></div>
+        </div>
+    </div>
+
+    <!-- ── Devices table ──────────────────── -->
+    <div class="print-section-label">Wykaz urządzeń</div>
+    <table class="print-device-table">
+        <thead>
+            <tr>
+                <th style="width:32px">#</th>
+                <th>Model urządzenia</th>
+                <th>Nr seryjny</th>
+                <th>IMEI</th>
+                <th>Nr SIM</th>
+                <th>Rejestracja</th>
+                <th>Pojazd</th>
+                <th>Miejsce montażu</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($batchInstallations as $i => $bi): ?>
+            <tr>
+                <td style="color:#2563eb;font-weight:700"><?= $i + 1 ?></td>
+                <td><?= h($bi['manufacturer_name'] . ' ' . $bi['model_name']) ?></td>
+                <td style="font-weight:700"><?= h($bi['serial_number']) ?></td>
+                <td style="color:#666;font-size:.78rem"><?= h($bi['imei'] ?? '—') ?></td>
+                <td style="color:#666;font-size:.78rem"><?= h($bi['sim_number'] ?? '—') ?></td>
+                <td style="font-weight:700"><?= h($bi['registration']) ?></td>
+                <td style="color:#666"><?= h(trim($bi['make'] . ' ' . ($bi['vehicle_model'] ?? ''))) ?: '—' ?></td>
+                <td style="color:#666"><?= h($bi['location_in_vehicle'] ?? '—') ?></td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (empty($batchInstallations)): ?>
+            <tr><td colspan="8" style="text-align:center;color:#999;padding:16px">Brak danych.</td></tr>
+            <?php endif; ?>
+        </tbody>
+    </table>
+
+    <!-- ── Notes ─────────────────────────── -->
+    <?php if ($firstRow && $firstRow['notes']): ?>
+    <div class="print-section-label">Uwagi</div>
+    <div style="font-size:.87rem;color:#333;margin-bottom:24px;padding:10px 14px;background:#f8faff;border-radius:6px;border:1px solid #e0e7ff">
+        <?= h($firstRow['notes']) ?>
+    </div>
+    <?php endif; ?>
+
+    <!-- ── Signatures ─────────────────────── -->
+    <div class="print-sig-row">
+        <div class="print-sig-box">
+            <div class="print-sig-line">Podpis technika<br><strong><?= h($technicianName) ?></strong></div>
+        </div>
+        <div class="print-sig-box">
+            <div class="print-sig-line">Podpis klienta / odbiór<br><strong><?= h($clientLabel) ?></strong></div>
+        </div>
+    </div>
+
+    <div class="print-footer">
+        Dokument wygenerowany przez <?= $companyName ? h($companyName) : 'FleetLink Magazyn' ?> &mdash; <?= date('d.m.Y H:i') ?>
     </div>
 </div>
 <?php endif; ?>

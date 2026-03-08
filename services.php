@@ -71,11 +71,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-if (in_array($action, ['view','edit']) && $id) {
+if (in_array($action, ['view','edit','print']) && $id) {
     $stmt = $db->prepare("
         SELECT s.*, d.serial_number, d.imei, m.name as model_name, mf.name as manufacturer_name,
                u.name as technician_name,
-               v.registration, v.make
+               v.registration, v.make,
+               c.contact_name, c.company_name, c.phone as client_phone,
+               c.address as client_address, c.city as client_city, c.postal_code as client_postal_code
         FROM services s
         JOIN devices d ON d.id=s.device_id
         JOIN models m ON m.id=d.model_id
@@ -83,6 +85,7 @@ if (in_array($action, ['view','edit']) && $id) {
         LEFT JOIN users u ON u.id=s.technician_id
         LEFT JOIN installations inst ON inst.id=s.installation_id
         LEFT JOIN vehicles v ON v.id=inst.vehicle_id
+        LEFT JOIN clients c ON c.id=inst.client_id
         WHERE s.id=?
     ");
     $stmt->execute([$id]);
@@ -147,7 +150,7 @@ if ($action === 'list') {
 }
 
 $activePage = 'services';
-$pageTitle = 'Serwisy';
+$pageTitle = $action === 'print' ? 'Zlecenie serwisowe' : 'Serwisy';
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -155,7 +158,7 @@ include __DIR__ . '/includes/header.php';
     <h1><i class="fas fa-wrench me-2 text-primary"></i>Serwisy</h1>
     <?php if ($action === 'list'): ?>
     <a href="services.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowy serwis</a>
-    <?php else: ?>
+    <?php elseif ($action !== 'print'): ?>
     <a href="services.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
 </div>
@@ -219,6 +222,7 @@ include __DIR__ . '/includes/header.php';
                     <td>
                         <a href="services.php?action=view&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
                         <a href="services.php?action=edit&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
+                        <a href="services.php?action=print&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie serwisowe"><i class="fas fa-print"></i></a>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="delete">
@@ -260,6 +264,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="card-footer d-flex gap-2">
                 <a href="services.php?action=edit&id=<?= $service['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                <a href="services.php?action=print&id=<?= $service['id'] ?>" class="btn btn-sm btn-outline-dark"><i class="fas fa-print me-1"></i>Drukuj zlecenie</a>
                 <a href="protocols.php?action=add&service=<?= $service['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
             </div>
         </div>
@@ -369,6 +374,171 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($action === 'print' && isset($service)): ?>
+<?php
+$svcClientLabel = $service['company_name'] ?: ($service['contact_name'] ?: '—');
+$svcTechName    = $service['technician_name'] ?? '—';
+$svcDate        = $service['planned_date'] ?? date('Y-m-d');
+$svcOrderNum    = sprintf('ZS/%s/%04d', date('Y', strtotime(!empty($svcDate) ? $svcDate : 'now')), $service['id']);
+$svcClientAddr  = trim(($service['client_address'] ?? '') . ', ' . ($service['client_postal_code'] ?? '') . ' ' . ($service['client_city'] ?? ''), ', ');
+$svcCompanyName = '';
+$svcCompanyAddr = '';
+$svcCompanyPhone= '';
+try {
+    $svcSettings = $db->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('company_name','company_address','company_city','company_postal_code','company_phone')")->fetchAll();
+    $sCfg = [];
+    foreach ($svcSettings as $s) { $sCfg[$s['key']] = $s['value']; }
+    $svcCompanyName  = $sCfg['company_name'] ?? '';
+    $svcCompanyAddr  = trim(($sCfg['company_address'] ?? '') . ', ' . ($sCfg['company_postal_code'] ?? '') . ' ' . ($sCfg['company_city'] ?? ''), ', ');
+    $svcCompanyPhone = $sCfg['company_phone'] ?? '';
+} catch (Exception $e) {}
+$typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+?>
+<style>
+.svc-print-doc { background:#fff; color:#1a1a2e; font-family:'DM Sans','Segoe UI',system-ui,sans-serif; max-width:900px; margin:0 auto; }
+.svc-print-header { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:18px; margin-bottom:22px; border-bottom:3px solid #f97316; }
+.svc-print-logo { font-size:1.5rem; font-weight:800; color:#1a1a2e; letter-spacing:-0.5px; }
+.svc-print-logo span { color:#f97316; }
+.svc-print-title { font-size:1.25rem; font-weight:700; color:#f97316; letter-spacing:1px; text-transform:uppercase; }
+.svc-print-meta { font-size:.83rem; color:#666; margin-top:2px; }
+.svc-section-label { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#f97316; margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+.svc-section-label::after { content:''; flex:1; height:1px; background:#fde8d0; }
+.svc-info-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; margin-bottom:24px; }
+.svc-info-box { background:#fff8f3; border:1px solid #fde8d0; border-radius:8px; padding:12px 14px; }
+.svc-info-box .label { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:#f97316; margin-bottom:4px; }
+.svc-info-box .value { font-size:.9rem; font-weight:600; color:#1a1a2e; }
+.svc-info-box .sub   { font-size:.78rem; color:#666; margin-top:2px; }
+.svc-detail-table { width:100%; border-collapse:collapse; margin-bottom:24px; font-size:.88rem; }
+.svc-detail-table th { text-align:left; padding:8px 12px; width:38%; font-weight:700; font-size:.78rem; text-transform:uppercase; letter-spacing:.5px; color:#888; border-bottom:1px solid #fde8d0; }
+.svc-detail-table td { padding:8px 12px; border-bottom:1px solid #fde8d0; color:#1a1a2e; }
+.svc-sig-row { display:flex; gap:32px; margin-top:40px; }
+.svc-sig-box { flex:1; text-align:center; }
+.svc-sig-line { border-top:2px solid #1a1a2e; padding-top:6px; margin-top:52px; font-size:.78rem; color:#444; }
+.svc-print-footer { text-align:center; font-size:.72rem; color:#999; margin-top:30px; padding-top:12px; border-top:1px solid #fde8d0; }
+@media print {
+    .no-print { display:none !important; }
+    body { background:#fff !important; }
+    .navbar, footer { display:none !important; }
+    .container-fluid { padding:0 !important; }
+    .svc-print-doc { max-width:100%; }
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 no-print">
+    <h5 class="mb-0"><i class="fas fa-file-alt me-2 text-warning"></i>Zlecenie serwisowe — podgląd wydruku</h5>
+    <div>
+        <button type="button" class="btn btn-warning me-2" onclick="window.print()">
+            <i class="fas fa-print me-2"></i>Drukuj / PDF
+        </button>
+        <a href="services.php?action=view&id=<?= $service['id'] ?>" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-1"></i>Powrót
+        </a>
+    </div>
+</div>
+
+<div class="svc-print-doc p-4 card">
+    <!-- ── Header ─────────────────────────── -->
+    <div class="svc-print-header">
+        <div>
+            <?php if ($svcCompanyName): ?>
+            <div class="svc-print-logo"><?= h($svcCompanyName) ?></div>
+            <?php if ($svcCompanyAddr): ?><div style="font-size:.82rem;color:#666;margin-top:3px"><?= h($svcCompanyAddr) ?></div><?php endif; ?>
+            <?php if ($svcCompanyPhone): ?><div style="font-size:.82rem;color:#666">Tel: <?= h($svcCompanyPhone) ?></div><?php endif; ?>
+            <?php else: ?>
+            <div class="svc-print-logo">Fleet<span>Link</span></div>
+            <div style="font-size:.82rem;color:#666">System zarządzania urządzeniami GPS</div>
+            <?php endif; ?>
+        </div>
+        <div style="text-align:right">
+            <div class="svc-print-title">Zlecenie serwisowe</div>
+            <div class="svc-print-meta">Nr zlecenia: <strong><?= h($svcOrderNum) ?></strong></div>
+            <div class="svc-print-meta">Data: <strong><?= formatDate($svcDate) ?></strong></div>
+            <div class="svc-print-meta">Typ: <strong><?= h($typeLabels[$service['type']] ?? ucfirst($service['type'])) ?></strong></div>
+        </div>
+    </div>
+
+    <!-- ── Info grid ──────────────────────── -->
+    <div class="svc-info-grid">
+        <div class="svc-info-box">
+            <div class="label">Klient</div>
+            <div class="value"><?= h($svcClientLabel) ?></div>
+            <?php if ($service['client_phone'] ?? ''): ?>
+            <div class="sub"><i class="fas fa-phone me-1" style="color:#f97316;font-size:.7rem"></i><?= h($service['client_phone']) ?></div>
+            <?php endif; ?>
+            <?php if ($svcClientAddr): ?>
+            <div class="sub"><i class="fas fa-map-marker-alt me-1" style="color:#f97316;font-size:.7rem"></i><?= h($svcClientAddr) ?></div>
+            <?php endif; ?>
+        </div>
+        <div class="svc-info-box">
+            <div class="label">Pojazd</div>
+            <div class="value"><?= $service['registration'] ? h($service['registration']) : '<span style="color:#999">—</span>' ?></div>
+            <?php if ($service['make'] ?? ''): ?>
+            <div class="sub"><?= h($service['make']) ?></div>
+            <?php endif; ?>
+        </div>
+        <div class="svc-info-box">
+            <div class="label">Technik</div>
+            <div class="value"><?= h($svcTechName) ?></div>
+            <?php if ($service['completed_date']): ?>
+            <div class="sub">Zrealizowano: <?= formatDate($service['completed_date']) ?></div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- ── Device details ─────────────────── -->
+    <div class="svc-section-label">Urządzenie GPS</div>
+    <table class="svc-detail-table" style="margin-bottom:20px">
+        <tr>
+            <th>Producent / Model</th>
+            <td><strong><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></strong></td>
+            <th>Nr seryjny</th>
+            <td><?= h($service['serial_number']) ?></td>
+        </tr>
+        <tr>
+            <th>IMEI</th>
+            <td><?= h($service['imei'] ?? '—') ?></td>
+            <th>Status serwisu</th>
+            <td><?= getStatusBadge($service['status'], 'service') ?></td>
+        </tr>
+    </table>
+
+    <!-- ── Description / Resolution ──────── -->
+    <?php if ($service['description']): ?>
+    <div class="svc-section-label">Opis / Problem</div>
+    <div style="font-size:.87rem;color:#333;margin-bottom:18px;padding:10px 14px;background:#fff8f3;border-radius:6px;border:1px solid #fde8d0">
+        <?= h($service['description']) ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($service['resolution']): ?>
+    <div class="svc-section-label">Rozwiązanie / Wynik prac</div>
+    <div style="font-size:.87rem;color:#333;margin-bottom:18px;padding:10px 14px;background:#fff8f3;border-radius:6px;border:1px solid #fde8d0">
+        <?= h($service['resolution']) ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($service['cost'] > 0): ?>
+    <div style="text-align:right;font-size:1rem;font-weight:700;margin-bottom:20px">
+        Koszt serwisu: <span style="color:#f97316"><?= formatMoney($service['cost']) ?></span>
+    </div>
+    <?php endif; ?>
+
+    <!-- ── Signatures ─────────────────────── -->
+    <div class="svc-sig-row">
+        <div class="svc-sig-box">
+            <div class="svc-sig-line">Podpis technika<br><strong><?= h($svcTechName) ?></strong></div>
+        </div>
+        <div class="svc-sig-box">
+            <div class="svc-sig-line">Podpis klienta / odbiór<br><strong><?= h($svcClientLabel) ?></strong></div>
+        </div>
+    </div>
+
+    <div class="svc-print-footer">
+        Dokument wygenerowany przez <?= $svcCompanyName ? h($svcCompanyName) : 'FleetLink Magazyn' ?> &mdash; <?= date('d.m.Y H:i') ?>
     </div>
 </div>
 <?php endif; ?>

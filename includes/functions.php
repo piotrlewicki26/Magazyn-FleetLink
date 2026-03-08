@@ -25,18 +25,32 @@ function flashError($msg) {
 }
 
 function renderFlash() {
-    $html = '';
+    $html = '<div id="fl-toast-container" aria-live="polite" aria-atomic="true"></div>';
+    $toasts = '';
     if (!empty($_SESSION['flash_success'])) {
-        $html .= '<div class="alert alert-success alert-dismissible fade show" role="alert">'
-               . h($_SESSION['flash_success'])
-               . '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+        $toasts .= '<div class="fl-toast fl-toast-success" role="alert">'
+                 . '<i class="fas fa-check-circle me-2"></i>'
+                 . h($_SESSION['flash_success'])
+                 . '<button class="fl-toast-close" aria-label="Zamknij">×</button></div>';
         unset($_SESSION['flash_success']);
     }
     if (!empty($_SESSION['flash_error'])) {
-        $html .= '<div class="alert alert-danger alert-dismissible fade show" role="alert">'
-               . h($_SESSION['flash_error'])
-               . '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+        $toasts .= '<div class="fl-toast fl-toast-error" role="alert">'
+                 . '<i class="fas fa-exclamation-circle me-2"></i>'
+                 . h($_SESSION['flash_error'])
+                 . '<button class="fl-toast-close" aria-label="Zamknij">×</button></div>';
         unset($_SESSION['flash_error']);
+    }
+    if ($toasts) {
+        $html .= '<script>document.addEventListener("DOMContentLoaded",function(){'
+               . 'var c=document.getElementById("fl-toast-container");'
+               . 'c.innerHTML=' . json_encode($toasts) . ';'
+               . 'c.querySelectorAll(".fl-toast").forEach(function(t){'
+               . '  var b=t.querySelector(".fl-toast-close");'
+               . '  if(b)b.onclick=function(){t.classList.add("fl-toast-hide");setTimeout(function(){t.remove();},300);};'
+               . '  setTimeout(function(){t.classList.add("fl-toast-hide");setTimeout(function(){t.remove();},300);},5000);'
+               . '});'
+               . '});</script>';
     }
     return $html;
 }

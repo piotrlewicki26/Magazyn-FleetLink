@@ -30,7 +30,7 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
 <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
     <div class="container-fluid">
         <a class="navbar-brand fw-bold" href="<?= getBaseUrl() ?>dashboard.php">
-            <i class="fas fa-satellite-dish me-2"></i>FleetLink
+            <img src="<?= getBaseUrl() ?>assets/fleetlink-logo-v2.svg" alt="FleetLink" height="34" style="display:block">
         </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
             <span class="navbar-toggler-icon"></span>
@@ -122,6 +122,8 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><span class="dropdown-item-text text-muted small"><?= h($currentUser['email'] ?? '') ?></span></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>account.php"><i class="fas fa-user me-2"></i>Moje konto</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>logout.php"><i class="fas fa-sign-out-alt me-2"></i>Wyloguj</a></li>
                     </ul>
