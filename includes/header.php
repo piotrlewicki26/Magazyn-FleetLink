@@ -58,6 +58,11 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         <i class="fas fa-warehouse me-1"></i>Magazyn
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'clients' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>clients.php">
+                        <i class="fas fa-users me-1"></i>Klienci
+                    </a>
+                </li>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['installations','services']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
                         <i class="fas fa-tools me-1"></i>Operacje
@@ -74,17 +79,6 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     <a class="nav-link <?= ($activePage ?? '') === 'calendar' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>calendar.php">
                         <i class="fas fa-calendar-alt me-1"></i>Kalendarz
                     </a>
-                </li>
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['clients','offers']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
-                        <i class="fas fa-file-contract me-1"></i>CRM
-                    </a>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>clients.php"><i class="fas fa-users me-2"></i>Klienci</a></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offers.php"><i class="fas fa-file-invoice-dollar me-2"></i>Oferty</a></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>contracts.php"><i class="fas fa-file-signature me-2"></i>Umowy</a></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php"><i class="fas fa-clipboard-check me-2"></i>Protokoły</a></li>
-                    </ul>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link <?= ($activePage ?? '') === 'statistics' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>statistics.php">

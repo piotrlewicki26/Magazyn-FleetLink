@@ -31,23 +31,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$technicianId) $technicianId = $currentUser['id'];
 
+    // AJAX: quick-create client
+    if ($postAction === 'quick_add_client') {
+        header('Content-Type: application/json');
+        $contactName = sanitize($_POST['contact_name'] ?? '');
+        $companyName = sanitize($_POST['company_name'] ?? '');
+        $phone       = sanitize($_POST['phone'] ?? '');
+        $email       = sanitize($_POST['email'] ?? '');
+        if (empty($contactName)) { echo json_encode(['error' => 'Imię i nazwisko kontaktu jest wymagane.']); exit; }
+        $db->prepare("INSERT INTO clients (contact_name, company_name, phone, email) VALUES (?,?,?,?)")
+           ->execute([$contactName, $companyName, $phone, $email]);
+        $newClientId = $db->lastInsertId();
+        echo json_encode(['id' => $newClientId, 'label' => ($companyName ? $companyName . ' — ' : '') . $contactName]);
+        exit;
+    }
+
     if ($postAction === 'add') {
-        if (!$deviceId || !$vehicleId || empty($installationDate)) {
-            flashError('Urządzenie, pojazd i data montażu są wymagane.');
+        // New add flow: model_id + vehicle_registration
+        $modelId             = (int)($_POST['model_id'] ?? 0);
+        $vehicleRegistration = strtoupper(trim(sanitize($_POST['vehicle_registration'] ?? '')));
+
+        if (!$modelId || empty($vehicleRegistration) || empty($installationDate)) {
+            flashError('Model urządzenia, numer rejestracyjny pojazdu i data montażu są wymagane.');
             redirect(getBaseUrl() . 'installations.php?action=add');
         }
+
+        // Find first available device of this model
+        $devStmt = $db->prepare("SELECT id FROM devices WHERE model_id=? AND status IN ('nowy','sprawny') LIMIT 1");
+        $devStmt->execute([$modelId]);
+        $devRow = $devStmt->fetch();
+        if (!$devRow) {
+            flashError('Brak dostępnych urządzeń dla wybranego modelu. Sprawdź stan magazynu.');
+            redirect(getBaseUrl() . 'installations.php?action=add');
+        }
+        $deviceId = $devRow['id'];
+
+        // Find or auto-create vehicle by registration plate
+        $vStmt = $db->prepare("SELECT id FROM vehicles WHERE registration=? LIMIT 1");
+        $vStmt->execute([$vehicleRegistration]);
+        $vRow = $vStmt->fetch();
+        if ($vRow) {
+            $vehicleId = $vRow['id'];
+        } else {
+            $db->prepare("INSERT INTO vehicles (registration, client_id) VALUES (?,?)")
+               ->execute([$vehicleRegistration, $clientId]);
+            $vehicleId = $db->lastInsertId();
+        }
+
         // Check device not already installed
         $checkStmt = $db->prepare("SELECT id FROM installations WHERE device_id=? AND status='aktywna' LIMIT 1");
         $checkStmt->execute([$deviceId]);
         if ($checkStmt->fetch()) {
-            flashError('To urządzenie jest już zamontowane w innym pojeździe (aktywny montaż).');
+            flashError('Wybrane urządzenie jest już zamontowane (aktywny montaż). Wybierz inny model lub sprawdź stan urządzeń.');
             redirect(getBaseUrl() . 'installations.php?action=add');
         }
         $db->beginTransaction();
         try {
             $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, notes) VALUES (?,?,?,?,?,?,?,?,?)")
                ->execute([$deviceId, $vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes]);
-            $installId = $db->lastInsertId();
             $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$deviceId]);
             $db->commit();
             flashSuccess('Montaż zarejestrowany pomyślnie.');
@@ -131,6 +172,19 @@ if ($action === 'edit' && $id) {
 }
 
 // Data for selects
+// Available device models (for the add form — model selector)
+$availableModels = $db->query("
+    SELECT m.id as model_id, m.name as model_name, mf.name as manufacturer_name,
+           COUNT(d.id) as available_count
+    FROM models m
+    JOIN manufacturers mf ON mf.id=m.manufacturer_id
+    JOIN devices d ON d.model_id=m.id AND d.status IN ('nowy','sprawny')
+    GROUP BY m.id
+    HAVING available_count > 0
+    ORDER BY mf.name, m.name
+")->fetchAll();
+
+// Individual available devices (for the edit form — keep existing device select)
 $availableDevices = $db->query("
     SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name
     FROM devices d
@@ -140,7 +194,6 @@ $availableDevices = $db->query("
     ORDER BY mf.name, m.name, d.serial_number
 ")->fetchAll();
 
-$vehicles = $db->query("SELECT v.id, v.registration, v.make, v.model_name, c.contact_name, c.company_name FROM vehicles v LEFT JOIN clients c ON c.id=v.client_id WHERE v.active=1 ORDER BY v.registration")->fetchAll();
 $clients  = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 $users    = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
 
@@ -316,51 +369,51 @@ include __DIR__ . '/includes/header.php';
         <form method="POST">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="<?= $action ?>">
-            <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $installation['id'] ?>"><?php endif; ?>
+            <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $installation['id'] ?>"><input type="hidden" name="vehicle_id" value="<?= $installation['vehicle_id'] ?? 0 ?>"><?php endif; ?>
             <div class="row g-3">
                 <?php if ($action === 'add'): ?>
                 <div class="col-md-6">
-                    <label class="form-label required-star">Urządzenie GPS</label>
-                    <select name="device_id" class="form-select" required>
-                        <option value="">— wybierz urządzenie —</option>
-                        <?php
-                        $currentMf = '';
-                        foreach ($availableDevices as $d):
-                            if ($d['manufacturer_name'] !== $currentMf) {
-                                if ($currentMf) echo '</optgroup>';
-                                echo '<optgroup label="' . h($d['manufacturer_name'] . ' ' . $d['model_name']) . '">';
-                                $currentMf = $d['manufacturer_name'];
-                            }
-                        ?>
-                        <option value="<?= $d['id'] ?>" <?= (int)($_GET['device'] ?? 0) === $d['id'] ? 'selected' : '' ?>>
-                            <?= h($d['serial_number']) ?>
+                    <label class="form-label required-star">Model urządzenia GPS</label>
+                    <select name="model_id" class="form-select" required>
+                        <option value="">— wybierz model —</option>
+                        <?php foreach ($availableModels as $m): ?>
+                        <option value="<?= $m['model_id'] ?>">
+                            <?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (dostępne: <?= (int)$m['available_count'] ?>)
                         </option>
-                        <?php endforeach; if ($currentMf) echo '</optgroup>'; ?>
+                        <?php endforeach; ?>
+                        <?php if (empty($availableModels)): ?>
+                        <option value="" disabled>Brak dostępnych urządzeń w magazynie</option>
+                        <?php endif; ?>
                     </select>
+                    <div class="form-text">System automatycznie przypisze pierwsze dostępne urządzenie wybranego modelu.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label required-star">Numer rejestracyjny pojazdu</label>
+                    <input type="text" name="vehicle_registration" class="form-control"
+                           required placeholder="np. KR 12345"
+                           value="<?= h($_POST['vehicle_registration'] ?? '') ?>"
+                           style="text-transform:uppercase">
+                    <div class="form-text">Wpisz numer rejestracyjny. Pojazd zostanie automatycznie zarejestrowany jeśli nie istnieje.</div>
                 </div>
                 <?php endif; ?>
                 <div class="col-md-6">
-                    <label class="form-label required-star">Pojazd</label>
-                    <select name="vehicle_id" class="form-select" required>
-                        <option value="">— wybierz pojazd —</option>
-                        <?php foreach ($vehicles as $v): ?>
-                        <option value="<?= $v['id'] ?>"
-                                <?= ($installation['vehicle_id'] ?? (int)($_GET['vehicle'] ?? 0)) == $v['id'] ? 'selected' : '' ?>>
-                            <?= h($v['registration'] . ' — ' . $v['make'] . ' ' . $v['model_name'] . ($v['contact_name'] ? ' (' . ($v['company_name'] ?: $v['contact_name']) . ')' : '')) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="col-md-6">
                     <label class="form-label">Klient</label>
-                    <select name="client_id" class="form-select">
-                        <option value="">— brak przypisania —</option>
-                        <?php foreach ($clients as $c): ?>
-                        <option value="<?= $c['id'] ?>" <?= ($installation['client_id'] ?? 0) == $c['id'] ? 'selected' : '' ?>>
-                            <?= h(($c['company_name'] ? $c['company_name'] . ' — ' : '') . $c['contact_name']) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <div class="input-group">
+                        <select name="client_id" id="clientSelect" class="form-select">
+                            <option value="">— brak przypisania —</option>
+                            <?php foreach ($clients as $c): ?>
+                            <option value="<?= $c['id'] ?>" <?= ($installation['client_id'] ?? 0) == $c['id'] ? 'selected' : '' ?>>
+                                <?= h(($c['company_name'] ? $c['company_name'] . ' — ' : '') . $c['contact_name']) ?>
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php if ($action === 'add'): ?>
+                        <button type="button" class="btn btn-outline-success" id="quickAddClientBtn"
+                                title="Dodaj nowego klienta" data-bs-toggle="tooltip">
+                            <i class="fas fa-user-plus"></i>
+                        </button>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Technik</label>
@@ -440,6 +493,84 @@ function showUninstallModal(id, deviceId, serial) {
     document.getElementById('uninstallSerial').textContent = serial;
     new bootstrap.Modal(document.getElementById('uninstallModal')).show();
 }
+</script>
+
+<!-- Quick Add Client Modal -->
+<div class="modal fade" id="quickClientModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-user-plus me-2 text-success"></i>Nowy klient</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="quickClientError" class="alert alert-danger d-none"></div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label required-star">Imię i nazwisko kontaktu</label>
+                        <input type="text" id="qc_contact_name" class="form-control" placeholder="Jan Kowalski">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Nazwa firmy</label>
+                        <input type="text" id="qc_company_name" class="form-control" placeholder="Firma Sp. z o.o.">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Telefon</label>
+                        <input type="text" id="qc_phone" class="form-control" placeholder="+48 123 456 789">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">E-mail</label>
+                        <input type="email" id="qc_email" class="form-control" placeholder="kontakt@firma.pl">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success" id="quickClientSave">
+                    <i class="fas fa-save me-2"></i>Zapisz klienta
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var btn = document.getElementById('quickAddClientBtn');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+        new bootstrap.Modal(document.getElementById('quickClientModal')).show();
+    });
+    document.getElementById('quickClientSave').addEventListener('click', function () {
+        var contactName = document.getElementById('qc_contact_name').value.trim();
+        var companyName = document.getElementById('qc_company_name').value.trim();
+        var phone       = document.getElementById('qc_phone').value.trim();
+        var email       = document.getElementById('qc_email').value.trim();
+        var errEl       = document.getElementById('quickClientError');
+        if (!contactName) { errEl.textContent = 'Imię i nazwisko kontaktu jest wymagane.'; errEl.classList.remove('d-none'); return; }
+        errEl.classList.add('d-none');
+        var fd = new FormData();
+        fd.append('action', 'quick_add_client');
+        var csrfEl = document.querySelector('input[name="csrf_token"]');
+        if (!csrfEl) { errEl.textContent = 'Błąd sesji. Odśwież stronę i spróbuj ponownie.'; errEl.classList.remove('d-none'); return; }
+        fd.append('csrf_token', csrfEl.value);
+        fd.append('contact_name', contactName);
+        fd.append('company_name', companyName);
+        fd.append('phone', phone);
+        fd.append('email', email);
+        fetch('installations.php', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+                var sel = document.getElementById('clientSelect');
+                var opt = new Option(data.label, data.id, true, true);
+                sel.appendChild(opt);
+                bootstrap.Modal.getInstance(document.getElementById('quickClientModal')).hide();
+                // Reset modal fields
+                ['qc_contact_name','qc_company_name','qc_phone','qc_email'].forEach(function (id) { document.getElementById(id).value = ''; });
+            })
+            .catch(function () { errEl.textContent = 'Błąd połączenia z serwerem.'; errEl.classList.remove('d-none'); });
+    });
+}());
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

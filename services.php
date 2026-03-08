@@ -270,7 +270,10 @@ include __DIR__ . '/includes/header.php';
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label required-star">Urządzenie GPS</label>
-                    <select name="device_id" class="form-select" required>
+                    <input type="text" id="deviceSearch" class="form-control mb-1"
+                           placeholder="Wyszukaj urządzenie (nr seryjny, model, producent)…"
+                           autocomplete="off">
+                    <select name="device_id" id="deviceSelect" class="form-select" required size="4" style="height:auto">
                         <option value="">— wybierz urządzenie —</option>
                         <?php
                         $currentMf = '';
@@ -282,11 +285,13 @@ include __DIR__ . '/includes/header.php';
                             }
                         ?>
                         <option value="<?= $d['id'] ?>"
+                                data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'])) ?>"
                                 <?= ($service['device_id'] ?? (int)($_GET['device'] ?? 0)) == $d['id'] ? 'selected' : '' ?>>
-                            <?= h($d['serial_number']) ?>
+                            <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?>
                         </option>
                         <?php endforeach; if ($currentMf) echo '</optgroup>'; ?>
                     </select>
+                    <div class="form-text">Wpisz fragment numeru seryjnego, modelu lub producenta aby przefiltrować listę.</div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Powiązany montaż</label>
@@ -360,5 +365,49 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php endif; ?>
+
+<script>
+(function () {
+    var searchInput = document.getElementById('deviceSearch');
+    var deviceSelect = document.getElementById('deviceSelect');
+    if (!searchInput || !deviceSelect) return;
+
+    // Pre-select and show label for current value
+    var currentOption = deviceSelect.selectedIndex > 0 ? deviceSelect.options[deviceSelect.selectedIndex] : null;
+    if (currentOption && currentOption.value) {
+        searchInput.value = currentOption.textContent.trim();
+    }
+
+    searchInput.addEventListener('input', function () {
+        var term = this.value.toLowerCase().trim();
+        var options = deviceSelect.querySelectorAll('option[data-search]');
+        options.forEach(function (opt) {
+            var match = !term || opt.dataset.search.includes(term);
+            opt.style.display = match ? '' : 'none';
+            opt.parentElement.style.display = '';
+        });
+        // Hide empty optgroups
+        deviceSelect.querySelectorAll('optgroup').forEach(function (grp) {
+            var visible = Array.from(grp.querySelectorAll('option[data-search]')).some(function (o) { return o.style.display !== 'none'; });
+            grp.style.display = visible ? '' : 'none';
+        });
+        // Deselect if text doesn't match selection
+        if (deviceSelect.selectedIndex > 0) {
+            var sel = deviceSelect.options[deviceSelect.selectedIndex];
+            if (sel && sel.style.display === 'none') {
+                deviceSelect.value = '';
+            }
+        }
+    });
+
+    // When user selects a device from the list, update the text input
+    deviceSelect.addEventListener('change', function () {
+        var sel = this.options[this.selectedIndex];
+        if (sel && sel.value) {
+            searchInput.value = sel.textContent.trim();
+        }
+    });
+}());
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
