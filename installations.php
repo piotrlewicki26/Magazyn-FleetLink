@@ -59,8 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'installations.php?action=add');
         }
 
-        $allocatedDeviceIds = []; // track devices allocated in this batch
-        $vehicleCache       = []; // registration plate → vehicle_id (avoid duplicate INSERTs)
+        $allocatedDeviceIds       = []; // track devices allocated in this batch
+        $allocatedInstallationIds = []; // track created installation IDs for print
+        $vehicleCache             = []; // registration plate → vehicle_id (avoid duplicate INSERTs)
         $db->beginTransaction();
         try {
             foreach ($deviceModes as $idx => $mode) {
@@ -133,6 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Create installation record
                 $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, notes) VALUES (?,?,?,?,?,?,?,?,?)")
                    ->execute([$dId, $rowVehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes]);
+                $allocatedInstallationIds[] = (int)$db->lastInsertId();
 
                 // Update device status + auto inventory adjust
                 $oldStatus = $devRow['status'];
@@ -149,7 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Błąd: ' . $e->getMessage());
             redirect(getBaseUrl() . 'installations.php?action=add');
         }
-        redirect(getBaseUrl() . 'installations.php');
+        // Redirect to print order (IDs passed via URL so the page survives a refresh)
+        redirect(getBaseUrl() . 'installations.php?action=print_batch&ids=' . implode(',', $allocatedInstallationIds));
 
     } elseif ($postAction === 'uninstall') {
         $instId = (int)($_POST['id'] ?? 0);
@@ -306,6 +309,36 @@ if ($action === 'list') {
     $installations = $stmt->fetchAll();
 }
 
+// Fetch data for print-batch view
+$batchInstallations = [];
+if ($action === 'print_batch') {
+    // IDs are passed in the URL so the print page survives a browser refresh
+    $rawIds   = sanitize($_GET['ids'] ?? '');
+    $batchIds = array_filter(array_map('intval', explode(',', $rawIds)));
+    if (!empty($batchIds)) {
+        $ph = implode(',', array_fill(0, count($batchIds), '?'));
+        $batchStmt = $db->prepare("
+            SELECT i.id, i.installation_date, i.status, i.location_in_vehicle, i.notes,
+                   d.serial_number, d.imei, d.sim_number,
+                   m.name as model_name, mf.name as manufacturer_name,
+                   v.registration, v.make, v.model_name as vehicle_model,
+                   c.contact_name, c.company_name, c.phone as client_phone,
+                   u.name as technician_name
+            FROM installations i
+            JOIN devices d ON d.id = i.device_id
+            JOIN models m ON m.id = d.model_id
+            JOIN manufacturers mf ON mf.id = m.manufacturer_id
+            JOIN vehicles v ON v.id = i.vehicle_id
+            LEFT JOIN clients c ON c.id = i.client_id
+            LEFT JOIN users u ON u.id = i.technician_id
+            WHERE i.id IN ($ph)
+            ORDER BY i.id
+        ");
+        $batchStmt->execute($batchIds);
+        $batchInstallations = $batchStmt->fetchAll();
+    }
+}
+
 $activePage = 'installations';
 $pageTitle = 'Montaże';
 include __DIR__ . '/includes/header.php';
@@ -414,6 +447,7 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
                 <a href="services.php?action=add&installation=<?= $installation['id'] ?>&device=<?= $installation['device_id'] ?>" class="btn btn-sm btn-outline-warning"><i class="fas fa-wrench me-1"></i>Serwis</a>
                 <a href="protocols.php?action=add&installation=<?= $installation['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
+                <button type="button" class="btn btn-sm btn-outline-dark" onclick="window.print()"><i class="fas fa-print me-1"></i>Drukuj</button>
             </div>
         </div>
     </div>
@@ -603,7 +637,122 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
-<!-- Uninstall Modal -->
+<?php if ($action === 'print_batch'): ?>
+<?php
+$firstRow       = $batchInstallations[0] ?? [];
+$clientLabel    = $firstRow ? ($firstRow['company_name'] ?: ($firstRow['contact_name'] ?: '—')) : '—';
+$technicianName = $firstRow['technician_name'] ?? '—';
+$installDate    = $firstRow['installation_date'] ?? date('Y-m-d');
+// Order number: ZM/YEAR/first_id-count (unique and descriptive)
+$batchFirstId   = $firstRow['id'] ?? 0;
+$batchCount     = count($batchInstallations);
+$orderNumber    = sprintf('ZM/%s/%d-%d', date('Y', strtotime($installDate ?: 'now')), $batchFirstId, $batchCount);
+?>
+<style>
+@media print {
+    .no-print { display: none !important; }
+    .card { border: none !important; box-shadow: none !important; }
+    body { font-size: 12pt; }
+}
+</style>
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+    <h5 class="mb-0"><i class="fas fa-file-alt me-2 text-primary"></i>Zlecenie montażu — podgląd wydruku</h5>
+    <div>
+        <button type="button" class="btn btn-primary me-2" onclick="window.print()"><i class="fas fa-print me-2"></i>Drukuj</button>
+        <a href="installations.php" class="btn btn-outline-secondary"><i class="fas fa-list me-1"></i>Lista montaży</a>
+    </div>
+</div>
+
+<div class="card" id="printArea">
+    <div class="card-body">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-start mb-4">
+            <div>
+                <h4 class="fw-bold mb-1"><?= defined('APP_NAME') ? h(APP_NAME) : 'FleetLink Magazyn' ?></h4>
+                <div class="text-muted small">System zarządzania urządzeniami GPS</div>
+            </div>
+            <div class="text-end">
+                <h5 class="fw-bold mb-1">ZLECENIE MONTAŻU</h5>
+                <div class="text-muted small">Nr: <strong><?= h($orderNumber) ?></strong></div>
+                <div class="text-muted small">Data: <strong><?= formatDate($installDate) ?></strong></div>
+            </div>
+        </div>
+        <hr>
+
+        <!-- Client & technician info -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="fw-semibold text-muted small text-uppercase mb-1">Klient</div>
+                <div class="fw-bold fs-5"><?= h($clientLabel) ?></div>
+                <?php if ($firstRow && $firstRow['client_phone']): ?>
+                <div class="text-muted small"><?= h($firstRow['client_phone']) ?></div>
+                <?php endif; ?>
+            </div>
+            <div class="col-md-3">
+                <div class="fw-semibold text-muted small text-uppercase mb-1">Technik</div>
+                <div><?= h($technicianName) ?></div>
+            </div>
+            <div class="col-md-3">
+                <div class="fw-semibold text-muted small text-uppercase mb-1">Liczba urządzeń</div>
+                <div class="fw-bold fs-5"><?= count($batchInstallations) ?></div>
+            </div>
+        </div>
+
+        <!-- Devices table -->
+        <div class="fw-semibold text-muted small text-uppercase mb-2">Urządzenia</div>
+        <table class="table table-bordered table-sm mb-4">
+            <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    <th>Model</th>
+                    <th>Nr seryjny</th>
+                    <th>IMEI</th>
+                    <th>SIM</th>
+                    <th>Pojazd (rejestracja)</th>
+                    <th>Marka / model pojazdu</th>
+                    <th>Miejsce montażu</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($batchInstallations as $i => $bi): ?>
+                <tr>
+                    <td><?= $i + 1 ?></td>
+                    <td><?= h($bi['manufacturer_name'] . ' ' . $bi['model_name']) ?></td>
+                    <td class="fw-semibold"><?= h($bi['serial_number']) ?></td>
+                    <td class="text-muted small"><?= h($bi['imei'] ?? '—') ?></td>
+                    <td class="text-muted small"><?= h($bi['sim_number'] ?? '—') ?></td>
+                    <td class="fw-semibold"><?= h($bi['registration']) ?></td>
+                    <td class="text-muted small"><?= h(trim($bi['make'] . ' ' . $bi['vehicle_model'])) ?: '—' ?></td>
+                    <td class="text-muted small"><?= h($bi['location_in_vehicle'] ?? '—') ?></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($batchInstallations)): ?>
+                <tr><td colspan="8" class="text-center text-muted">Brak danych.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+
+        <!-- Notes -->
+        <?php if ($firstRow && $firstRow['notes']): ?>
+        <div class="mb-4">
+            <div class="fw-semibold text-muted small text-uppercase mb-1">Uwagi</div>
+            <div><?= h($firstRow['notes']) ?></div>
+        </div>
+        <?php endif; ?>
+
+        <!-- Signatures -->
+        <div class="row g-4 mt-4">
+            <div class="col-md-5">
+                <div style="border-top:1px solid #333;padding-top:4px" class="text-muted small text-center">Podpis technika</div>
+            </div>
+            <div class="col-md-2"></div>
+            <div class="col-md-5">
+                <div style="border-top:1px solid #333;padding-top:4px" class="text-muted small text-center">Podpis klienta / odbiór</div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 <div class="modal fade" id="uninstallModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
         <div class="modal-content">
@@ -819,6 +968,11 @@ function showUninstallModal(id, deviceId, serial) {
         var manualCol = row.querySelector('.col-mode-manual');
         if (autoCol)   autoCol.style.display   = (mode === 'auto')   ? '' : 'none';
         if (manualCol) manualCol.style.display = (mode === 'manual') ? '' : 'none';
+        // Initialize TomSelect lazily — only when the manual column becomes visible
+        // so that TomSelect never initializes on a hidden element (prevents dark/broken dropdown)
+        if (mode === 'manual') {
+            initTomSelectOnRow(row);
+        }
     }
 
     // Event delegation – mode toggle
@@ -856,17 +1010,15 @@ function showUninstallModal(id, deviceId, serial) {
             el.htmlFor = el.htmlFor.replace(/__IDX__/g, idx);
         });
         container.appendChild(clone);
-        // Initialize Tom Select on the new row (must be in DOM first)
-        var newRow = container.querySelector('.device-row:last-child');
-        if (newRow) initTomSelectOnRow(newRow);
+        // TomSelect is initialized lazily in applyModeToRow when user switches to manual mode
         updateRowNumbers();
     });
 
-    // Init: apply mode to first row, update remove-button visibility, init Tom Select
+    // Init: apply mode to first row, update remove-button visibility
+    // TomSelect is initialized lazily inside applyModeToRow when mode === 'manual'
     container.querySelectorAll('.device-row').forEach(function (row) {
         var checked = row.querySelector('.btn-check:checked');
         if (checked) applyModeToRow(row, checked.value);
-        initTomSelectOnRow(row);
     });
     updateRowNumbers();
 }());
