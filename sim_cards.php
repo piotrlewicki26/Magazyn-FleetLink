@@ -153,7 +153,12 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <div class="card">
-    <div class="card-header">Karty SIM przypisane do urządzeń (<?= count($simDevices) ?>)</div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Karty SIM przypisane do urządzeń (<?= count($simDevices) ?>)</span>
+        <a href="sim_cards.php?action=add" class="btn btn-sm btn-primary">
+            <i class="fas fa-plus me-1"></i>Przypisz kartę SIM
+        </a>
+    </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>

@@ -29,6 +29,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!in_array($type, ['in','out','correction'])) $type = 'in';
 
+    if ($postAction === 'sync_inventory') {
+        $db->beginTransaction();
+        try {
+            // Ensure inventory rows exist for all active models
+            $db->exec("
+                INSERT INTO inventory (model_id, quantity, min_quantity)
+                SELECT m.id, 0, 0 FROM models m WHERE m.active = 1
+                ON DUPLICATE KEY UPDATE model_id = model_id
+            ");
+            // Set quantity = actual in-stock device count (0 when none)
+            $db->exec("
+                UPDATE inventory i
+                LEFT JOIN (
+                    SELECT model_id, COUNT(*) AS cnt
+                    FROM devices
+                    WHERE status IN ('nowy','sprawny')
+                    GROUP BY model_id
+                ) AS actual ON actual.model_id = i.model_id
+                SET i.quantity = COALESCE(actual.cnt, 0)
+            ");
+            // Log a correction movement for each model that now has stock
+            $adminStmt = $db->query("SELECT id FROM users WHERE role='admin' LIMIT 1");
+            $adminRow  = $adminStmt ? $adminStmt->fetch() : false;
+            if ($adminRow) {
+                $db->prepare("INSERT INTO inventory_movements (model_id, user_id, type, quantity, reason, reference_type)
+                              SELECT model_id, ?, 'correction', quantity,
+                                     CONCAT('Synchronizacja z listą urządzeń (nowy stan: ', quantity, ' szt.)'),
+                                     'sync'
+                              FROM inventory WHERE quantity > 0")
+                   ->execute([$adminRow['id']]);
+            }
+            $db->commit();
+            flashSuccess('Stan magazynowy zsynchronizowany z listą urządzeń.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd synchronizacji: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'inventory.php');
+    }
+
     if ($postAction === 'adjustment' && $modelId && $quantity != 0) {
         // Update inventory
         $db->beginTransaction();
@@ -71,15 +111,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get inventory data
+// Get inventory data – use models as the primary source so all models with devices
+// appear even if no inventory row exists yet. Also show the actual in-stock count
+// derived directly from the devices table.
 $inventory = $db->query("
-    SELECT i.id, i.model_id, i.quantity, i.min_quantity, i.updated_at,
+    SELECT m.id as model_id,
+           COALESCE(i.quantity, 0) as quantity,
+           COALESCE(i.min_quantity, 0) as min_quantity,
+           i.updated_at,
            m.name as model_name, m.price_purchase, m.price_sale,
-           mf.name as manufacturer_name
-    FROM inventory i
-    JOIN models m ON m.id = i.model_id
+           mf.name as manufacturer_name,
+           (SELECT COUNT(*) FROM devices d2
+            WHERE d2.model_id = m.id
+              AND d2.status IN ('nowy','sprawny')) as actual_count
+    FROM models m
     JOIN manufacturers mf ON mf.id = m.manufacturer_id
+    LEFT JOIN inventory i ON i.model_id = m.id
     WHERE m.active = 1
+      AND (i.model_id IS NOT NULL
+           OR EXISTS (SELECT 1 FROM devices d3 WHERE d3.model_id = m.id))
     ORDER BY mf.name, m.name
 ")->fetchAll();
 
@@ -135,6 +185,15 @@ include __DIR__ . '/includes/header.php';
         <a href="inventory.php?action=sim_cards" class="btn <?= $action === 'sim_cards' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
             <i class="fas fa-sim-card me-1"></i>Karty SIM
         </a>
+        <form method="POST" class="d-inline me-1">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="sync_inventory">
+            <button type="submit" class="btn btn-outline-info btn-sm"
+                    data-confirm="Zsynchronizować stan magazynowy z listą urządzeń? Ilości w magazynie zostaną nadpisane rzeczywistą liczbą urządzeń o statusie Nowy/Sprawny."
+                    title="Przelicz stany magazynowe na podstawie listy urządzeń">
+                <i class="fas fa-sync-alt me-1"></i>Synchronizuj z urządzeniami
+            </button>
+        </form>
         <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#adjustModal">
             <i class="fas fa-plus-minus me-1"></i>Koryguj stan
         </button>
@@ -181,40 +240,52 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Producent</th><th>Model</th><th>Stan</th><th>Min. stan</th><th>Wartość (zakup)</th><th>Wartość (sprzedaż)</th><th>Ostatnia zmiana</th><th>Akcje</th>
+                    <th>Producent</th><th>Model</th><th>Stan magazynowy</th><th>Faktyczny stan urządzeń</th><th>Min. stan</th><th>Wartość (zakup)</th><th>Wartość (sprzedaż)</th><th>Ostatnia zmiana</th><th>Akcje</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($inventory as $item): ?>
+                <?php $mismatch = (int)$item['actual_count'] !== (int)$item['quantity']; ?>
                 <tr class="<?= $item['quantity'] <= $item['min_quantity'] ? 'table-warning' : '' ?>">
                     <td><?= h($item['manufacturer_name']) ?></td>
                     <td class="fw-semibold"><?= h($item['model_name']) ?></td>
                     <td>
                         <span class="fw-bold <?= $item['quantity'] == 0 ? 'text-danger' : ($item['quantity'] <= $item['min_quantity'] ? 'text-warning' : 'text-success') ?>">
-                            <?= $item['quantity'] ?> szt
+                            <?= (int)$item['quantity'] ?> szt
                         </span>
                         <?php if ($item['quantity'] <= $item['min_quantity'] && $item['min_quantity'] > 0): ?>
                         <span class="badge bg-warning ms-1">niski stan</span>
                         <?php endif; ?>
+                        <?php if ($mismatch): ?>
+                        <span class="badge bg-danger ms-1" title="Rozbieżność z listą urządzeń — użyj Synchronizuj">!</span>
+                        <?php endif; ?>
                     </td>
-                    <td><?= $item['min_quantity'] ?> szt</td>
+                    <td>
+                        <span class="fw-bold <?= $item['actual_count'] == 0 ? 'text-danger' : 'text-success' ?>">
+                            <?= (int)$item['actual_count'] ?> szt
+                        </span>
+                        <?php if ($mismatch): ?>
+                        <i class="fas fa-exclamation-triangle text-warning ms-1" title="Różni się od stanu magazynowego — kliknij Synchronizuj"></i>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= (int)$item['min_quantity'] ?> szt</td>
                     <td><?= formatMoney($item['quantity'] * $item['price_purchase']) ?></td>
                     <td><?= formatMoney($item['quantity'] * $item['price_sale']) ?></td>
-                    <td class="text-muted small"><?= formatDateTime($item['updated_at']) ?></td>
+                    <td class="text-muted small"><?= $item['updated_at'] ? formatDateTime($item['updated_at']) : '—' ?></td>
                     <td>
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action"
-                                onclick="openAdjustModal(<?= $item['model_id'] ?>, '<?= h(addslashes($item['manufacturer_name'] . ' ' . $item['model_name'])) ?>', <?= $item['quantity'] ?>)">
+                                onclick="openAdjustModal(<?= $item['model_id'] ?>, '<?= h(addslashes($item['manufacturer_name'] . ' ' . $item['model_name'])) ?>', <?= (int)$item['quantity'] ?>)">
                             <i class="fas fa-edit"></i>
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
-                                onclick="openMinModal(<?= $item['model_id'] ?>, '<?= h(addslashes($item['model_name'])) ?>', <?= $item['min_quantity'] ?>)">
+                                onclick="openMinModal(<?= $item['model_id'] ?>, '<?= h(addslashes($item['model_name'])) ?>', <?= (int)$item['min_quantity'] ?>)">
                             <i class="fas fa-bell"></i>
                         </button>
                     </td>
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($inventory)): ?>
-                <tr><td colspan="8" class="text-center text-muted p-3">Brak modeli w magazynie. Dodaj <a href="models.php">modele urządzeń</a> najpierw.</td></tr>
+                <tr><td colspan="9" class="text-center text-muted p-3">Brak modeli w magazynie z urządzeniami. Dodaj <a href="models.php">modele urządzeń</a> i <a href="devices.php?action=add">urządzenia</a> najpierw. Po dodaniu użyj przycisku <strong>Synchronizuj z urządzeniami</strong>, aby zaktualizować stany.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
