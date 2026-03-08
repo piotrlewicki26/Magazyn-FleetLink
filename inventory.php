@@ -143,27 +143,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (PDOException $e) { flashError('Nie można usunąć — akcesorium jest powiązane z wydaniami.'); }
         redirect(getBaseUrl() . 'inventory.php?action=accessories');
 
+    } elseif ($postAction === 'accessory_issue_delete') {
+        if (!isAdmin()) { flashError('Usuwanie wpisów historii jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        $issueId = (int)($_POST['issue_id'] ?? 0);
+        if ($issueId) {
+            $db->prepare("DELETE FROM accessory_issues WHERE id=?")->execute([$issueId]);
+            flashSuccess('Wpis usunięty z historii.');
+        }
+        redirect(getBaseUrl() . 'inventory.php?action=accessories');
+
     } elseif ($postAction === 'accessory_pickup') {
-        // Standalone warehouse pickup (no installation_id)
-        $accId   = (int)($_POST['accessory_id'] ?? 0);
-        $qty     = max(1, (int)($_POST['quantity'] ?? 1));
-        $notes   = sanitize($_POST['notes'] ?? '');
-        $curUser = getCurrentUser();
-        if (!$accId) { flashError('Wybierz akcesorium.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        // Multi-item standalone warehouse pickup (no installation_id)
+        $pickupAccIds  = array_map('intval', (array)($_POST['pickup_acc']  ?? []));
+        $pickupQtys    = array_map('intval', (array)($_POST['pickup_qty']  ?? []));
+        $pickupNotes   = (array)($_POST['pickup_note'] ?? []);
+        $pickupRecip   = sanitize($_POST['recipient'] ?? '');
+        $curUser       = getCurrentUser();
+
+        // Filter out blank rows
+        $rows = [];
+        foreach ($pickupAccIds as $i => $aid) {
+            $qty = (int)($pickupQtys[$i] ?? 0);
+            if ($aid > 0 && $qty > 0) {
+                $rows[] = ['acc_id' => $aid, 'qty' => $qty, 'note' => sanitize($pickupNotes[$i] ?? '')];
+            }
+        }
+        if (empty($rows)) { flashError('Wybierz co najmniej jedno akcesorium i ilość.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+
+        $db->beginTransaction();
         try {
-            $remStmt = $db->prepare("SELECT a.quantity_initial, COALESCE((SELECT SUM(ai.quantity) FROM accessory_issues ai WHERE ai.accessory_id = a.id),0) AS issued FROM accessories a WHERE a.id=?");
-            $remStmt->execute([$accId]);
-            $accRow = $remStmt->fetch();
-            if (!$accRow) { throw new Exception('Akcesorium nie istnieje.'); }
-            $remaining = (int)$accRow['quantity_initial'] - (int)$accRow['issued'];
-            if ($qty > $remaining) { throw new Exception('Niewystarczający stan: dostępne ' . max(0,$remaining) . ' szt.'); }
-            $db->prepare("INSERT INTO accessory_issues (accessory_id, installation_id, user_id, quantity, notes) VALUES (?,NULL,?,?,?)")
-               ->execute([$accId, $curUser['id'], $qty, $notes]);
-            // Return the new issue ID for W/Z redirect
-            $wzId = (int)$db->lastInsertId();
-            flashSuccess('Pobrano ' . $qty . ' szt. z magazynu.');
-            redirect(getBaseUrl() . 'inventory.php?action=wz_print&id=' . $wzId);
+            $insertedIds = [];
+            foreach ($rows as $row) {
+                $remStmt = $db->prepare("SELECT a.quantity_initial, COALESCE((SELECT SUM(ai.quantity) FROM accessory_issues ai WHERE ai.accessory_id = a.id),0) AS issued FROM accessories a WHERE a.id=?");
+                $remStmt->execute([$row['acc_id']]);
+                $accRow = $remStmt->fetch();
+                if (!$accRow) { throw new Exception('Akcesorium ID ' . $row['acc_id'] . ' nie istnieje.'); }
+                $remaining = (int)$accRow['quantity_initial'] - (int)$accRow['issued'];
+                if ($row['qty'] > $remaining) { throw new Exception('Niewystarczający stan dla jednego z akcesoriów. Dostępne: ' . max(0,$remaining) . ' szt.'); }
+                $noteVal = trim(($row['note'] ? $row['note'] . ' ' : '') . ($pickupRecip ? '(Dla: ' . $pickupRecip . ')' : ''));
+                $db->prepare("INSERT INTO accessory_issues (accessory_id, installation_id, user_id, quantity, notes) VALUES (?,NULL,?,?,?)")
+                   ->execute([$row['acc_id'], $curUser['id'], $row['qty'], $noteVal ?: null]);
+                $insertedIds[] = (int)$db->lastInsertId();
+            }
+            $db->commit();
+            $total = array_sum(array_column($rows, 'qty'));
+            flashSuccess('Pobrano łącznie ' . $total . ' szt. z magazynu.');
+            redirect(getBaseUrl() . 'inventory.php?action=wz_print&ids=' . implode(',', $insertedIds));
         } catch (Exception $e) {
+            $db->rollBack();
             flashError($e->getMessage());
         }
         redirect(getBaseUrl() . 'inventory.php?action=accessories');
@@ -257,12 +284,16 @@ if ($action === 'sim_cards') {
 
 // W/Z print data (single accessory issue record)
 $wzIssue = null;
+$wzIssues = [];
 $wzCompanyName = '';
 $wzCompanyAddr = '';
 if ($action === 'wz_print') {
-    $wzId = (int)($_GET['id'] ?? 0);
-    if ($wzId) {
+    // Support both ?id=X (single) and ?ids=X,Y,Z (multi)
+    $wzRawIds = sanitize($_GET['ids'] ?? ($_GET['id'] ?? ''));
+    $wzIds = array_filter(array_map('intval', explode(',', $wzRawIds)));
+    if (!empty($wzIds)) {
         try {
+            $phWz = implode(',', array_fill(0, count($wzIds), '?'));
             $wzStmt = $db->prepare("
                 SELECT ai.id, ai.quantity, ai.notes, ai.issued_at,
                        a.name AS accessory_name, a.id AS accessory_id,
@@ -270,11 +301,13 @@ if ($action === 'wz_print') {
                 FROM accessory_issues ai
                 JOIN accessories a ON a.id = ai.accessory_id
                 JOIN users u ON u.id = ai.user_id
-                WHERE ai.id = ?
+                WHERE ai.id IN ($phWz)
+                ORDER BY ai.id
             ");
-            $wzStmt->execute([$wzId]);
-            $wzIssue = $wzStmt->fetch();
-        } catch (Exception $e) { $wzIssue = null; }
+            $wzStmt->execute($wzIds);
+            $wzIssues = $wzStmt->fetchAll();
+            $wzIssue  = $wzIssues[0] ?? null; // compat: single
+        } catch (Exception $e) { $wzIssues = []; $wzIssue = null; }
     }
     try {
         $cfg = [];
@@ -554,7 +587,7 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
     <div class="table-responsive">
         <table class="table table-sm mb-0">
             <thead>
-                <tr><th>Data wydania</th><th>Akcesorium</th><th>Ilość</th><th>Zlecenie / Pobranie</th><th>Wydał</th><th>Uwagi</th><th></th></tr>
+                <tr><th>Data pobrania</th><th>Akcesorium</th><th>Ilość</th><th>Zlecenie / Pobranie</th><th>Pobrał</th><th>Uwagi</th><th></th></tr>
             </thead>
             <tbody>
                 <?php foreach ($accHistory as $ah): ?>
@@ -571,10 +604,19 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
                     </td>
                     <td><?= h($ah['user_name']) ?></td>
                     <td class="text-muted small"><?= h($ah['notes'] ?? '') ?></td>
-                    <td>
-                        <a href="inventory.php?action=wz_print&id=<?= $ah['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj W/Z">
+                    <td class="text-nowrap">
+                        <a href="inventory.php?action=wz_print&ids=<?= $ah['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj W/Z">
                             <i class="fas fa-print"></i>
                         </a>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="accessory_issue_delete">
+                            <input type="hidden" name="issue_id" value="<?= $ah['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usunąć ten wpis z historii?"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -672,13 +714,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
 <!-- Pickup Modal (available to all logged-in users) -->
 <div class="modal fade" id="pickupModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="POST">
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="accessory_pickup">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-hand-holding me-2 text-warning"></i>Pobierz akcesorium z magazynu</h5>
+                    <h5 class="modal-title"><i class="fas fa-hand-holding me-2 text-warning"></i>Pobierz akcesoria z magazynu</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -686,26 +728,42 @@ document.addEventListener('DOMContentLoaded', function () {
                     <div class="alert alert-warning mb-0">Brak dostępnych akcesoriów w magazynie.</div>
                     <?php else: ?>
                     <div class="mb-3">
-                        <label class="form-label required-star">Akcesorium</label>
-                        <select name="accessory_id" class="form-select" required>
-                            <option value="">— wybierz —</option>
-                            <?php foreach ($accessories as $acc2):
-                                $rem2 = (int)$acc2['quantity_initial'] - (int)$acc2['issued'];
-                            ?>
-                            <option value="<?= $acc2['id'] ?>" <?= $rem2 <= 0 ? 'disabled' : '' ?>>
-                                <?= h($acc2['name']) ?> (dostępne: <?= max(0,$rem2) ?> szt.)
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
+                        <label class="form-label">Dla kogo (opcjonalnie)</label>
+                        <input type="text" name="recipient" class="form-control" placeholder="np. Jan Kowalski, Pojazd WA12345…">
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label required-star">Ilość (szt.)</label>
-                        <input type="number" name="quantity" class="form-control" required min="1" value="1">
+                    <div id="pickupRowsContainer">
+                        <div class="pickup-row border rounded p-2 mb-2 bg-light">
+                            <div class="row g-2 align-items-center">
+                                <div class="col-md-6">
+                                    <label class="form-label form-label-sm mb-1">Akcesorium</label>
+                                    <select name="pickup_acc[]" class="form-select form-select-sm" required>
+                                        <option value="">— wybierz —</option>
+                                        <?php foreach ($accessories as $acc2):
+                                            $rem2 = (int)$acc2['quantity_initial'] - (int)$acc2['issued'];
+                                        ?>
+                                        <option value="<?= $acc2['id'] ?>" <?= $rem2 <= 0 ? 'disabled' : '' ?>>
+                                            <?= h($acc2['name']) ?> (dost.: <?= max(0,$rem2) ?> szt.)
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label form-label-sm mb-1">Ilość</label>
+                                    <input type="number" name="pickup_qty[]" class="form-control form-control-sm" required min="1" value="1">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label form-label-sm mb-1">Uwagi</label>
+                                    <input type="text" name="pickup_note[]" class="form-control form-control-sm" placeholder="Opcjonalnie">
+                                </div>
+                                <div class="col-md-1 d-flex align-items-end">
+                                    <button type="button" class="btn btn-outline-danger btn-sm pickup-remove-row" disabled title="Usuń wiersz"><i class="fas fa-times"></i></button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Cel / Uwagi</label>
-                        <input type="text" name="notes" class="form-control" placeholder="np. remont, naprawa pojazdu...">
-                    </div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="pickupAddRow">
+                        <i class="fas fa-plus me-1"></i>Dodaj pozycję
+                    </button>
                     <?php endif; ?>
                 </div>
                 <div class="modal-footer">
@@ -718,11 +776,66 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
     </div>
 </div>
+<script>
+(function () {
+    var accOptions = <?= json_encode(array_map(function($a) {
+        $rem = (int)$a['quantity_initial'] - (int)$a['issued'];
+        return ['id' => $a['id'], 'name' => $a['name'], 'rem' => max(0,$rem)];
+    }, $accessories ?? [])) ?>;
+
+    function buildSelectHtml() {
+        var html = '<option value="">— wybierz —</option>';
+        accOptions.forEach(function(a) {
+            html += '<option value="' + a.id + '"' + (a.rem <= 0 ? ' disabled' : '') + '>' + a.name.replace(/&/g,'&amp;').replace(/</g,'&lt;') + ' (dost.: ' + a.rem + ' szt.)</option>';
+        });
+        return html;
+    }
+
+    document.getElementById('pickupAddRow').addEventListener('click', function () {
+        var container = document.getElementById('pickupRowsContainer');
+        var div = document.createElement('div');
+        div.className = 'pickup-row border rounded p-2 mb-2 bg-light';
+        div.innerHTML = '<div class="row g-2 align-items-center">' +
+            '<div class="col-md-6"><label class="form-label form-label-sm mb-1">Akcesorium</label>' +
+            '<select name="pickup_acc[]" class="form-select form-select-sm" required>' + buildSelectHtml() + '</select></div>' +
+            '<div class="col-md-2"><label class="form-label form-label-sm mb-1">Ilość</label>' +
+            '<input type="number" name="pickup_qty[]" class="form-control form-control-sm" required min="1" value="1"></div>' +
+            '<div class="col-md-3"><label class="form-label form-label-sm mb-1">Uwagi</label>' +
+            '<input type="text" name="pickup_note[]" class="form-control form-control-sm" placeholder="Opcjonalnie"></div>' +
+            '<div class="col-md-1 d-flex align-items-end">' +
+            '<button type="button" class="btn btn-outline-danger btn-sm pickup-remove-row" title="Usuń wiersz"><i class="fas fa-times"></i></button></div>' +
+            '</div>';
+        container.appendChild(div);
+        updateRemoveButtons();
+    });
+
+    document.addEventListener('click', function (e) {
+        if (e.target.closest('.pickup-remove-row')) {
+            e.target.closest('.pickup-row').remove();
+            updateRemoveButtons();
+        }
+    });
+
+    function updateRemoveButtons() {
+        var rows = document.querySelectorAll('#pickupRowsContainer .pickup-row');
+        rows.forEach(function(r) {
+            var btn = r.querySelector('.pickup-remove-row');
+            if (btn) btn.disabled = rows.length <= 1;
+        });
+    }
+})();
+</script>
 
 <?php elseif ($action === 'wz_print'): ?>
 <?php
-// W/Z document print view
-$wzNum = $wzIssue ? sprintf('WZ/%s/%04d', date('Y', strtotime($wzIssue['issued_at'])), $wzIssue['id']) : '—';
+// W/Z document print view — supports single or multi-issue
+$wzFirstIssue = $wzIssues[0] ?? null;
+$wzDocDate    = $wzFirstIssue ? $wzFirstIssue['issued_at'] : date('Y-m-d H:i:s');
+$wzIdsStr     = implode(',', array_column($wzIssues, 'id'));
+$wzNum        = $wzFirstIssue ? sprintf('WZ/%s/%04d', date('Y', strtotime($wzDocDate)), $wzFirstIssue['id']) : '—';
+$wzUserName   = $wzFirstIssue['user_name'] ?? '—';
+// Collect notes for display (recipient hint stored in notes)
+$allNotes = array_unique(array_filter(array_map(fn($r) => $r['notes'] ?? '', $wzIssues)));
 ?>
 <style>
 .wz-doc { background:#fff; color:#1a1a2e; font-family:'DM Sans','Segoe UI',system-ui,sans-serif; max-width:800px; margin:0 auto; }
@@ -767,36 +880,45 @@ $wzNum = $wzIssue ? sprintf('WZ/%s/%04d', date('Y', strtotime($wzIssue['issued_a
         <div style="text-align:right">
             <div class="wz-title">Wydanie z Magazynu (W/Z)</div>
             <div class="wz-meta">Nr dokumentu: <strong><?= h($wzNum) ?></strong></div>
-            <?php if ($wzIssue): ?>
-            <div class="wz-meta">Data: <strong><?= formatDateTime($wzIssue['issued_at']) ?></strong></div>
+            <?php if ($wzFirstIssue): ?>
+            <div class="wz-meta">Data: <strong><?= formatDateTime($wzDocDate) ?></strong></div>
             <?php endif; ?>
         </div>
     </div>
 
-    <?php if ($wzIssue): ?>
-    <div class="wz-section-label">Dane wydania</div>
+    <?php if (!empty($wzIssues)): ?>
+    <div class="wz-section-label">Dane pobrania</div>
     <table style="width:100%;margin-bottom:20px;font-size:.87rem">
-        <tr><th style="width:35%;color:#888;font-weight:600;padding:4px 0">Wydał</th><td><?= h($wzIssue['user_name']) ?></td></tr>
-        <tr><th style="color:#888;font-weight:600;padding:4px 0">Data i godzina</th><td><?= formatDateTime($wzIssue['issued_at']) ?></td></tr>
-        <?php if ($wzIssue['notes']): ?>
-        <tr><th style="color:#888;font-weight:600;padding:4px 0">Cel / Uwagi</th><td><?= h($wzIssue['notes']) ?></td></tr>
+        <tr><th style="width:35%;color:#888;font-weight:600;padding:4px 0">Pobrał</th><td><?= h($wzUserName) ?></td></tr>
+        <tr><th style="color:#888;font-weight:600;padding:4px 0">Data i godzina</th><td><?= formatDateTime($wzDocDate) ?></td></tr>
+        <?php if ($allNotes): ?>
+        <tr><th style="color:#888;font-weight:600;padding:4px 0">Cel / Uwagi</th><td><?= h(implode(' | ', $allNotes)) ?></td></tr>
         <?php endif; ?>
     </table>
 
-    <div class="wz-section-label">Wydane pozycje</div>
+    <div class="wz-section-label">Pobrane pozycje</div>
     <table class="wz-table">
         <thead>
             <tr>
                 <th style="width:40px">#</th>
                 <th>Nazwa akcesorium</th>
                 <th style="width:120px;text-align:center">Ilość</th>
+                <th>Uwagi</th>
             </tr>
         </thead>
         <tbody>
+            <?php foreach ($wzIssues as $wi => $wzRow): ?>
             <tr>
-                <td style="color:#2563eb;font-weight:700">1</td>
-                <td style="font-weight:600"><?= h($wzIssue['accessory_name']) ?></td>
-                <td style="text-align:center;font-weight:700"><?= (int)$wzIssue['quantity'] ?> szt.</td>
+                <td style="color:#2563eb;font-weight:700"><?= $wi + 1 ?></td>
+                <td style="font-weight:600"><?= h($wzRow['accessory_name']) ?></td>
+                <td style="text-align:center;font-weight:700"><?= (int)$wzRow['quantity'] ?> szt.</td>
+                <td style="color:#666;font-size:.8rem"><?= h($wzRow['notes'] ?? '') ?></td>
+            </tr>
+            <?php endforeach; ?>
+            <tr style="background:#f0f4ff">
+                <td colspan="2" style="font-weight:700;text-align:right">Razem:</td>
+                <td style="text-align:center;font-weight:800"><?= array_sum(array_column($wzIssues,'quantity')) ?> szt.</td>
+                <td></td>
             </tr>
         </tbody>
     </table>
@@ -806,7 +928,7 @@ $wzNum = $wzIssue ? sprintf('WZ/%s/%04d', date('Y', strtotime($wzIssue['issued_a
 
     <div class="wz-sig-row">
         <div class="wz-sig-box">
-            <div class="wz-sig-line">Podpis wydającego<br><strong><?= h($wzIssue['user_name'] ?? '—') ?></strong></div>
+            <div class="wz-sig-line">Podpis wydającego<br><strong><?= h($wzUserName) ?></strong></div>
         </div>
         <div class="wz-sig-box">
             <div class="wz-sig-line">Podpis odbierającego<br>&nbsp;</div>

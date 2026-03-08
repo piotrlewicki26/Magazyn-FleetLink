@@ -11,6 +11,7 @@ require_once __DIR__ . '/includes/functions.php';
 
 date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
+if (!isAdmin()) { flashError('Import urządzeń jest dostępny tylko dla Administratora.'); redirect(getBaseUrl() . 'devices.php'); }
 
 $db = getDb();
 

@@ -154,6 +154,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $db->commit();
             $n = count($allocatedDeviceIds);
+            // Process accessory pickups submitted with the installation form
+            $accPickupIds  = array_map('intval', (array)($_POST['inst_acc'] ?? []));
+            $accPickupQtys = array_map('intval', (array)($_POST['inst_acc_qty'] ?? []));
+            $accPickupNotes= (array)($_POST['inst_acc_note'] ?? []);
+            $firstInstId   = $allocatedInstallationIds[0] ?? null;
+            $curUser       = getCurrentUser();
+            if ($firstInstId && !empty($accPickupIds)) {
+                try {
+                    foreach ($accPickupIds as $ai => $acid) {
+                        $aqty = max(0, (int)($accPickupQtys[$ai] ?? 0));
+                        if (!$acid || !$aqty) continue;
+                        $noteVal = sanitize($accPickupNotes[$ai] ?? '');
+                        $db->prepare("INSERT INTO accessory_issues (accessory_id, installation_id, user_id, quantity, notes) VALUES (?,?,?,?,?)")
+                           ->execute([$acid, $firstInstId, $curUser['id'], $aqty, $noteVal ?: null]);
+                    }
+                } catch (Exception $e) { /* non-fatal: continue */ }
+            }
             flashSuccess('Zarejestrowano ' . $n . ' montaż' . ($n === 1 ? '' : 'e') . ' pomyślnie.');
         } catch (Exception $e) {
             $db->rollBack();
@@ -349,6 +366,19 @@ $availableDevices = $db->query("
 
 $clients  = $db->query("SELECT id, contact_name, company_name, address, city, postal_code FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 $users    = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
+
+// Available accessories for forms (add/view)
+if (!isset($availableAccessories)) {
+    $availableAccessories = [];
+    try {
+        $aaStmt2 = $db->query("
+            SELECT a.id, a.name,
+                   (a.quantity_initial - COALESCE((SELECT SUM(ai2.quantity) FROM accessory_issues ai2 WHERE ai2.accessory_id = a.id),0)) AS remaining
+            FROM accessories a WHERE a.active = 1 ORDER BY a.name
+        ");
+        $availableAccessories = $aaStmt2->fetchAll();
+    } catch (Exception $e) { $availableAccessories = []; }
+}
 
 $installations = [];
 $installationGroups = []; // processed for grouped display
@@ -708,7 +738,7 @@ function toggleBatchRows(groupKey, btn) {
     <div class="table-responsive">
         <table class="table table-sm mb-0">
             <thead>
-                <tr><th>Akcesorium</th><th class="text-center">Ilość</th><th>Wydał</th><th>Data wydania</th><th>Uwagi</th><th></th></tr>
+                <tr><th>Akcesorium</th><th class="text-center">Ilość</th><th>Pobrał</th><th>Data pobrania</th><th>Uwagi</th><th></th></tr>
             </thead>
             <tbody>
                 <?php foreach ($installAccessories as $ia): ?>
@@ -943,6 +973,41 @@ function toggleBatchRows(groupKey, btn) {
                     <label class="form-label">Uwagi</label>
                     <textarea name="notes" class="form-control" rows="3"><?= h($installation['notes'] ?? '') ?></textarea>
                 </div>
+                <?php if ($action === 'add' && !empty($availableAccessories)): ?>
+                <div class="col-12">
+                    <div class="card bg-light border-0 mt-2">
+                        <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
+                            <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria do pobrania z magazynu (opcjonalnie)</span>
+                            <button type="button" class="btn btn-outline-warning btn-sm" id="instAddAccRow">
+                                <i class="fas fa-plus me-1"></i>Dodaj pozycję
+                            </button>
+                        </div>
+                        <div class="card-body pb-1" id="instAccContainer">
+                            <div class="inst-acc-row row g-2 align-items-center mb-2">
+                                <div class="col-md-5">
+                                    <select name="inst_acc[]" class="form-select form-select-sm">
+                                        <option value="">— nie pobieraj —</option>
+                                        <?php foreach ($availableAccessories as $ia2): $rem2 = (int)$ia2['remaining']; ?>
+                                        <option value="<?= $ia2['id'] ?>" <?= $rem2 <= 0 ? 'disabled' : '' ?>>
+                                            <?= h($ia2['name']) ?> (dost.: <?= max(0,$rem2) ?> szt.)
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="number" name="inst_acc_qty[]" class="form-control form-control-sm" min="1" value="1" placeholder="Ilość">
+                                </div>
+                                <div class="col-md-4">
+                                    <input type="text" name="inst_acc_note[]" class="form-control form-control-sm" placeholder="Uwagi do pobrania">
+                                </div>
+                                <div class="col-md-1">
+                                    <button type="button" class="btn btn-outline-danger btn-sm inst-acc-remove" disabled><i class="fas fa-times"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i><?= $action === 'add' ? 'Zarejestruj montaż' : 'Zapisz zmiany' ?></button>
                     <a href="installations.php" class="btn btn-outline-secondary ms-2">Anuluj</a>
@@ -974,7 +1039,42 @@ function toggleBatchRows(groupKey, btn) {
             }
         });
     }
+
+    // Accessories dynamic rows
+    var accOpts = <?= json_encode(array_map(fn($a) => ['id' => $a['id'], 'name' => $a['name'], 'rem' => max(0,(int)$a['remaining'])], $availableAccessories ?? [])) ?>;
+    function buildAccOpts() {
+        var html = '<option value="">— nie pobieraj —</option>';
+        accOpts.forEach(function(a) {
+            html += '<option value="' + a.id + '"' + (a.rem <= 0 ? ' disabled' : '') + '>' + a.name.replace(/</g,'&lt;') + ' (dost.: ' + a.rem + ' szt.)</option>';
+        });
+        return html;
+    }
+    var addBtn = document.getElementById('instAddAccRow');
+    if (addBtn) {
+        addBtn.addEventListener('click', function() {
+            var container = document.getElementById('instAccContainer');
+            var div = document.createElement('div');
+            div.className = 'inst-acc-row row g-2 align-items-center mb-2';
+            div.innerHTML = '<div class="col-md-5"><select name="inst_acc[]" class="form-select form-select-sm">' + buildAccOpts() + '</select></div>' +
+                '<div class="col-md-2"><input type="number" name="inst_acc_qty[]" class="form-control form-control-sm" min="1" value="1" placeholder="Ilość"></div>' +
+                '<div class="col-md-4"><input type="text" name="inst_acc_note[]" class="form-control form-control-sm" placeholder="Uwagi do pobrania"></div>' +
+                '<div class="col-md-1"><button type="button" class="btn btn-outline-danger btn-sm inst-acc-remove"><i class="fas fa-times"></i></button></div>';
+            container.appendChild(div);
+            updateRemoveAccBtns();
+        });
+    }
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.inst-acc-remove')) {
+            e.target.closest('.inst-acc-row').remove();
+            updateRemoveAccBtns();
+        }
+    });
+    function updateRemoveAccBtns() {
+        var rows = document.querySelectorAll('#instAccContainer .inst-acc-row');
+        rows.forEach(function(r) { var b = r.querySelector('.inst-acc-remove'); if(b) b.disabled = rows.length <= 1; });
+    }
 }());
+</script>
 </script>
 <?php endif; ?>
 <?php endif; ?>

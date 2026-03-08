@@ -44,12 +44,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $db->prepare("INSERT INTO services (device_id, installation_id, technician_id, type, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?)")
            ->execute([$deviceId, $installationId, $technicianId, $type, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
+        $newServiceId = (int)$db->lastInsertId();
         // Update device status if in service
         if ($status === 'w_trakcie') {
             $db->prepare("UPDATE devices SET status='w_serwisie' WHERE id=?")->execute([$deviceId]);
         }
+        // Process accessory pickups submitted with the service form
+        $svcAccIds   = array_map('intval', (array)($_POST['svc_acc'] ?? []));
+        $svcAccQtys  = array_map('intval', (array)($_POST['svc_acc_qty'] ?? []));
+        $svcAccNotes = (array)($_POST['svc_acc_note'] ?? []);
+        if (!empty($svcAccIds)) {
+            foreach ($svcAccIds as $si => $sacid) {
+                $sqty = max(0, (int)($svcAccQtys[$si] ?? 0));
+                if (!$sacid || !$sqty) continue;
+                $snote = sanitize($svcAccNotes[$si] ?? '');
+                try {
+                    $db->prepare("INSERT INTO accessory_issues (accessory_id, installation_id, user_id, quantity, notes) VALUES (?,?,?,?,?)")
+                       ->execute([$sacid, $installationId ?: null, $currentUser['id'], $sqty, $snote ?: null]);
+                } catch (Exception $e) { /* non-fatal */ }
+            }
+        }
         flashSuccess('Serwis zarejestrowany pomyślnie.');
-        redirect(getBaseUrl() . 'services.php');
+        redirect(getBaseUrl() . 'services.php?action=view&id=' . $newServiceId);
 
     } elseif ($postAction === 'edit') {
         $editId = (int)($_POST['id'] ?? 0);
@@ -112,6 +128,17 @@ $activeInstallations = $db->query("
     WHERE i.status='aktywna'
     ORDER BY v.registration
 ")->fetchAll();
+
+// Available accessories for add/edit forms
+$svcAvailableAccessories = [];
+try {
+    $aaS = $db->query("
+        SELECT a.id, a.name,
+               (a.quantity_initial - COALESCE((SELECT SUM(ai2.quantity) FROM accessory_issues ai2 WHERE ai2.accessory_id = a.id),0)) AS remaining
+        FROM accessories a WHERE a.active = 1 ORDER BY a.name
+    ");
+    $svcAvailableAccessories = $aaS->fetchAll();
+} catch (Exception $e) { $svcAvailableAccessories = []; }
 
 $services = [];
 if ($action === 'list') {
@@ -371,6 +398,41 @@ include __DIR__ . '/includes/header.php';
                     <label class="form-label">Rozwiązanie / Wynik</label>
                     <textarea name="resolution" class="form-control" rows="3"><?= h($service['resolution'] ?? '') ?></textarea>
                 </div>
+                <?php if ($action === 'add' && !empty($svcAvailableAccessories)): ?>
+                <div class="col-12">
+                    <div class="card bg-light border-0 mt-2">
+                        <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
+                            <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria do pobrania z magazynu (opcjonalnie)</span>
+                            <button type="button" class="btn btn-outline-warning btn-sm" id="svcAddAccRow">
+                                <i class="fas fa-plus me-1"></i>Dodaj pozycję
+                            </button>
+                        </div>
+                        <div class="card-body pb-1" id="svcAccContainer">
+                            <div class="svc-acc-row row g-2 align-items-center mb-2">
+                                <div class="col-md-5">
+                                    <select name="svc_acc[]" class="form-select form-select-sm">
+                                        <option value="">— nie pobieraj —</option>
+                                        <?php foreach ($svcAvailableAccessories as $sa): $srem = (int)$sa['remaining']; ?>
+                                        <option value="<?= $sa['id'] ?>" <?= $srem <= 0 ? 'disabled' : '' ?>>
+                                            <?= h($sa['name']) ?> (dost.: <?= max(0,$srem) ?> szt.)
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="number" name="svc_acc_qty[]" class="form-control form-control-sm" min="1" value="1" placeholder="Ilość">
+                                </div>
+                                <div class="col-md-4">
+                                    <input type="text" name="svc_acc_note[]" class="form-control form-control-sm" placeholder="Uwagi do pobrania">
+                                </div>
+                                <div class="col-md-1">
+                                    <button type="button" class="btn btn-outline-danger btn-sm svc-acc-remove" disabled><i class="fas fa-times"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i><?= $action === 'add' ? 'Zarejestruj serwis' : 'Zapisz zmiany' ?></button>
                     <a href="services.php" class="btn btn-outline-secondary ms-2">Anuluj</a>
@@ -379,6 +441,44 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+<?php if ($action === 'add'): ?>
+<script>
+(function() {
+    var svcAccOpts = <?= json_encode(array_map(fn($a) => ['id' => $a['id'], 'name' => $a['name'], 'rem' => max(0,(int)$a['remaining'])], $svcAvailableAccessories ?? [])) ?>;
+    function buildSvcAccOpts() {
+        var html = '<option value="">— nie pobieraj —</option>';
+        svcAccOpts.forEach(function(a) {
+            html += '<option value="' + a.id + '"' + (a.rem <= 0 ? ' disabled' : '') + '>' + a.name.replace(/</g,'&lt;') + ' (dost.: ' + a.rem + ' szt.)</option>';
+        });
+        return html;
+    }
+    var addBtn = document.getElementById('svcAddAccRow');
+    if (addBtn) {
+        addBtn.addEventListener('click', function() {
+            var container = document.getElementById('svcAccContainer');
+            var div = document.createElement('div');
+            div.className = 'svc-acc-row row g-2 align-items-center mb-2';
+            div.innerHTML = '<div class="col-md-5"><select name="svc_acc[]" class="form-select form-select-sm">' + buildSvcAccOpts() + '</select></div>' +
+                '<div class="col-md-2"><input type="number" name="svc_acc_qty[]" class="form-control form-control-sm" min="1" value="1" placeholder="Ilość"></div>' +
+                '<div class="col-md-4"><input type="text" name="svc_acc_note[]" class="form-control form-control-sm" placeholder="Uwagi do pobrania"></div>' +
+                '<div class="col-md-1"><button type="button" class="btn btn-outline-danger btn-sm svc-acc-remove"><i class="fas fa-times"></i></button></div>';
+            container.appendChild(div);
+            updateSvcRemoveBtns();
+        });
+    }
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.svc-acc-remove')) {
+            e.target.closest('.svc-acc-row').remove();
+            updateSvcRemoveBtns();
+        }
+    });
+    function updateSvcRemoveBtns() {
+        var rows = document.querySelectorAll('#svcAccContainer .svc-acc-row');
+        rows.forEach(function(r) { var b = r.querySelector('.svc-acc-remove'); if(b) b.disabled = rows.length <= 1; });
+    }
+})();
+</script>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if ($action === 'print' && isset($service)): ?>

@@ -42,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes      = sanitize($_POST['notes'] ?? '');
 
     if ($postAction === 'add') {
+        if (!isAdmin()) { flashError('Dodawanie kart SIM jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'sim_cards.php'); }
         // Create a new SIM card entry (device optional)
         if (empty($simNumber)) {
             flashError('Numer telefonu SIM jest wymagany.');
@@ -237,7 +238,9 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-sim-card me-2 text-primary"></i>Karty SIM</h1>
     <?php if ($action === 'list'): ?>
+    <?php if (isAdmin()): ?>
     <a href="sim_cards.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Dodaj kartę SIM</a>
+    <?php endif; ?>
     <?php else: ?>
     <a href="sim_cards.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -274,9 +277,11 @@ include __DIR__ . '/includes/header.php';
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Karty SIM (<?= count($allSimRows) ?>)</span>
+        <?php if (isAdmin()): ?>
         <a href="sim_cards.php?action=add" class="btn btn-sm btn-primary">
             <i class="fas fa-plus me-1"></i>Dodaj kartę SIM
         </a>
+        <?php endif; ?>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
