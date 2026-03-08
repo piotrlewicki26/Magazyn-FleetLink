@@ -154,7 +154,8 @@ if ($action === 'list') {
         SELECT d.id, d.serial_number, d.imei, d.sim_number, d.status, d.purchase_date,
                m.name as model_name, mf.name as manufacturer_name,
                v.registration as vehicle_registration,
-               c.contact_name, c.company_name
+               c.contact_name, c.company_name,
+               i.installation_date
         FROM devices d
         JOIN models m ON m.id = d.model_id
         JOIN manufacturers mf ON mf.id = m.manufacturer_id
@@ -234,7 +235,7 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data zakupu</th><th>Akcje</th>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data zakupu / montażu</th><th>Akcje</th>
                 </tr>
             </thead>
             <tbody>
@@ -249,7 +250,14 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $d['vehicle_registration'] ? h($d['vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?= $d['sim_number'] ? h($d['sim_number']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?php $clientLabel = $d['company_name'] ?: ($d['contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
-                    <td><?= formatDate($d['purchase_date']) ?></td>
+                    <td>
+                        <?php if ($d['status'] === 'zamontowany' && $d['installation_date']): ?>
+                            <?= formatDate($d['installation_date']) ?>
+                            <br><small class="text-muted">montaż</small>
+                        <?php else: ?>
+                            <?= formatDate($d['purchase_date']) ?>
+                        <?php endif; ?>
+                    </td>
                     <td>
                         <a href="devices.php?action=view&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Podgląd"><i class="fas fa-eye"></i></a>
                         <a href="devices.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>

@@ -23,6 +23,7 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
     <link rel="stylesheet" href="<?= getBaseUrl() ?>assets/css/style.css">
 </head>
 <body>
@@ -42,13 +43,15 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['manufacturers','models','devices']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['manufacturers','models','devices','sim_cards']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
                         <i class="fas fa-microchip me-1"></i>Urządzenia
                     </a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php"><i class="fas fa-list me-2"></i>Lista urządzeń</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php?action=add"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>device_import.php"><i class="fas fa-file-import me-2"></i>Importuj urządzenia</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>sim_cards.php"><i class="fas fa-sim-card me-2"></i>Karty SIM</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>manufacturers.php"><i class="fas fa-industry me-2"></i>Producenci</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>models.php"><i class="fas fa-tags me-2"></i>Modele</a></li>
@@ -65,14 +68,20 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['installations','services']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
-                        <i class="fas fa-tools me-1"></i>Operacje
+                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'installations' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-car me-1"></i>Instalacje
                     </a>
                     <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php"><i class="fas fa-car me-2"></i>Montaże</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php"><i class="fas fa-list me-2"></i>Lista montaży</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php?action=add"><i class="fas fa-plus me-2"></i>Nowy montaż</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php"><i class="fas fa-wrench me-2"></i>Serwisy</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'services' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-wrench me-1"></i>Serwisy
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php"><i class="fas fa-list me-2"></i>Lista serwisów</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php?action=add"><i class="fas fa-plus me-2"></i>Nowy serwis</a></li>
                     </ul>
                 </li>

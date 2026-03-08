@@ -501,7 +501,7 @@ include __DIR__ . '/includes/header.php';
                                     </select>
                                 </div>
                                 <div class="col col-mode-manual" <?= $preMode === 'auto' ? 'style="display:none"' : '' ?>>
-                                    <select name="device_id_manual[0]" class="form-select form-select-sm">
+                                    <select name="device_id_manual[0]" class="form-select form-select-sm ts-device" data-ts-init="0">
                                         <option value="">— wybierz urządzenie —</option>
                                         <?php
                                         $currentGroup = '';
@@ -741,7 +741,7 @@ function showUninstallModal(id, deviceId, serial) {
                 </select>
             </div>
             <div class="col col-mode-manual" style="display:none">
-                <select name="device_id_manual[__IDX__]" class="form-select form-select-sm">
+                <select name="device_id_manual[__IDX__]" class="form-select form-select-sm ts-device">
                     <option value="">— wybierz urządzenie —</option>
                     <?php
                     $tplGroup = '';
@@ -779,6 +779,31 @@ function showUninstallModal(id, deviceId, serial) {
 
     var rowCounter = 1; // Row 0 is already rendered by PHP
 
+    // ── Tom Select helpers ──────────────────────────────────
+    function initTomSelectOnRow(row) {
+        row.querySelectorAll('select.ts-device').forEach(function (sel) {
+            if (sel.tomselect) return; // already initialized
+            if (typeof TomSelect === 'undefined') return;
+            new TomSelect(sel, {
+                placeholder: '— szukaj urządzenia —',
+                allowEmptyOption: true,
+                maxOptions: null,
+                searchField: ['text', 'value'],
+                render: {
+                    option: function (data, escape) {
+                        return '<div>' + escape(data.text) + '</div>';
+                    }
+                }
+            });
+        });
+    }
+
+    function destroyTomSelectOnRow(row) {
+        row.querySelectorAll('select.ts-device').forEach(function (sel) {
+            if (sel.tomselect) sel.tomselect.destroy();
+        });
+    }
+
     function updateRowNumbers() {
         var rows = container.querySelectorAll('.device-row');
         rows.forEach(function (row, i) {
@@ -807,7 +832,9 @@ function showUninstallModal(id, deviceId, serial) {
     container.addEventListener('click', function (e) {
         var btn = e.target.closest('.remove-row-btn');
         if (btn) {
-            btn.closest('.device-row').remove();
+            var row = btn.closest('.device-row');
+            destroyTomSelectOnRow(row);
+            row.remove();
             updateRowNumbers();
         }
     });
@@ -829,13 +856,17 @@ function showUninstallModal(id, deviceId, serial) {
             el.htmlFor = el.htmlFor.replace(/__IDX__/g, idx);
         });
         container.appendChild(clone);
+        // Initialize Tom Select on the new row (must be in DOM first)
+        var newRow = container.querySelector('.device-row:last-child');
+        if (newRow) initTomSelectOnRow(newRow);
         updateRowNumbers();
     });
 
-    // Init: apply mode to first row and update remove-button visibility
+    // Init: apply mode to first row, update remove-button visibility, init Tom Select
     container.querySelectorAll('.device-row').forEach(function (row) {
         var checked = row.querySelector('.btn-check:checked');
         if (checked) applyModeToRow(row, checked.value);
+        initTomSelectOnRow(row);
     });
     updateRowNumbers();
 }());
