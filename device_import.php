@@ -265,7 +265,7 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $modelMap[mb_strtolower(trim($r['name']))] = $r['id']; // also by model name alone
     }
 
-    $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany'];
+    $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'];
     $imported = 0; $skipped = 0; $errors = [];
 
     /**

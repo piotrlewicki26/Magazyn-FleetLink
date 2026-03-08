@@ -29,9 +29,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $status        = sanitize($_POST['status'] ?? 'nowy');
     $purchaseDate  = sanitize($_POST['purchase_date'] ?? '');
     $purchasePrice = str_replace(',', '.', $_POST['purchase_price'] ?? '0');
+    $saleDate      = sanitize($_POST['sale_date'] ?? '');
+    $leaseEndDate  = sanitize($_POST['lease_end_date'] ?? '');
     $notes         = sanitize($_POST['notes'] ?? '');
 
-    $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany'];
+    $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'];
     if (!in_array($status, $validStatuses)) $status = 'nowy';
 
     if ($postAction === 'add') {
@@ -40,8 +42,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'devices.php?action=add');
         }
         try {
-            $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, status, purchase_date, purchase_price, notes) VALUES (?,?,?,?,?,?,?,?)");
-            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $status, $purchaseDate ?: null, $purchasePrice, $notes]);
+            $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, status, purchase_date, purchase_price, sale_date, lease_end_date, notes) VALUES (?,?,?,?,?,?,?,?,?,?)");
+            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes]);
+            // Auto-adjust inventory: new device with status 'nowy' enters stock
+            adjustInventoryForStatusChange($db, $modelId, '', $status);
             flashSuccess("Urządzenie $serialNumber zostało dodane.");
         } catch (PDOException $e) {
             flashError('Numer seryjny już istnieje w systemie.');
@@ -54,9 +58,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Nieprawidłowe dane.');
             redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $editId);
         }
+        // Fetch old status for inventory adjustment
+        $oldRow = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+        $oldRow->execute([$editId]);
+        $oldDevice = $oldRow->fetch();
         try {
-            $stmt = $db->prepare("UPDATE devices SET model_id=?, serial_number=?, imei=?, sim_number=?, status=?, purchase_date=?, purchase_price=?, notes=? WHERE id=?");
-            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $status, $purchaseDate ?: null, $purchasePrice, $notes, $editId]);
+            $stmt = $db->prepare("UPDATE devices SET model_id=?, serial_number=?, imei=?, sim_number=?, status=?, purchase_date=?, purchase_price=?, sale_date=?, lease_end_date=?, notes=? WHERE id=?");
+            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes, $editId]);
+            // Auto-adjust inventory on status change
+            if ($oldDevice) {
+                adjustInventoryForStatusChange($db, $modelId, $oldDevice['status'], $status);
+            }
             flashSuccess('Urządzenie zostało zaktualizowane.');
         } catch (PDOException $e) {
             flashError('Numer seryjny już istnieje w systemie.');
@@ -65,8 +77,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($postAction === 'delete') {
         $delId = (int)($_POST['id'] ?? 0);
+        // Fetch device for inventory restore
+        $delRow = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+        $delRow->execute([$delId]);
+        $delDevice = $delRow->fetch();
         try {
             $db->prepare("DELETE FROM devices WHERE id=?")->execute([$delId]);
+            // If device was in stock ('nowy'), reduce inventory
+            if ($delDevice && $delDevice['status'] === 'nowy') {
+                adjustInventoryForStatusChange($db, $delDevice['model_id'], 'nowy', 'wycofany');
+            }
             flashSuccess('Urządzenie zostało usunięte.');
         } catch (PDOException $e) {
             flashError('Nie można usunąć urządzenia — posiada powiązane rekordy.');
@@ -131,7 +151,7 @@ if ($action === 'list') {
     $filterStatus = sanitize($_GET['status'] ?? '');
 
     $sql = "
-        SELECT d.id, d.serial_number, d.imei, d.status, d.purchase_date,
+        SELECT d.id, d.serial_number, d.imei, d.sim_number, d.status, d.purchase_date,
                m.name as model_name, mf.name as manufacturer_name,
                v.registration as vehicle_registration,
                c.contact_name, c.company_name
@@ -185,8 +205,8 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-3">
                 <select name="status" class="form-select form-select-sm">
                     <option value="">Wszystkie statusy</option>
-                    <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany'] as $s): ?>
-                    <option value="<?= $s ?>" <?= ($_GET['status'] ?? '') === $s ? 'selected' : '' ?>><?= h(ucfirst($s)) ?></option>
+                    <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'] as $s): ?>
+                    <option value="<?= $s ?>" <?= ($_GET['status'] ?? '') === $s ? 'selected' : '' ?>><?= h(ucfirst(str_replace('_',' ',$s))) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -214,7 +234,7 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Klient</th><th>Data zakupu</th><th>Akcje</th>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data zakupu</th><th>Akcje</th>
                 </tr>
             </thead>
             <tbody>
@@ -227,6 +247,7 @@ include __DIR__ . '/includes/header.php';
                     <td><?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?></td>
                     <td><?= getStatusBadge($d['status'], 'device') ?></td>
                     <td><?= $d['vehicle_registration'] ? h($d['vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
+                    <td><?= $d['sim_number'] ? h($d['sim_number']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?php $clientLabel = $d['company_name'] ?: ($d['contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
                     <td><?= formatDate($d['purchase_date']) ?></td>
                     <td>
@@ -243,7 +264,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($devices)): ?>
-                <tr><td colspan="8" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
+                <tr><td colspan="9" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -261,10 +282,52 @@ include __DIR__ . '/includes/header.php';
                     <tr><th class="text-muted">Model</th><td><?= h($device['model_name']) ?></td></tr>
                     <tr><th class="text-muted">Nr seryjny</th><td class="fw-bold"><?= h($device['serial_number']) ?></td></tr>
                     <tr><th class="text-muted">IMEI</th><td><?= h($device['imei'] ?? '—') ?></td></tr>
-                    <tr><th class="text-muted">Nr karty SIM</th><td><?= h($device['sim_number'] ?? '—') ?></td></tr>
+                    <tr><th class="text-muted">Nr telefonu SIM</th><td><?= h($device['sim_number'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Status</th><td><?= getStatusBadge($device['status'], 'device') ?></td></tr>
                     <tr><th class="text-muted">Data zakupu</th><td><?= formatDate($device['purchase_date']) ?></td></tr>
                     <tr><th class="text-muted">Cena zakupu</th><td><?= $device['purchase_price'] ? formatMoney($device['purchase_price']) : '—' ?></td></tr>
+                    <?php if ($device['status'] === 'sprzedany'): ?>
+                    <tr><th class="text-muted">Data sprzedaży</th><td><?= formatDate($device['sale_date'] ?? '') ?></td></tr>
+                    <?php if (!empty($device['sale_date'])): ?>
+                    <?php
+                        $saleDateTime = new DateTime($device['sale_date']);
+                        $warrantyEnd  = (clone $saleDateTime)->modify('+24 months');
+                        $now          = new DateTime();
+                        $warrantyExpired = $warrantyEnd < $now;
+                        // Remaining whole months (using exact day comparison)
+                        $remainingMonths = 0;
+                        if (!$warrantyExpired) {
+                            $diff = $now->diff($warrantyEnd);
+                            $remainingMonths = $diff->y * 12 + $diff->m + ($diff->d > 0 ? 1 : 0);
+                        }
+                    ?>
+                    <tr>
+                        <th class="text-muted">Gwarancja do</th>
+                        <td>
+                            <?= h($warrantyEnd->format('d.m.Y')) ?>
+                            <?php if ($warrantyExpired): ?>
+                            <span class="badge bg-secondary ms-1">Wygasła</span>
+                            <?php else: ?>
+                            <span class="badge bg-success ms-1">Aktywna (<?= $remainingMonths ?> mies.)</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php elseif ($device['status'] === 'dzierżawa'): ?>
+                    <tr><th class="text-muted">Dzierżawa do</th>
+                        <td>
+                            <?= formatDate($device['lease_end_date'] ?? '') ?>
+                            <?php if (!empty($device['lease_end_date'])): ?>
+                                <?php $leaseEnd = new DateTime($device['lease_end_date']); ?>
+                                <?php if ($leaseEnd < new DateTime()): ?>
+                                <span class="badge bg-danger ms-1">Wygasła</span>
+                                <?php else: ?>
+                                <span class="badge bg-info ms-1">Aktywna</span>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endif; ?>
                 </table>
                 <?php if ($device['notes']): ?>
                 <hr><p class="small text-muted mb-0"><?= h($device['notes']) ?></p>
@@ -368,15 +431,15 @@ include __DIR__ . '/includes/header.php';
                     <input type="text" name="imei" class="form-control" value="<?= h($device['imei'] ?? '') ?>" placeholder="15-cyfrowy numer IMEI">
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Numer karty SIM</label>
-                    <input type="text" name="sim_number" class="form-control" value="<?= h($device['sim_number'] ?? '') ?>">
+                    <label class="form-label">Nr telefonu SIM</label>
+                    <input type="text" name="sim_number" class="form-control" value="<?= h($device['sim_number'] ?? '') ?>" placeholder="np. +48 600 000 000">
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Status</label>
-                    <select name="status" class="form-select">
-                        <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany'] as $s): ?>
+                    <select name="status" id="deviceStatus" class="form-select">
+                        <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'] as $s): ?>
                         <option value="<?= $s ?>" <?= ($device['status'] ?? 'nowy') === $s ? 'selected' : '' ?>>
-                            <?= ucfirst(str_replace('_', ' ', $s)) ?>
+                            <?= h(ucfirst(str_replace('_',' ',$s))) ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
@@ -392,6 +455,20 @@ include __DIR__ . '/includes/header.php';
                         <span class="input-group-text">zł</span>
                     </div>
                 </div>
+
+                <!-- Sale date – shown when status = sprzedany -->
+                <div class="col-md-6" id="fieldSaleDate" style="display:none">
+                    <label class="form-label">Data sprzedaży</label>
+                    <input type="date" name="sale_date" class="form-control" value="<?= h($device['sale_date'] ?? '') ?>">
+                    <div class="form-text">Gwarancja naliczana 24 miesiące od tej daty.</div>
+                </div>
+
+                <!-- Lease end date – shown when status = dzierżawa -->
+                <div class="col-md-6" id="fieldLeaseEnd" style="display:none">
+                    <label class="form-label">Data końca dzierżawy</label>
+                    <input type="date" name="lease_end_date" class="form-control" value="<?= h($device['lease_end_date'] ?? '') ?>">
+                </div>
+
                 <div class="col-12">
                     <label class="form-label">Uwagi</label>
                     <textarea name="notes" class="form-control" rows="3"><?= h($device['notes'] ?? '') ?></textarea>
@@ -404,6 +481,15 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+<script>
+function toggleStatusFields() {
+    var status = document.getElementById('deviceStatus').value;
+    document.getElementById('fieldSaleDate').style.display  = (status === 'sprzedany')  ? '' : 'none';
+    document.getElementById('fieldLeaseEnd').style.display  = (status === 'dzierżawa')  ? '' : 'none';
+}
+document.getElementById('deviceStatus').addEventListener('change', toggleStatusFields);
+toggleStatusFields(); // run on page load
+</script>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

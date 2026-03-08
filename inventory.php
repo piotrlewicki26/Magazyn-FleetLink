@@ -97,6 +97,25 @@ if ($action === 'movements') {
     ")->fetchAll();
 }
 
+// SIM cards list
+$simCards = [];
+if ($action === 'sim_cards') {
+    $simCards = $db->query("
+        SELECT d.id, d.serial_number, d.sim_number, d.status,
+               m.name as model_name, mf.name as manufacturer_name,
+               v.registration as vehicle_registration,
+               c.company_name, c.contact_name
+        FROM devices d
+        JOIN models m ON m.id = d.model_id
+        JOIN manufacturers mf ON mf.id = m.manufacturer_id
+        LEFT JOIN installations i ON i.device_id = d.id AND i.status = 'aktywna'
+        LEFT JOIN vehicles v ON v.id = i.vehicle_id
+        LEFT JOIN clients c ON c.id = i.client_id
+        WHERE d.sim_number IS NOT NULL AND d.sim_number <> ''
+        ORDER BY d.sim_number
+    ")->fetchAll();
+}
+
 $models = $db->query("SELECT m.id, m.name, mf.name as manufacturer_name FROM models m JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE m.active=1 ORDER BY mf.name, m.name")->fetchAll();
 
 $activePage = 'inventory';
@@ -112,6 +131,9 @@ include __DIR__ . '/includes/header.php';
         </a>
         <a href="inventory.php?action=movements" class="btn <?= $action === 'movements' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
             <i class="fas fa-history me-1"></i>Historia ruchów
+        </a>
+        <a href="inventory.php?action=sim_cards" class="btn <?= $action === 'sim_cards' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
+            <i class="fas fa-sim-card me-1"></i>Karty SIM
         </a>
         <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#adjustModal">
             <i class="fas fa-plus-minus me-1"></i>Koryguj stan
@@ -226,6 +248,46 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
                 <?php endforeach; ?>
                 <?php if (empty($movements)): ?>
                 <tr><td colspan="6" class="text-center text-muted">Brak ruchów magazynowych.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<?php elseif ($action === 'sim_cards'): ?>
+<div class="card">
+    <div class="card-header"><i class="fas fa-sim-card me-2 text-primary"></i>Karty SIM — numery telefonów urządzeń (<?= count($simCards) ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Nr telefonu SIM</th>
+                    <th>Urządzenie</th>
+                    <th>Model</th>
+                    <th>Status</th>
+                    <th>Pojazd</th>
+                    <th>Klient</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($simCards as $sc): ?>
+                <tr>
+                    <td class="fw-semibold"><?= h($sc['sim_number']) ?></td>
+                    <td><?= h($sc['serial_number']) ?></td>
+                    <td><?= h($sc['manufacturer_name'] . ' ' . $sc['model_name']) ?></td>
+                    <td><?= getStatusBadge($sc['status'], 'device') ?></td>
+                    <td><?= $sc['vehicle_registration'] ? h($sc['vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
+                    <td><?php $cl = $sc['company_name'] ?: ($sc['contact_name'] ?: null); echo $cl ? h($cl) : '<span class="text-muted">—</span>'; ?></td>
+                    <td>
+                        <a href="devices.php?action=view&id=<?= $sc['id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Podgląd urządzenia">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($simCards)): ?>
+                <tr><td colspan="7" class="text-center text-muted p-3">Brak urządzeń z przypisanymi numerami SIM.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>

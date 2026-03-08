@@ -72,6 +72,8 @@ function getStatusBadge($status, $type = 'device') {
             'uszkodzony' => ['danger', 'Uszkodzony'],
             'zamontowany'=> ['primary', 'Zamontowany'],
             'wycofany'   => ['secondary', 'Wycofany'],
+            'sprzedany'  => ['info', 'Sprzedany'],
+            'dzierżawa'  => ['purple', 'Dzierżawa'],
         ],
         'installation' => [
             'aktywna'    => ['success', 'Aktywna'],
@@ -93,6 +95,10 @@ function getStatusBadge($status, $type = 'device') {
         ],
     ];
     $item = $map[$type][$status] ?? ['secondary', ucfirst($status)];
+    // 'purple' is a custom color not in Bootstrap – render inline
+    if ($item[0] === 'purple') {
+        return '<span class="badge" style="background:#6f42c1">' . h($item[1]) . '</span>';
+    }
     return '<span class="badge bg-' . $item[0] . '">' . h($item[1]) . '</span>';
 }
 
@@ -331,4 +337,51 @@ function getDashboardStats() {
     $stats['total_stock'] = (int)($inventoryStats['total_stock'] ?? 0);
 
     return $stats;
+}
+
+/**
+ * Automatically adjust the inventory count for a model when a device's
+ * status transitions in/out of 'nowy' (stock).
+ *
+ * Rules:
+ *   old='nowy' → new≠'nowy' : stock -1  (device leaves stock)
+ *   old≠'nowy' → new='nowy' : stock +1  (device returns to stock)
+ *   no transition            : no change
+ */
+function adjustInventoryForStatusChange(PDO $db, int $modelId, string $oldStatus, string $newStatus): void {
+    if ($oldStatus === $newStatus) return;
+
+    $delta = 0;
+    if ($oldStatus === 'nowy' && $newStatus !== 'nowy') {
+        $delta = -1; // leaving stock
+    } elseif ($oldStatus !== 'nowy' && $newStatus === 'nowy') {
+        $delta = 1;  // returning to stock
+    }
+    if ($delta === 0) return;
+
+    try {
+        // Ensure the inventory row exists for this model
+        $db->prepare("INSERT INTO inventory (model_id, quantity, min_quantity) VALUES (?, 0, 0) ON DUPLICATE KEY UPDATE model_id=model_id")
+           ->execute([$modelId]);
+
+        if ($delta > 0) {
+            $db->prepare("UPDATE inventory SET quantity = quantity + ? WHERE model_id = ?")
+               ->execute([$delta, $modelId]);
+        } else {
+            // Do not let quantity go below 0
+            $db->prepare("UPDATE inventory SET quantity = GREATEST(0, quantity + ?) WHERE model_id = ?")
+               ->execute([$delta, $modelId]);
+        }
+
+        // Record the automatic movement — use first admin user or skip if none
+        $adminStmt = $db->query("SELECT id FROM users WHERE role='admin' LIMIT 1");
+        $adminRow  = $adminStmt ? $adminStmt->fetch() : false;
+        if ($adminRow) {
+            $db->prepare("INSERT INTO inventory_movements (model_id, user_id, type, quantity, reason, reference_type)
+                          VALUES (?, ?, ?, ?, 'Automatyczna korekta statusu urządzenia', 'auto_status')")
+               ->execute([$modelId, $adminRow['id'], $delta > 0 ? 'in' : 'out', abs($delta)]);
+        }
+    } catch (Exception $e) {
+        // Silently ignore — inventory table may not exist yet on old installs
+    }
 }
