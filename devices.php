@@ -34,8 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes         = sanitize($_POST['notes'] ?? '');
 
     if ($postAction === 'sim_edit') {
-        // Only Technician or Admin may update SIM number
-        if (!isAdmin() && !isTechnician()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'devices.php'); }
+        // Administrator, Technik and Użytkownik may update SIM number (requireLogin enforces auth)
         $simEditId = (int)($_POST['id'] ?? 0);
         if (!$simEditId) {
             flashError('Nieprawidłowe dane.');
@@ -372,12 +371,11 @@ include __DIR__ . '/includes/header.php';
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
                                     data-confirm="Usuń urządzenie <?= h($d['serial_number']) ?>?"><i class="fas fa-trash"></i></button>
                         </form>
-                        <?php elseif (isTechnician()): ?>
+                        <?php endif; ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień nr SIM"
                                 onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
                             <i class="fas fa-sim-card"></i>
                         </button>
-                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -389,8 +387,8 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php if (isTechnician()): ?>
-<!-- SIM-edit modal (Technician only) -->
+<?php // SIM-edit modal (all roles) ?>
+<!-- SIM-edit modal -->
 <div class="modal fade" id="simEditModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
         <div class="modal-content">
@@ -429,7 +427,6 @@ function openSimEdit(deviceId, currentSim) {
     modal.show();
 }
 </script>
-<?php endif; ?>
 
 <?php elseif ($action === 'view' && isset($device)): ?>
 <div class="row g-3">
