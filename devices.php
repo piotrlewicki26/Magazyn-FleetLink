@@ -132,10 +132,15 @@ if ($action === 'list') {
 
     $sql = "
         SELECT d.id, d.serial_number, d.imei, d.status, d.purchase_date,
-               m.name as model_name, mf.name as manufacturer_name
+               m.name as model_name, mf.name as manufacturer_name,
+               v.registration as vehicle_registration,
+               c.contact_name, c.company_name
         FROM devices d
         JOIN models m ON m.id = d.model_id
         JOIN manufacturers mf ON mf.id = m.manufacturer_id
+        LEFT JOIN installations i ON i.device_id = d.id AND i.status = 'aktywna'
+        LEFT JOIN vehicles v ON v.id = i.vehicle_id
+        LEFT JOIN clients c ON c.id = i.client_id
         WHERE 1=1
     ";
     $params = [];
@@ -160,7 +165,10 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-microchip me-2 text-primary"></i>Urządzenia GPS</h1>
     <?php if ($action === 'list'): ?>
-    <a href="devices.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a>
+    <div class="d-flex gap-2">
+        <a href="devices.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a>
+        <a href="device_import.php" class="btn btn-outline-secondary"><i class="fas fa-file-import me-2"></i>Importuj</a>
+    </div>
     <?php else: ?>
     <a href="devices.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -206,7 +214,7 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Data zakupu</th><th>Akcje</th>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Klient</th><th>Data zakupu</th><th>Akcje</th>
                 </tr>
             </thead>
             <tbody>
@@ -218,6 +226,8 @@ include __DIR__ . '/includes/header.php';
                     <td><?= h($d['imei'] ?? '—') ?></td>
                     <td><?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?></td>
                     <td><?= getStatusBadge($d['status'], 'device') ?></td>
+                    <td><?= $d['vehicle_registration'] ? h($d['vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
+                    <td><?php $clientLabel = $d['company_name'] ?: ($d['contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
                     <td><?= formatDate($d['purchase_date']) ?></td>
                     <td>
                         <a href="devices.php?action=view&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Podgląd"><i class="fas fa-eye"></i></a>
@@ -233,7 +243,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($devices)): ?>
-                <tr><td colspan="6" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
+                <tr><td colspan="8" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
                 <?php endif; ?>
             </tbody>
         </table>

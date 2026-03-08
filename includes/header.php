@@ -48,6 +48,7 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php"><i class="fas fa-list me-2"></i>Lista urządzeń</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php?action=add"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>device_import.php"><i class="fas fa-file-import me-2"></i>Importuj urządzenia</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>manufacturers.php"><i class="fas fa-industry me-2"></i>Producenci</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>models.php"><i class="fas fa-tags me-2"></i>Modele</a></li>

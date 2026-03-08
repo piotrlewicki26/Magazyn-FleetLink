@@ -291,6 +291,14 @@ include __DIR__ . '/includes/header.php';
                             <i class="fas fa-minus-circle"></i>
                         </button>
                         <?php endif; ?>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $inst['id'] ?>">
+                            <input type="hidden" name="device_id" value="<?= $inst['device_id'] ?? 0 ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń montaż #<?= $inst['id'] ?>? Urządzenie zostanie oznaczone jako sprawne."><i class="fas fa-trash"></i></button>
+                        </form>
                     </td>
                 </tr>
                 <?php endforeach; ?>
