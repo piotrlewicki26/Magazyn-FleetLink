@@ -15,6 +15,18 @@ $db = getDb();
 
 $year = (int)($_GET['year'] ?? date('Y'));
 
+// ─── Initialise all variables with safe defaults ──────────────────────────
+$installsByMonthData = array_fill(1, 12, 0);
+$servicesByMonthData = array_fill(1, 12, 0);
+$topDevices          = [];
+$servicesByType      = [];
+$topTechs            = [];
+$totalServiceRevenue = 0.0;
+$offerStatsData      = ['total' => 0, 'accepted' => 0, 'total_value' => 0, 'accepted_value' => 0];
+$deviceStatusMap     = [];
+$statsError          = null;
+
+try {
 // Installations by month
 $installsByMonth = $db->prepare("
     SELECT DATE_FORMAT(installation_date,'%m') as month, COUNT(*) as count
@@ -24,7 +36,6 @@ $installsByMonth = $db->prepare("
     ORDER BY month
 ");
 $installsByMonth->execute([$year]);
-$installsByMonthData = array_fill(1, 12, 0);
 foreach ($installsByMonth->fetchAll() as $row) {
     $installsByMonthData[(int)$row['month']] = (int)$row['count'];
 }
@@ -38,7 +49,6 @@ $servicesByMonth = $db->prepare("
     ORDER BY month
 ");
 $servicesByMonth->execute([$year]);
-$servicesByMonthData = array_fill(1, 12, 0);
 foreach ($servicesByMonth->fetchAll() as $row) {
     $servicesByMonthData[(int)$row['month']] = (int)$row['count'];
 }
@@ -82,23 +92,31 @@ $serviceRevenue->execute([$year]);
 $totalServiceRevenue = (float)($serviceRevenue->fetchColumn() ?? 0);
 
 // Offer statistics
-$offerStats = $db->prepare("
-    SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status='zaakceptowana' THEN 1 ELSE 0 END) as accepted,
-        SUM(total_gross) as total_value,
-        SUM(CASE WHEN status='zaakceptowana' THEN total_gross ELSE 0 END) as accepted_value
-    FROM offers WHERE YEAR(created_at)=?
-");
-$offerStats->execute([$year]);
-$offerStatsData = $offerStats->fetch();
+try {
+    $offerStats = $db->prepare("
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status='zaakceptowana' THEN 1 ELSE 0 END) as accepted,
+            SUM(total_gross) as total_value,
+            SUM(CASE WHEN status='zaakceptowana' THEN total_gross ELSE 0 END) as accepted_value
+        FROM offers WHERE YEAR(created_at)=?
+    ");
+    $offerStats->execute([$year]);
+    $offerRow = $offerStats->fetch();
+    if ($offerRow) $offerStatsData = $offerRow;
+} catch (Exception $e) {
+    // offers table may not exist – silently skip
+}
 
 // Active devices count
 $deviceStats = $db->query("
     SELECT status, COUNT(*) as count FROM devices GROUP BY status
 ")->fetchAll();
-$deviceStatusMap = [];
 foreach ($deviceStats as $row) $deviceStatusMap[$row['status']] = $row['count'];
+
+} catch (Exception $e) {
+    $statsError = $e->getMessage();
+}
 
 $activePage = 'statistics';
 $pageTitle = 'Statystyki';
@@ -116,6 +134,13 @@ include __DIR__ . '/includes/header.php';
         </select>
     </form>
 </div>
+
+<?php if ($statsError): ?>
+<div class="alert alert-warning">
+    <i class="fas fa-exclamation-triangle me-2"></i>
+    Nie udało się wczytać części danych statystycznych. Sprawdź, czy baza danych jest poprawnie skonfigurowana.
+</div>
+<?php endif; ?>
 
 <!-- Summary Stats -->
 <div class="row g-3 mb-4">
@@ -139,7 +164,7 @@ include __DIR__ . '/includes/header.php';
     </div>
     <div class="col-6 col-md-3">
         <div class="card text-center p-3">
-            <div class="h3 text-info fw-bold"><?= $offerStatsData['accepted'] ?? 0 ?> / <?= $offerStatsData['total'] ?? 0 ?></div>
+            <div class="h3 text-info fw-bold"><?= (int)($offerStatsData['accepted'] ?? 0) ?> / <?= (int)($offerStatsData['total'] ?? 0) ?></div>
             <div class="text-muted small">Ofert zaakceptowanych/wystawionych <?= $year ?></div>
         </div>
     </div>

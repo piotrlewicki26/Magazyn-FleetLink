@@ -136,6 +136,15 @@ $targetFields = [
     'notes'          => 'Uwagi',
 ];
 
+// Load available models for manual override selector
+$allModels = $db->query("
+    SELECT m.id, m.name, mf.name as manufacturer_name
+    FROM models m
+    JOIN manufacturers mf ON mf.id = m.manufacturer_id
+    WHERE m.active = 1
+    ORDER BY mf.name, m.name
+")->fetchAll();
+
 // ──────────────────────────────────────────────────────────────
 // Step routing
 // ──────────────────────────────────────────────────────────────
@@ -210,6 +219,12 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $idx = isset($_POST['map_' . $field]) ? (int)$_POST['map_' . $field] : -1;
         if ($idx >= 0) $mapping[$field] = $idx;
     }
+
+    // Manual model override (0 = no override)
+    $overrideModelId = (int)($_POST['override_model_id'] ?? 0);
+    $_SESSION['import_override_model_id'] = $overrideModelId > 0 ? $overrideModelId : 0;
+
+    // serial_number column is always required as the unique device identifier
     if (!isset($mapping['serial_number'])) {
         $error = 'Kolumna "Numer seryjny" jest wymagana.';
         $step  = 2;
@@ -229,9 +244,10 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'device_import.php');
     }
 
-    $headers = $_SESSION['import_headers'] ?? [];
-    $rows    = $_SESSION['import_rows']    ?? [];
-    $mapping = $_SESSION['import_mapping'] ?? [];
+    $headers         = $_SESSION['import_headers']          ?? [];
+    $rows            = $_SESSION['import_rows']              ?? [];
+    $mapping         = $_SESSION['import_mapping']           ?? [];
+    $overrideModelId = (int)($_SESSION['import_override_model_id'] ?? 0);
 
     if (empty($rows) || !isset($mapping['serial_number'])) {
         flashError('Brak danych sesji. Zacznij od nowa.');
@@ -312,17 +328,19 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
             continue;
         }
 
-        // Resolve model_id
-        $modelId   = null;
-        $modelName = $get('model');
-        $mfName    = $get('manufacturer');
-        if ($modelName !== '') {
-            try {
-                $modelId = $resolveModelId($mfName, $modelName);
-            } catch (Exception $e) {
-                $errors[] = "Wiersz " . ($rowIdx + 2) . ": " . $e->getMessage();
-                $skipped++;
-                continue;
+        // Resolve model_id — prefer manual override, then try columns
+        $modelId   = $overrideModelId > 0 ? $overrideModelId : null;
+        if (!$modelId) {
+            $modelName = $get('model');
+            $mfName    = $get('manufacturer');
+            if ($modelName !== '') {
+                try {
+                    $modelId = $resolveModelId($mfName, $modelName);
+                } catch (Exception $e) {
+                    $errors[] = "Wiersz " . ($rowIdx + 2) . ": " . $e->getMessage();
+                    $skipped++;
+                    continue;
+                }
             }
         }
         if (!$modelId) {
@@ -362,7 +380,7 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Clean up session
     @unlink($_SESSION['import_file'] ?? '');
-    unset($_SESSION['import_file'], $_SESSION['import_headers'], $_SESSION['import_rows'], $_SESSION['import_mapping']);
+    unset($_SESSION['import_file'], $_SESSION['import_headers'], $_SESSION['import_rows'], $_SESSION['import_mapping'], $_SESSION['import_override_model_id']);
 
     $importStats = compact('imported', 'skipped', 'errors');
 }
@@ -374,9 +392,10 @@ $activePage = 'devices';
 $pageTitle  = 'Import urządzeń';
 include __DIR__ . '/includes/header.php';
 
-$sessionHeaders = $_SESSION['import_headers'] ?? [];
-$sessionRows    = $_SESSION['import_rows']    ?? [];
-$sessionMapping = $_SESSION['import_mapping'] ?? [];
+$sessionHeaders      = $_SESSION['import_headers']          ?? [];
+$sessionRows         = $_SESSION['import_rows']              ?? [];
+$sessionMapping      = $_SESSION['import_mapping']           ?? [];
+$sessionOverrideId   = (int)($_SESSION['import_override_model_id'] ?? 0);
 ?>
 
 <div class="page-header">
@@ -502,9 +521,40 @@ elseif ($step === 2 && !empty($sessionHeaders)):
         <form method="POST">
             <?= csrfField() ?>
             <input type="hidden" name="step" value="2">
+
+            <!-- Manual model override -->
+            <div class="mb-4 p-3 rounded border" style="background:rgba(13,110,253,.05)">
+                <label class="form-label fw-semibold">
+                    <i class="fas fa-tag me-1 text-primary"></i>Przypisz model dla wszystkich urządzeń (opcjonalne)
+                </label>
+                <select name="override_model_id" id="overrideModelSelect" class="form-select form-select-sm">
+                    <option value="0">— nie przypisuj — użyj wartości z kolumn pliku —</option>
+                    <?php
+                    $curMf = '';
+                    foreach ($allModels as $m):
+                        if ($m['manufacturer_name'] !== $curMf) {
+                            if ($curMf) echo '</optgroup>';
+                            echo '<optgroup label="' . h($m['manufacturer_name']) . '">';
+                            $curMf = $m['manufacturer_name'];
+                        }
+                    ?>
+                    <option value="<?= $m['id'] ?>" <?= $sessionOverrideId === (int)$m['id'] ? 'selected' : '' ?>>
+                        <?= h($m['name']) ?>
+                    </option>
+                    <?php endforeach; if ($curMf) echo '</optgroup>'; ?>
+                </select>
+                <div class="form-text">
+                    Jeśli wybierzesz model tutaj, kolumny <em>Model</em> i <em>Producent</em> z pliku zostaną zignorowane —
+                    każde urządzenie zostanie przypisane do wybranego modelu.
+                </div>
+            </div>
+
             <div class="row g-3">
-                <?php foreach ($targetFields as $field => $label): ?>
-                <div class="col-md-6">
+                <?php foreach ($targetFields as $field => $label):
+                    $dimWhenOverride = in_array($field, ['model', 'manufacturer']);
+                    $colClass = $dimWhenOverride ? 'col-md-6 model-col' : 'col-md-6';
+                ?>
+                <div class="<?= $colClass ?>">
                     <label class="form-label small fw-semibold <?= $field === 'serial_number' ? 'required-star' : '' ?>">
                         <?= h($label) ?>
                     </label>
@@ -537,6 +587,22 @@ elseif ($step === 2 && !empty($sessionHeaders)):
         </form>
     </div>
 </div>
+<script>
+// Dim model/manufacturer column selectors when override model is chosen
+(function(){
+    const sel = document.getElementById('overrideModelSelect');
+    const modelCols = document.querySelectorAll('.model-col');
+    function toggle(){
+        const override = sel.value !== '0';
+        modelCols.forEach(function(el){
+            el.style.opacity = override ? '0.4' : '1';
+            el.querySelectorAll('select').forEach(function(s){ s.disabled = override; });
+        });
+    }
+    sel.addEventListener('change', toggle);
+    toggle();
+})();
+</script>
 
 <?php
 // ──────────────────────────────────────────────────────────────
@@ -544,7 +610,22 @@ elseif ($step === 2 && !empty($sessionHeaders)):
 // ──────────────────────────────────────────────────────────────
 elseif ($step === 3 && !empty($sessionRows) && !empty($sessionMapping)):
     $previewRows = array_slice($sessionRows, 0, 10);
+    // Resolve override model name for display
+    $overrideModelLabel = null;
+    if ($sessionOverrideId > 0) {
+        foreach ($allModels as $m) {
+            if ((int)$m['id'] === $sessionOverrideId) {
+                $overrideModelLabel = $m['manufacturer_name'] . ' ' . $m['name'];
+                break;
+            }
+        }
+    }
 ?>
+<?php if ($overrideModelLabel): ?>
+<div class="alert alert-info mb-3">
+    <i class="fas fa-tag me-2"></i>Model dla wszystkich urządzeń: <strong><?= h($overrideModelLabel) ?></strong>
+</div>
+<?php endif; ?>
 <div class="card mb-3">
     <div class="card-header"><i class="fas fa-table me-2"></i>Krok 3 — Podgląd importu (pierwsze <?= count($previewRows) ?> z <?= count($sessionRows) ?> wierszy)</div>
     <div class="table-responsive">

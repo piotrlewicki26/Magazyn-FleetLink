@@ -426,13 +426,23 @@ body {
 
 /* ── Footer ─────────────────────────────────────────────── */
 footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 999;
     background: var(--fl-footer-bg) !important;
     border-top: 1px solid var(--fl-border) !important;
-    margin-top: 3rem !important;
+    margin-top: 0 !important;
     transition: background var(--fl-transition), border-color var(--fl-transition);
 }
 
 footer .text-muted { color: var(--fl-text-muted) !important; }
+
+/* Leave room at the bottom of every page for the fixed footer */
+body {
+    padding-bottom: 60px;
+}
 
 /* ── Calendar ───────────────────────────────────────────── */
 #calendar {

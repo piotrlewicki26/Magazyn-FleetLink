@@ -271,7 +271,7 @@ include __DIR__ . '/includes/header.php';
                         </a>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="calendar.php" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center">
+                        <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
                             <i class="fas fa-calendar-alt fa-2x mb-2"></i>
                             <span>Kalendarz</span>
                         </a>
