@@ -15,9 +15,22 @@ $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
 
+// Creating new offers has been disabled
+if ($action === 'add') {
+    flashError('Tworzenie nowych ofert zostało wyłączone w tej wersji systemu.');
+    redirect(getBaseUrl() . 'offers.php');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) { flashError('Błąd bezpieczeństwa.'); redirect(getBaseUrl() . 'offers.php'); }
     $postAction  = sanitize($_POST['action'] ?? '');
+
+    // Block POST add as well
+    if ($postAction === 'add') {
+        flashError('Tworzenie nowych ofert zostało wyłączone w tej wersji systemu.');
+        redirect(getBaseUrl() . 'offers.php');
+    }
+
     $clientId    = (int)($_POST['client_id'] ?? 0) ?: null;
     $status      = sanitize($_POST['status'] ?? 'robocza');
     $validUntil  = sanitize($_POST['valid_until'] ?? '') ?: null;
@@ -161,8 +174,6 @@ include __DIR__ . '/includes/header.php';
     <h1><i class="fas fa-file-invoice-dollar me-2 text-primary"></i>Oferty</h1>
     <?php if ($action === 'list'): ?>
     <div class="d-flex gap-2">
-        <a href="offer_generator.php" class="btn btn-outline-info"><i class="fas fa-magic me-2"></i>Generator ofert GPS</a>
-        <a href="offers.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowa oferta</a>
     </div>
     <?php else: ?>
     <a href="offers.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>

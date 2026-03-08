@@ -1,8 +1,37 @@
 /* FleetLink Magazyn - Application JavaScript */
 
-// Auto-dismiss alerts after 5 seconds
+function initDarkMode() {
+    var btn = document.getElementById('darkModeToggle');
+    if (!btn) return;
+
+    function updateIcon(theme) {
+        var icon = btn.querySelector('i');
+        if (!icon) return;
+        if (theme === 'dark') {
+            icon.className = 'fas fa-sun';
+            btn.setAttribute('title', 'Tryb jasny');
+        } else {
+            icon.className = 'fas fa-moon';
+            btn.setAttribute('title', 'Tryb ciemny');
+        }
+    }
+
+    var current = document.documentElement.getAttribute('data-bs-theme') || 'light';
+    updateIcon(current);
+
+    btn.addEventListener('click', function () {
+        var next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-bs-theme', next);
+        localStorage.setItem('fl-theme', next);
+        updateIcon(next);
+    });
+}
+
+/* ── Main Init ─────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', function () {
-    // Auto-dismiss flash messages
+    initDarkMode();
+
+    // Auto-dismiss flash messages after 5 seconds
     setTimeout(function () {
         document.querySelectorAll('.alert.alert-success, .alert.alert-info').forEach(function (el) {
             if (el.querySelector('.btn-close')) {
@@ -27,11 +56,22 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
         new bootstrap.Tooltip(el);
     });
+
+    // Table search
+    var searchInput = document.getElementById('tableSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            var term = this.value.toLowerCase();
+            document.querySelectorAll('tbody tr').forEach(function (row) {
+                row.style.display = row.textContent.toLowerCase().includes(term) ? '' : 'none';
+            });
+        });
+    }
 });
 
-// Offer item management
+/* ── Offer Item Management ─────────────────────────────── */
 function initOfferItems() {
-    const container = document.getElementById('offerItems');
+    var container = document.getElementById('offerItems');
     if (!container) return;
 
     document.getElementById('addItemBtn')?.addEventListener('click', addOfferItem);
@@ -43,9 +83,9 @@ function initOfferItems() {
     });
     container.addEventListener('input', function (e) {
         if (e.target.matches('.item-qty, .item-price')) {
-            const row = e.target.closest('.offer-item-row');
-            const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
-            const price = parseFloat(row.querySelector('.item-price').value) || 0;
+            var row = e.target.closest('.offer-item-row');
+            var qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+            var price = parseFloat(row.querySelector('.item-price').value) || 0;
             row.querySelector('.item-total').value = (qty * price).toFixed(2);
             recalculateTotal();
         }
@@ -54,81 +94,44 @@ function initOfferItems() {
 }
 
 function addOfferItem() {
-    const container = document.getElementById('offerItems');
-    const idx = container.querySelectorAll('.offer-item-row').length;
-    const row = document.createElement('div');
+    var container = document.getElementById('offerItems');
+    var idx = container.querySelectorAll('.offer-item-row').length;
+    var row = document.createElement('div');
     row.className = 'offer-item-row row g-2 mb-2 align-items-center';
-    row.innerHTML = `
-        <div class="col-md-5">
-            <input type="text" name="items[${idx}][description]" class="form-control form-control-sm" placeholder="Opis pozycji" required>
-        </div>
-        <div class="col-md-1">
-            <input type="number" name="items[${idx}][quantity]" class="form-control form-control-sm item-qty" value="1" min="0.01" step="0.01">
-        </div>
-        <div class="col-md-1">
-            <input type="text" name="items[${idx}][unit]" class="form-control form-control-sm" value="szt" placeholder="j.m.">
-        </div>
-        <div class="col-md-2">
-            <input type="number" name="items[${idx}][unit_price]" class="form-control form-control-sm item-price" value="0.00" min="0" step="0.01">
-        </div>
-        <div class="col-md-2">
-            <input type="number" name="items[${idx}][total_price]" class="form-control form-control-sm item-total" value="0.00" readonly>
-        </div>
-        <div class="col-md-1">
-            <button type="button" class="btn btn-sm btn-outline-danger remove-item w-100"><i class="fas fa-times"></i></button>
-        </div>`;
+    row.innerHTML =
+        '<div class="col-md-5"><input type="text" name="items[' + idx + '][description]" class="form-control form-control-sm" placeholder="Opis pozycji" required></div>' +
+        '<div class="col-md-1"><input type="number" name="items[' + idx + '][quantity]" class="form-control form-control-sm item-qty" value="1" min="0.01" step="0.01"></div>' +
+        '<div class="col-md-1"><input type="text" name="items[' + idx + '][unit]" class="form-control form-control-sm" value="szt" placeholder="j.m."></div>' +
+        '<div class="col-md-2"><input type="number" name="items[' + idx + '][unit_price]" class="form-control form-control-sm item-price" value="0.00" min="0" step="0.01"></div>' +
+        '<div class="col-md-2"><input type="number" name="items[' + idx + '][total_price]" class="form-control form-control-sm item-total" value="0.00" readonly></div>' +
+        '<div class="col-md-1"><button type="button" class="btn btn-sm btn-outline-danger remove-item w-100"><i class="fas fa-times"></i></button></div>';
     container.appendChild(row);
 }
 
 function recalculateTotal() {
-    let total = 0;
+    var total = 0;
     document.querySelectorAll('.item-total').forEach(function (el) {
         total += parseFloat(el.value) || 0;
     });
-    const totalNetEl = document.getElementById('totalNet');
-    const totalGrossEl = document.getElementById('totalGross');
+    var totalNetEl = document.getElementById('totalNet');
+    var totalGrossEl = document.getElementById('totalGross');
     if (totalNetEl) {
         totalNetEl.textContent = total.toFixed(2).replace('.', ',') + ' zł';
-        const vatRate = parseFloat(document.getElementById('vatRate')?.value || 23) / 100;
-        const gross = total * (1 + vatRate);
+        var vatRateEl = document.getElementById('vatRate');
+        var vatRate = parseFloat(vatRateEl ? vatRateEl.value : 23) / 100;
+        var gross = total * (1 + vatRate);
         if (totalGrossEl) totalGrossEl.textContent = gross.toFixed(2).replace('.', ',') + ' zł';
     }
 }
 
-// Print document
-function printDocument() {
-    window.print();
-}
+/* ── Misc ──────────────────────────────────────────────── */
+function printDocument() { window.print(); }
 
-// Date range picker initialization
-function initDatePicker() {
-    const pickers = document.querySelectorAll('input[type="date"]');
-    pickers.forEach(function (picker) {
-        if (!picker.value && picker.dataset.default) {
-            picker.value = picker.dataset.default;
-        }
-    });
-}
-
-// AJAX helper
 function ajaxPost(url, data, callback) {
-    const formData = new FormData();
-    Object.keys(data).forEach(k => formData.append(k, data[k]));
+    var formData = new FormData();
+    Object.keys(data).forEach(function (k) { formData.append(k, data[k]); });
     fetch(url, { method: 'POST', body: formData })
-        .then(r => r.json())
+        .then(function (r) { return r.json(); })
         .then(callback)
-        .catch(err => console.error('AJAX error:', err));
+        .catch(function (err) { console.error('AJAX error:', err); });
 }
-
-// Search/filter tables
-document.addEventListener('DOMContentLoaded', function () {
-    const searchInput = document.getElementById('tableSearch');
-    if (searchInput) {
-        searchInput.addEventListener('input', function () {
-            const term = this.value.toLowerCase();
-            document.querySelectorAll('tbody tr').forEach(function (row) {
-                row.style.display = row.textContent.toLowerCase().includes(term) ? '' : 'none';
-            });
-        });
-    }
-});

@@ -58,27 +58,6 @@ $lowStock = $db->query("
     LIMIT 5
 ")->fetchAll();
 
-// Recent offers
-$recentOffers = $db->query("
-    SELECT o.id, o.offer_number, o.status, o.total_gross, o.created_at,
-           c.contact_name, c.company_name
-    FROM offers o
-    LEFT JOIN clients c ON c.id = o.client_id
-    ORDER BY o.created_at DESC
-    LIMIT 5
-")->fetchAll();
-
-// Monthly stats for chart
-$monthlyStats = $db->query("
-    SELECT 
-        DATE_FORMAT(installation_date, '%Y-%m') as month,
-        COUNT(*) as count
-    FROM installations
-    WHERE installation_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-    GROUP BY month
-    ORDER BY month
-")->fetchAll();
-
 $activePage = 'dashboard';
 $pageTitle = 'Panel główny';
 include __DIR__ . '/includes/header.php';
@@ -234,7 +213,7 @@ include __DIR__ . '/includes/header.php';
 
     <!-- Low Stock Alert -->
     <?php if (!empty($lowStock)): ?>
-    <div class="col-md-6">
+    <div class="col-12">
         <div class="card border-danger">
             <div class="card-header bg-danger bg-opacity-10 text-danger d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</span>
@@ -261,35 +240,6 @@ include __DIR__ . '/includes/header.php';
     </div>
     <?php endif; ?>
 
-    <!-- Recent Offers -->
-    <div class="col-md-<?= empty($lowStock) ? '12' : '6' ?>">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-file-invoice-dollar me-2 text-info"></i>Ostatnie oferty</span>
-                <a href="offers.php" class="btn btn-sm btn-outline-primary">Wszystkie</a>
-            </div>
-            <div class="table-responsive">
-                <?php if (empty($recentOffers)): ?>
-                <div class="p-3 text-muted text-center">Brak ofert</div>
-                <?php else: ?>
-                <table class="table table-sm table-hover mb-0">
-                    <tbody>
-                        <?php foreach ($recentOffers as $offer): ?>
-                        <tr>
-                            <td><a href="offers.php?action=view&id=<?= $offer['id'] ?>"><?= h($offer['offer_number']) ?></a></td>
-                            <td><?= h($offer['company_name'] ?: $offer['contact_name'] ?? '—') ?></td>
-                            <td><?= getStatusBadge($offer['status'], 'offer') ?></td>
-                            <td class="text-end fw-semibold"><?= formatMoney($offer['total_gross']) ?></td>
-                            <td class="text-muted small"><?= formatDate($offer['created_at']) ?></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
     <!-- Quick Actions -->
     <div class="col-12">
         <div class="card">
@@ -297,39 +247,39 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body">
                 <div class="row g-2">
                     <div class="col-6 col-md-2">
-                        <a href="devices.php?action=add" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center py-3">
-                            <i class="fas fa-plus-circle fa-2x mb-1"></i>
-                            <span class="small">Dodaj urządzenie</span>
+                        <a href="devices.php?action=add" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center">
+                            <i class="fas fa-plus-circle fa-2x mb-2"></i>
+                            <span>Dodaj urządzenie</span>
                         </a>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="installations.php?action=add" class="btn btn-outline-success w-100 d-flex flex-column align-items-center py-3">
-                            <i class="fas fa-car fa-2x mb-1"></i>
-                            <span class="small">Nowy montaż</span>
+                        <a href="installations.php?action=add" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center">
+                            <i class="fas fa-car fa-2x mb-2"></i>
+                            <span>Nowy montaż</span>
                         </a>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="services.php?action=add" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center py-3">
-                            <i class="fas fa-wrench fa-2x mb-1"></i>
-                            <span class="small">Nowy serwis</span>
+                        <a href="services.php?action=add" class="btn btn-outline-warning quick-action-btn w-100 d-flex flex-column align-items-center">
+                            <i class="fas fa-wrench fa-2x mb-2"></i>
+                            <span>Nowy serwis</span>
                         </a>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="offers.php?action=add" class="btn btn-outline-info w-100 d-flex flex-column align-items-center py-3">
-                            <i class="fas fa-file-invoice fa-2x mb-1"></i>
-                            <span class="small">Nowa oferta</span>
+                        <a href="clients.php?action=add" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center">
+                            <i class="fas fa-user-plus fa-2x mb-2"></i>
+                            <span>Nowy klient</span>
                         </a>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="clients.php?action=add" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center py-3">
-                            <i class="fas fa-user-plus fa-2x mb-1"></i>
-                            <span class="small">Nowy klient</span>
+                        <a href="calendar.php" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center">
+                            <i class="fas fa-calendar-alt fa-2x mb-2"></i>
+                            <span>Kalendarz</span>
                         </a>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="calendar.php" class="btn btn-outline-dark w-100 d-flex flex-column align-items-center py-3">
-                            <i class="fas fa-calendar-alt fa-2x mb-1"></i>
-                            <span class="small">Kalendarz</span>
+                        <a href="statistics.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
+                            <i class="fas fa-chart-bar fa-2x mb-2"></i>
+                            <span>Statystyki</span>
                         </a>
                     </div>
                 </div>

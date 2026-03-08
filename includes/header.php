@@ -16,13 +16,17 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= h($pageTitle) ?></title>
+    <!-- Apply saved theme before render to avoid flash -->
+    <script>
+        (function(){var t=localStorage.getItem('fl-theme')||'light';document.documentElement.setAttribute('data-bs-theme',t);})();
+    </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css">
     <link rel="stylesheet" href="<?= getBaseUrl() ?>assets/css/style.css">
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top shadow-sm">
+<nav class="navbar navbar-expand-lg navbar-dark sticky-top">
     <div class="container-fluid">
         <a class="navbar-brand fw-bold" href="<?= getBaseUrl() ?>dashboard.php">
             <i class="fas fa-satellite-dish me-2"></i>FleetLink
@@ -72,13 +76,12 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['clients','offers','offer_generator']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['clients','offers']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
                         <i class="fas fa-file-contract me-1"></i>CRM
                     </a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>clients.php"><i class="fas fa-users me-2"></i>Klienci</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offers.php"><i class="fas fa-file-invoice-dollar me-2"></i>Oferty</a></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offer_generator.php"><i class="fas fa-magic me-2"></i>Generator ofert GPS</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>contracts.php"><i class="fas fa-file-signature me-2"></i>Umowy</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php"><i class="fas fa-clipboard-check me-2"></i>Protokoły</a></li>
                     </ul>
@@ -101,7 +104,13 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                 </li>
                 <?php endif; ?>
             </ul>
-            <ul class="navbar-nav ms-auto">
+            <ul class="navbar-nav ms-auto align-items-center gap-2">
+                <!-- Dark mode toggle -->
+                <li class="nav-item">
+                    <button id="darkModeToggle" title="Tryb ciemny" aria-label="Przełącz tryb kolorów">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </li>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
                         <i class="fas fa-user-circle me-1"></i><?= h($currentUser['name'] ?? 'Użytkownik') ?>

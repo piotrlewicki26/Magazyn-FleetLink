@@ -193,7 +193,6 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="card-footer d-flex gap-2 flex-wrap">
                 <a href="clients.php?action=edit&id=<?= $client['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
-                <a href="offers.php?action=add&client=<?= $client['id'] ?>" class="btn btn-sm btn-success"><i class="fas fa-file-invoice me-1"></i>Nowa oferta</a>
                 <a href="vehicles.php?action=add&client=<?= $client['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-car me-1"></i>Dodaj pojazd</a>
             </div>
         </div>
