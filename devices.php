@@ -83,9 +83,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $delDevice = $delRow->fetch();
         try {
             $db->prepare("DELETE FROM devices WHERE id=?")->execute([$delId]);
-            // If device was in stock ('nowy'), reduce inventory
-            if ($delDevice && $delDevice['status'] === 'nowy') {
-                adjustInventoryForStatusChange($db, $delDevice['model_id'], 'nowy', 'wycofany');
+            // If device was in stock ('nowy' or 'sprawny'), reduce inventory
+            if ($delDevice) {
+                adjustInventoryForStatusChange($db, $delDevice['model_id'], $delDevice['status'], 'wycofany');
             }
             flashSuccess('Urządzenie zostało usunięte.');
         } catch (PDOException $e) {

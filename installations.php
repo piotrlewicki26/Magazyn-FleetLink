@@ -48,43 +48,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'add') {
-        // New multi-device add flow
-        $vehicleRegistration = strtoupper(trim(sanitize($_POST['vehicle_registration'] ?? '')));
+        // Per-row arrays
+        $deviceModes          = is_array($_POST['device_mode'] ?? null)          ? $_POST['device_mode']          : ['auto'];
+        $modelIds             = is_array($_POST['model_id'] ?? null)             ? $_POST['model_id']             : [0];
+        $deviceIdsManual      = is_array($_POST['device_id_manual'] ?? null)     ? $_POST['device_id_manual']     : [0];
+        $vehicleRegistrations = is_array($_POST['vehicle_registration'] ?? null) ? $_POST['vehicle_registration'] : [''];
 
-        if (empty($vehicleRegistration) || empty($installationDate)) {
-            flashError('Numer rejestracyjny pojazdu i data montażu są wymagane.');
+        if (empty($deviceModes) || empty($installationDate)) {
+            flashError('Wybierz co najmniej jedno urządzenie i podaj datę montażu.');
             redirect(getBaseUrl() . 'installations.php?action=add');
-        }
-
-        // Arrays of per-device row data
-        // device_mode[] values are validated to 'auto'/'manual' in the loop; model/device IDs are cast to int.
-        $deviceModes     = is_array($_POST['device_mode'] ?? null)      ? $_POST['device_mode']      : ['auto'];
-        $modelIds        = is_array($_POST['model_id'] ?? null)         ? $_POST['model_id']         : [0];
-        $deviceIdsManual = is_array($_POST['device_id_manual'] ?? null) ? $_POST['device_id_manual'] : [0];
-        // location_in_vehicle is a single shared field (next to Status) applied to all devices in this batch
-
-        if (empty($deviceModes)) {
-            flashError('Wybierz co najmniej jedno urządzenie.');
-            redirect(getBaseUrl() . 'installations.php?action=add');
-        }
-
-        // Find or auto-create vehicle by registration plate
-        $vStmt = $db->prepare("SELECT id FROM vehicles WHERE registration=? LIMIT 1");
-        $vStmt->execute([$vehicleRegistration]);
-        $vRow = $vStmt->fetch();
-        if ($vRow) {
-            $vehicleId = $vRow['id'];
-        } else {
-            $db->prepare("INSERT INTO vehicles (registration, client_id) VALUES (?,?)")
-               ->execute([$vehicleRegistration, $clientId]);
-            $vehicleId = $db->lastInsertId();
         }
 
         $allocatedDeviceIds = []; // track devices allocated in this batch
+        $vehicleCache       = []; // registration plate → vehicle_id (avoid duplicate INSERTs)
         $db->beginTransaction();
         try {
             foreach ($deviceModes as $idx => $mode) {
                 $mode = ($mode === 'manual') ? 'manual' : 'auto';
+
+                // Per-row vehicle registration
+                $reg = strtoupper(trim(sanitize($vehicleRegistrations[$idx] ?? '')));
+                if (empty($reg)) {
+                    throw new Exception('Wiersz ' . ($idx + 1) . ': numer rejestracyjny pojazdu jest wymagany.');
+                }
+
+                // Find or auto-create vehicle for this row
+                if (isset($vehicleCache[$reg])) {
+                    $rowVehicleId = $vehicleCache[$reg];
+                } else {
+                    $vStmt = $db->prepare("SELECT id FROM vehicles WHERE registration=? LIMIT 1");
+                    $vStmt->execute([$reg]);
+                    $vRow = $vStmt->fetch();
+                    if ($vRow) {
+                        $rowVehicleId = $vRow['id'];
+                    } else {
+                        $db->prepare("INSERT INTO vehicles (registration, client_id) VALUES (?,?)")
+                           ->execute([$reg, $clientId]);
+                        $rowVehicleId = $db->lastInsertId();
+                    }
+                    $vehicleCache[$reg] = $rowVehicleId;
+                }
 
                 if ($mode === 'manual') {
                     $dId = (int)($deviceIdsManual[$idx] ?? 0);
@@ -127,9 +130,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Wiersz ' . ($idx + 1) . ': urządzenie jest już aktywnie zamontowane.');
                 }
 
-                // Create installation record ($locationInVehicle is shared across all devices in this batch)
+                // Create installation record
                 $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, notes) VALUES (?,?,?,?,?,?,?,?,?)")
-                   ->execute([$dId, $vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes]);
+                   ->execute([$dId, $rowVehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes]);
 
                 // Update device status + auto inventory adjust
                 $oldStatus = $devRow['status'];
@@ -154,8 +157,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $devId = (int)($_POST['device_id'] ?? 0);
         $db->beginTransaction();
         try {
+            // Fetch device info inside transaction to avoid stale data
+            $devInfoStmt = $db->prepare("SELECT model_id, status FROM devices WHERE id=? FOR UPDATE");
+            $devInfoStmt->execute([$devId]);
+            $devInfo = $devInfoStmt->fetch();
             $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE id=?")->execute([$uninstDate, $instId]);
             $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$devId]);
+            // Restore device to stock
+            if ($devInfo) {
+                adjustInventoryForStatusChange($db, $devInfo['model_id'], $devInfo['status'], 'sprawny');
+            }
             $db->commit();
             flashSuccess('Demontaż zarejestrowany.');
         } catch (Exception $e) {
@@ -174,11 +185,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($postAction === 'delete') {
         $delId = (int)($_POST['id'] ?? 0);
         $devId = (int)($_POST['device_id'] ?? 0);
+        $db->beginTransaction();
         try {
+            // Fetch device info inside transaction to avoid stale data
+            if ($devId) {
+                $delDevStmt = $db->prepare("SELECT model_id, status FROM devices WHERE id=? FOR UPDATE");
+                $delDevStmt->execute([$devId]);
+                $delDevInfo = $delDevStmt->fetch();
+            } else {
+                $delDevInfo = false;
+            }
             $db->prepare("DELETE FROM installations WHERE id=?")->execute([$delId]);
-            if ($devId) $db->prepare("UPDATE devices SET status='sprawny' WHERE id=? AND status='zamontowany'")->execute([$devId]);
+            if ($devId) {
+                $db->prepare("UPDATE devices SET status='sprawny' WHERE id=? AND status='zamontowany'")->execute([$devId]);
+                // Restore device to stock
+                if ($delDevInfo) {
+                    adjustInventoryForStatusChange($db, $delDevInfo['model_id'], $delDevInfo['status'], 'sprawny');
+                }
+            }
+            $db->commit();
             flashSuccess('Montaż usunięty.');
         } catch (PDOException $e) {
+            $db->rollBack();
             flashError('Nie można usunąć — powiązane rekordy istnieją.');
         }
         redirect(getBaseUrl() . 'installations.php');
@@ -434,16 +462,6 @@ include __DIR__ . '/includes/header.php';
                 <div class="col-12">
                     <label class="form-label required-star">Urządzenia GPS do montażu</label>
 
-                    <!-- Vehicle registration shared for entire batch -->
-                    <div class="mb-3">
-                        <label class="form-label required-star" for="vehicle_registration_input">Numer rejestracyjny pojazdu</label>
-                        <input type="text" id="vehicle_registration_input" name="vehicle_registration" class="form-control"
-                               required placeholder="np. KR 12345"
-                               value="<?= h($_POST['vehicle_registration'] ?? '') ?>"
-                               style="text-transform:uppercase;max-width:250px">
-                        <div class="form-text">Pojazd zostanie automatycznie zarejestrowany jeśli nie istnieje.</div>
-                    </div>
-
                     <?php if (empty($availableModels) && empty($availableDevices)): ?>
                     <div class="alert alert-warning py-2 mb-2">
                         <i class="fas fa-exclamation-triangle me-2"></i>Brak dostępnych urządzeń w magazynie.
@@ -500,6 +518,12 @@ include __DIR__ . '/includes/header.php';
                                         </option>
                                         <?php endforeach; if ($currentGroup) echo '</optgroup>'; ?>
                                     </select>
+                                </div>
+                                <div class="col-auto">
+                                    <input type="text" name="vehicle_registration[0]" class="form-control form-control-sm"
+                                           required placeholder="Nr rej. pojazdu"
+                                           aria-label="Numer rejestracyjny pojazdu"
+                                           style="text-transform:uppercase;min-width:130px">
                                 </div>
                                 <div class="col-auto">
                                     <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" style="display:none"
@@ -732,6 +756,12 @@ function showUninstallModal(id, deviceId, serial) {
                     <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?><?= $dev['sim_number'] ? ' (' . h($dev['sim_number']) . ')' : '' ?></option>
                     <?php endforeach; if ($tplGroup) echo '</optgroup>'; ?>
                 </select>
+            </div>
+            <div class="col-auto">
+                <input type="text" name="vehicle_registration[__IDX__]" class="form-control form-control-sm"
+                       required placeholder="Nr rej. pojazdu"
+                       aria-label="Numer rejestracyjny pojazdu"
+                       style="text-transform:uppercase;min-width:130px">
             </div>
             <div class="col-auto">
                 <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn"

@@ -341,20 +341,24 @@ function getDashboardStats() {
 
 /**
  * Automatically adjust the inventory count for a model when a device's
- * status transitions in/out of 'nowy' (stock).
+ * status transitions in/out of the "in-stock" statuses ('nowy', 'sprawny').
  *
  * Rules:
- *   old='nowy' → new≠'nowy' : stock -1  (device leaves stock)
- *   old≠'nowy' → new='nowy' : stock +1  (device returns to stock)
- *   no transition            : no change
+ *   old ∈ {nowy,sprawny} → new ∉ {nowy,sprawny} : stock -1  (device leaves stock)
+ *   old ∉ {nowy,sprawny} → new ∈ {nowy,sprawny} : stock +1  (device returns to stock)
+ *   no transition                                 : no change
  */
 function adjustInventoryForStatusChange(PDO $db, int $modelId, string $oldStatus, string $newStatus): void {
     if ($oldStatus === $newStatus) return;
 
+    $inStock    = ['nowy', 'sprawny'];
+    $wasInStock = in_array($oldStatus, $inStock, true);
+    $isInStock  = in_array($newStatus, $inStock, true);
+
     $delta = 0;
-    if ($oldStatus === 'nowy' && $newStatus !== 'nowy') {
+    if ($wasInStock && !$isInStock) {
         $delta = -1; // leaving stock
-    } elseif ($oldStatus !== 'nowy' && $newStatus === 'nowy') {
+    } elseif (!$wasInStock && $isInStock) {
         $delta = 1;  // returning to stock
     }
     if ($delta === 0) return;
