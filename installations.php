@@ -25,8 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $installationDate   = sanitize($_POST['installation_date'] ?? '');
     $uninstallationDate = sanitize($_POST['uninstallation_date'] ?? '') ?: null;
     $status             = sanitize($_POST['status'] ?? 'aktywna');
-    // $locationInVehicle is used for the 'edit' action (single string field).
-    // For 'add', location_in_vehicle[] is an array processed per device row.
+    // $locationInVehicle is a single string used for both 'add' (shared across all devices in batch) and 'edit'.
     $locationInVehicle  = is_array($_POST['location_in_vehicle'] ?? null) ? '' : sanitize($_POST['location_in_vehicle'] ?? '');
     $notes              = sanitize($_POST['notes'] ?? '');
     $currentUser        = getCurrentUser();
@@ -59,10 +58,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Arrays of per-device row data
         // device_mode[] values are validated to 'auto'/'manual' in the loop; model/device IDs are cast to int.
-        $deviceModes     = is_array($_POST['device_mode'] ?? null)         ? $_POST['device_mode']         : ['auto'];
-        $modelIds        = is_array($_POST['model_id'] ?? null)            ? $_POST['model_id']            : [0];
-        $deviceIdsManual = is_array($_POST['device_id_manual'] ?? null)    ? $_POST['device_id_manual']    : [0];
-        $locationRows    = is_array($_POST['location_in_vehicle'] ?? null) ? $_POST['location_in_vehicle'] : [''];
+        $deviceModes     = is_array($_POST['device_mode'] ?? null)      ? $_POST['device_mode']      : ['auto'];
+        $modelIds        = is_array($_POST['model_id'] ?? null)         ? $_POST['model_id']         : [0];
+        $deviceIdsManual = is_array($_POST['device_id_manual'] ?? null) ? $_POST['device_id_manual'] : [0];
+        // location_in_vehicle is a single shared field (next to Status) applied to all devices in this batch
 
         if (empty($deviceModes)) {
             flashError('Wybierz co najmniej jedno urządzenie.');
@@ -85,8 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->beginTransaction();
         try {
             foreach ($deviceModes as $idx => $mode) {
-                $mode   = ($mode === 'manual') ? 'manual' : 'auto';
-                $locRow = sanitize($locationRows[$idx] ?? '');
+                $mode = ($mode === 'manual') ? 'manual' : 'auto';
 
                 if ($mode === 'manual') {
                     $dId = (int)($deviceIdsManual[$idx] ?? 0);
@@ -129,9 +127,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Wiersz ' . ($idx + 1) . ': urządzenie jest już aktywnie zamontowane.');
                 }
 
-                // Create installation record
+                // Create installation record ($locationInVehicle is shared across all devices in this batch)
                 $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, notes) VALUES (?,?,?,?,?,?,?,?,?)")
-                   ->execute([$dId, $vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locRow, $notes]);
+                   ->execute([$dId, $vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes]);
 
                 // Update device status + auto inventory adjust
                 $oldStatus = $devRow['status'];
@@ -420,7 +418,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php elseif ($action === 'add' || $action === 'edit'): ?>
-<div class="card" style="max-width:700px">
+<div class="card" style="max-width:1050px">
     <div class="card-header">
         <i class="fas fa-<?= $action === 'add' ? 'plus' : 'edit' ?> me-2"></i>
         <?= $action === 'add' ? 'Nowy montaż' : 'Edytuj montaż' ?>
@@ -432,20 +430,20 @@ include __DIR__ . '/includes/header.php';
             <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $installation['id'] ?>"><input type="hidden" name="vehicle_id" value="<?= $installation['vehicle_id'] ?? 0 ?>"><?php endif; ?>
             <div class="row g-3">
                 <?php if ($action === 'add'): ?>
-                <!-- Vehicle registration -->
-                <div class="col-md-6">
-                    <label class="form-label required-star">Numer rejestracyjny pojazdu</label>
-                    <input type="text" name="vehicle_registration" class="form-control"
-                           required placeholder="np. KR 12345"
-                           value="<?= h($_POST['vehicle_registration'] ?? '') ?>"
-                           style="text-transform:uppercase">
-                    <div class="form-text">Pojazd zostanie automatycznie zarejestrowany jeśli nie istnieje.</div>
-                </div>
-                <div class="col-md-6"></div>
-
                 <!-- Multi-device selection rows -->
                 <div class="col-12">
                     <label class="form-label required-star">Urządzenia GPS do montażu</label>
+
+                    <!-- Vehicle registration shared for entire batch -->
+                    <div class="mb-3">
+                        <label class="form-label required-star" for="vehicle_registration_input">Numer rejestracyjny pojazdu</label>
+                        <input type="text" id="vehicle_registration_input" name="vehicle_registration" class="form-control"
+                               required placeholder="np. KR 12345"
+                               value="<?= h($_POST['vehicle_registration'] ?? '') ?>"
+                               style="text-transform:uppercase;max-width:250px">
+                        <div class="form-text">Pojazd zostanie automatycznie zarejestrowany jeśli nie istnieje.</div>
+                    </div>
+
                     <?php if (empty($availableModels) && empty($availableDevices)): ?>
                     <div class="alert alert-warning py-2 mb-2">
                         <i class="fas fa-exclamation-triangle me-2"></i>Brak dostępnych urządzeń w magazynie.
@@ -502,10 +500,6 @@ include __DIR__ . '/includes/header.php';
                                         </option>
                                         <?php endforeach; if ($currentGroup) echo '</optgroup>'; ?>
                                     </select>
-                                </div>
-                                <div class="col-md-3">
-                                    <input type="text" name="location_in_vehicle[0]" class="form-control form-control-sm"
-                                           placeholder="Miejsce montażu (opcjonalnie)">
                                 </div>
                                 <div class="col-auto">
                                     <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" style="display:none"
@@ -567,12 +561,10 @@ include __DIR__ . '/includes/header.php';
                         <option value="anulowana" <?= ($installation['status'] ?? '') === 'anulowana' ? 'selected' : '' ?>>Anulowana</option>
                     </select>
                 </div>
-                <?php if ($action === 'edit'): ?>
                 <div class="col-md-6">
                     <label class="form-label">Miejsce montażu w pojeździe</label>
                     <input type="text" name="location_in_vehicle" class="form-control" value="<?= h($installation['location_in_vehicle'] ?? '') ?>" placeholder="np. pod deską rozdzielczą">
                 </div>
-                <?php endif; ?>
                 <div class="col-12">
                     <label class="form-label">Uwagi</label>
                     <textarea name="notes" class="form-control" rows="3"><?= h($installation['notes'] ?? '') ?></textarea>
@@ -740,10 +732,6 @@ function showUninstallModal(id, deviceId, serial) {
                     <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?><?= $dev['sim_number'] ? ' (' . h($dev['sim_number']) . ')' : '' ?></option>
                     <?php endforeach; if ($tplGroup) echo '</optgroup>'; ?>
                 </select>
-            </div>
-            <div class="col-md-3">
-                <input type="text" name="location_in_vehicle[__IDX__]" class="form-control form-control-sm"
-                       placeholder="Miejsce montażu (opcjonalnie)">
             </div>
             <div class="col-auto">
                 <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn"
