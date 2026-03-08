@@ -550,6 +550,10 @@ body {
     background-clip: text;
 }
 
+.login-logo-img {
+    max-height: 64px;
+}
+
 /* ── Quick Action Buttons (dashboard) ───────────────────── */
 .quick-action-btn {
     border-radius: var(--fl-radius);

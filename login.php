@@ -75,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="login-card card mx-auto">
         <div class="card-body p-5">
             <div class="text-center mb-4">
-                <i class="fas fa-satellite-dish login-logo mb-3"></i>
+                <img src="<?= getBaseUrl() ?>assets/fleetlink-logo-v2.png" alt="FleetLink" class="login-logo-img mb-3">
                 <h2 class="fw-bold">FleetLink Magazyn</h2>
                 <p class="text-muted">System zarządzania urządzeniami GPS</p>
             </div>
