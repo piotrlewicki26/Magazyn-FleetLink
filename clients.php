@@ -41,6 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'clients.php');
 
     } elseif ($postAction === 'edit') {
+        if (isTechnician()) { flashError('Rola Technik nie może edytować klientów.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . (int)($_POST['id'] ?? 0)); }
         $editId = (int)($_POST['id'] ?? 0);
         if (empty($contactName) || !$editId) { flashError('Dane są nieprawidłowe.'); redirect(getBaseUrl() . 'clients.php?action=edit&id=' . $editId); }
         $db->prepare("UPDATE clients SET company_name=?, contact_name=?, email=?, phone=?, address=?, city=?, postal_code=?, nip=?, notes=?, active=? WHERE id=?")
@@ -49,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'clients.php');
 
     } elseif ($postAction === 'delete') {
+        if (isTechnician()) { flashError('Rola Technik nie może usuwać klientów.'); redirect(getBaseUrl() . 'clients.php'); }
         $delId = (int)($_POST['id'] ?? 0);
         try {
             $db->prepare("DELETE FROM clients WHERE id=?")->execute([$delId]);
@@ -67,6 +69,11 @@ if (in_array($action, ['edit','view']) && $id) {
     $client = $stmt->fetch();
     if (!$client) { flashError('Klient nie istnieje.'); redirect(getBaseUrl() . 'clients.php'); }
 }
+// Technician can only view clients
+if (isTechnician() && in_array($action, ['add','edit'])) {
+    flashError('Rola Technik nie ma dostępu do tej operacji.');
+    redirect(getBaseUrl() . 'clients.php');
+}
 
 $clients = [];
 if ($action === 'list') {
@@ -84,27 +91,28 @@ if ($action === 'list') {
     $clients = $stmt->fetchAll();
 }
 
-// For view - get vehicles and related data
-$clientVehicles = [];
+// For view - get installed devices instead of vehicles
+$clientInstalledDevices = [];
 $clientInstallations = [];
 if ($action === 'view' && $client) {
-    $clientVehicles = $db->prepare("SELECT * FROM vehicles WHERE client_id=? ORDER BY registration")->execute([$id]) ? [] : [];
-    $stmt = $db->prepare("SELECT * FROM vehicles WHERE client_id=? ORDER BY registration");
-    $stmt->execute([$id]);
-    $clientVehicles = $stmt->fetchAll();
-
-    $stmt = $db->prepare("
-        SELECT i.*, v.registration, d.serial_number, m.name as model_name
-        FROM installations i
-        JOIN vehicles v ON v.id=i.vehicle_id
-        JOIN devices d ON d.id=i.device_id
-        JOIN models m ON m.id=d.model_id
-        WHERE i.client_id=?
-        ORDER BY i.installation_date DESC
-        LIMIT 10
-    ");
-    $stmt->execute([$id]);
-    $clientInstallations = $stmt->fetchAll();
+    // Fetch installed devices (active installations) for this client
+    try {
+        $stmt = $db->prepare("
+            SELECT i.id as installation_id, i.status,
+                   d.id as device_id, d.serial_number, d.imei,
+                   m.name as model_name, mf.name as manufacturer_name,
+                   v.registration
+            FROM installations i
+            JOIN devices d ON d.id = i.device_id
+            JOIN models m ON m.id = d.model_id
+            JOIN manufacturers mf ON mf.id = m.manufacturer_id
+            JOIN vehicles v ON v.id = i.vehicle_id
+            WHERE i.client_id = ?
+            ORDER BY i.status = 'aktywna' DESC, i.installation_date DESC
+        ");
+        $stmt->execute([$id]);
+        $clientInstalledDevices = $stmt->fetchAll();
+    } catch (Exception $e) { $clientInstalledDevices = []; }
 }
 
 $activePage = 'clients';
@@ -115,7 +123,9 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-users me-2 text-primary"></i>Klienci</h1>
     <?php if ($action === 'list'): ?>
+    <?php if (!isTechnician()): ?>
     <a href="clients.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Dodaj klienta</a>
+    <?php endif; ?>
     <?php else: ?>
     <a href="clients.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -154,6 +164,7 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $c['offer_count'] ?></td>
                     <td>
                         <a href="clients.php?action=view&id=<?= $c['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <?php if (!isTechnician()): ?>
                         <a href="clients.php?action=edit&id=<?= $c['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
@@ -162,6 +173,7 @@ include __DIR__ . '/includes/header.php';
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
                                     data-confirm="Usuń klienta <?= h($c['contact_name']) ?>?"><i class="fas fa-trash"></i></button>
                         </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -192,50 +204,32 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
             <div class="card-footer d-flex gap-2 flex-wrap">
+                <?php if (!isTechnician()): ?>
                 <a href="clients.php?action=edit&id=<?= $client['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
-                <a href="vehicles.php?action=add&client=<?= $client['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-car me-1"></i>Dodaj pojazd</a>
+                <?php endif; ?>
             </div>
         </div>
     </div>
     <div class="col-md-8">
         <div class="card mb-3">
-            <div class="card-header d-flex justify-content-between">
-                <span><i class="fas fa-car me-2 text-primary"></i>Pojazdy</span>
-                <a href="vehicles.php?action=add&client=<?= $client['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-plus me-1"></i>Dodaj</a>
+            <div class="card-header">
+                <i class="fas fa-microchip me-2 text-primary"></i>Zamontowane urządzenia
             </div>
             <div class="table-responsive">
                 <table class="table table-sm mb-0">
-                    <thead><tr><th>Rejestracja</th><th>Marka / Model</th><th>Rok</th><th>VIN</th><th></th></tr></thead>
+                    <thead><tr><th>L.p</th><th>Model</th><th>Numer seryjny</th><th>IMEI</th><th>Nr rejestracyjny</th><th>Status</th></tr></thead>
                     <tbody>
-                        <?php foreach ($clientVehicles as $v): ?>
+                        <?php foreach ($clientInstalledDevices as $lp => $dev): ?>
                         <tr>
-                            <td class="fw-bold"><?= h($v['registration']) ?></td>
-                            <td><?= h($v['make'] . ' ' . $v['model_name']) ?></td>
-                            <td><?= h($v['year'] ?? '—') ?></td>
-                            <td><?= h($v['vin'] ?? '—') ?></td>
-                            <td><a href="vehicles.php?action=edit&id=<?= $v['id'] ?>" class="btn btn-xs btn-link p-0"><i class="fas fa-edit"></i></a></td>
+                            <td><?= $lp + 1 ?></td>
+                            <td><?= h(trim($dev['manufacturer_name'] . ' ' . $dev['model_name'])) ?></td>
+                            <td><a href="devices.php?action=view&id=<?= $dev['device_id'] ?>"><?= h($dev['serial_number']) ?></a></td>
+                            <td class="text-muted small"><?= h($dev['imei'] ?? '—') ?></td>
+                            <td><?= h($dev['registration']) ?></td>
+                            <td><?= getStatusBadge($dev['status'], 'installation') ?></td>
                         </tr>
                         <?php endforeach; ?>
-                        <?php if (empty($clientVehicles)): ?><tr><td colspan="5" class="text-muted text-center">Brak pojazdów</td></tr><?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <div class="card">
-            <div class="card-header"><i class="fas fa-car me-2 text-success"></i>Ostatnie montaże</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <thead><tr><th>Pojazd</th><th>Urządzenie</th><th>Data montażu</th><th>Status</th></tr></thead>
-                    <tbody>
-                        <?php foreach ($clientInstallations as $inst): ?>
-                        <tr>
-                            <td><?= h($inst['registration']) ?></td>
-                            <td><a href="devices.php?action=view&id=<?= $inst['device_id'] ?>"><?= h($inst['serial_number']) ?></a> <?= h($inst['model_name']) ?></td>
-                            <td><?= formatDate($inst['installation_date']) ?></td>
-                            <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
-                        </tr>
-                        <?php endforeach; ?>
-                        <?php if (empty($clientInstallations)): ?><tr><td colspan="4" class="text-muted text-center">Brak montaży</td></tr><?php endif; ?>
+                        <?php if (empty($clientInstalledDevices)): ?><tr><td colspan="6" class="text-muted text-center">Brak zamontowanych urządzeń</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>

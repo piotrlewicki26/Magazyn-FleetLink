@@ -143,6 +143,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (PDOException $e) { flashError('Nie można usunąć — akcesorium jest powiązane z wydaniami.'); }
         redirect(getBaseUrl() . 'inventory.php?action=accessories');
 
+    } elseif ($postAction === 'accessory_batch_delete') {
+        if (!isAdmin()) { flashError('Usuwanie wpisów historii jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        $rawIds = sanitize($_POST['issue_ids'] ?? '');
+        $ids = array_filter(array_map('intval', explode(',', $rawIds)));
+        if (!empty($ids)) {
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $db->prepare("DELETE FROM accessory_issues WHERE id IN ($ph)")->execute($ids);
+            flashSuccess('Usunięto ' . count($ids) . ' wpis(ów) z historii.');
+        }
+        redirect(getBaseUrl() . 'inventory.php?action=accessories');
+
     } elseif ($postAction === 'accessory_issue_delete') {
         if (!isAdmin()) { flashError('Usuwanie wpisów historii jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
         $issueId = (int)($_POST['issue_id'] ?? 0);
@@ -249,6 +260,7 @@ if ($action === 'accessories') {
 
 // Accessories issue history
 $accHistory = [];
+$accHistoryGroups = [];
 if ($action === 'accessories') {
     try {
         $accHistory = $db->query("
@@ -259,10 +271,16 @@ if ($action === 'accessories') {
             JOIN accessories a ON a.id = ai.accessory_id
             JOIN users u ON u.id = ai.user_id
             LEFT JOIN installations i ON i.id = ai.installation_id
-            ORDER BY ai.issued_at DESC
+            ORDER BY ai.issued_at DESC, ai.id DESC
             LIMIT 200
         ")->fetchAll();
     } catch (Exception $e) { $accHistory = []; }
+
+    // Group rows by (user_id + installation_id + issued_at) — items from the same multi-pickup share these values
+    foreach ($accHistory as $ah) {
+        $batchKey = $ah['user_id'] . '|' . ($ah['installation_id'] ?? 'NULL') . '|' . $ah['issued_at'];
+        $accHistoryGroups[$batchKey][] = $ah;
+    }
 }
 
 if ($action === 'sim_cards') {
@@ -325,6 +343,7 @@ $pageTitle = 'Stan magazynowy';
 include __DIR__ . '/includes/header.php';
 ?>
 
+<?php if ($action !== 'wz_print'): ?>
 <div class="page-header">
     <h1><i class="fas fa-warehouse me-2 text-primary"></i>Stan magazynowy</h1>
     <div>
@@ -391,6 +410,7 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
         </div>
     </div>
 </div>
+<?php endif; // end $action !== 'wz_print' ?>
 
 <?php if ($action === 'list'): ?>
 <div class="card">
@@ -587,46 +607,125 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
     <div class="table-responsive">
         <table class="table table-sm mb-0">
             <thead>
-                <tr><th>Data pobrania</th><th>Akcesorium</th><th>Ilość</th><th>Zlecenie / Pobranie</th><th>Pobrał</th><th>Uwagi</th><th></th></tr>
+                <tr><th>Data pobrania</th><th>Akcesorium / Pozycje</th><th>Ilość</th><th>Zlecenie / Pobranie</th><th>Pobrał</th><th>Uwagi</th><th></th></tr>
             </thead>
             <tbody>
-                <?php foreach ($accHistory as $ah): ?>
-                <tr>
-                    <td class="text-muted small"><?= formatDateTime($ah['issued_at']) ?></td>
-                    <td class="fw-semibold"><?= h($ah['accessory_name']) ?></td>
-                    <td class="fw-bold"><?= (int)$ah['quantity'] ?> szt</td>
+                <?php foreach ($accHistoryGroups as $batchKey => $batchRows):
+                    $first = $batchRows[0];
+                    $isBatch = count($batchRows) > 1;
+                    $batchIds = implode(',', array_column($batchRows, 'id'));
+                    $totalQty = array_sum(array_column($batchRows, 'quantity'));
+                    $batchUid = 'batch_' . md5($batchKey);
+                ?>
+                <?php if ($isBatch): ?>
+                <!-- Batch header row -->
+                <tr class="table-light">
+                    <td class="text-muted small"><?= formatDateTime($first['issued_at']) ?></td>
                     <td>
-                        <?php if ($ah['inst_id']): ?>
-                        <a href="installations.php?action=view&id=<?= $ah['inst_id'] ?>"><?= h($ah['order_num']) ?></a>
+                        <span class="badge bg-primary me-1"><?= count($batchRows) ?> pozycje</span>
+                        <button type="button" class="btn btn-link btn-sm p-0 ms-1" onclick="toggleBatchHist('<?= $batchUid ?>', this)">
+                            <i class="fas fa-chevron-down"></i><span class="toggle-label"> rozwiń</span>
+                        </button>
+                        <div class="text-muted small mt-1"><?php
+                            $nameList = array_column($batchRows, 'accessory_name');
+                            $maxShow = 3;
+                            $shown = array_slice($nameList, 0, $maxShow);
+                            echo h(implode(', ', $shown));
+                            if (count($nameList) > $maxShow) echo ' <span class="text-secondary">+' . (count($nameList) - $maxShow) . ' więcej</span>';
+                        ?></div>
+                    </td>
+                    <td class="fw-bold"><?= $totalQty ?> szt</td>
+                    <td>
+                        <?php if ($first['inst_id']): ?>
+                        <a href="installations.php?action=view&id=<?= $first['inst_id'] ?>"><?= h($first['order_num']) ?></a>
                         <?php else: ?>
                         <span class="badge bg-secondary">Pobranie</span>
                         <?php endif; ?>
                     </td>
-                    <td><?= h($ah['user_name']) ?></td>
-                    <td class="text-muted small"><?= h($ah['notes'] ?? '') ?></td>
+                    <td><?= h($first['user_name']) ?></td>
+                    <td></td>
                     <td class="text-nowrap">
-                        <a href="inventory.php?action=wz_print&ids=<?= $ah['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj W/Z">
+                        <a href="inventory.php?action=wz_print&ids=<?= $batchIds ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj W/Z">
+                            <i class="fas fa-print"></i>
+                        </a>
+                        <?php if (isAdmin()): ?>
+                        <button type="button" class="btn btn-sm btn-outline-danger btn-action"
+                                onclick="deleteBatch(<?= htmlspecialchars(json_encode(array_column($batchRows,'id'))) ?>)"
+                                title="Usuń grupę"><i class="fas fa-trash"></i></button>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <!-- Batch child rows -->
+                <?php foreach ($batchRows as $bi => $brow): ?>
+                <tr class="d-none batch-hist-row" data-batch-hist="<?= $batchUid ?>">
+                    <td class="ps-4 text-muted small">↳</td>
+                    <td class="ps-4 fw-semibold"><?= h($brow['accessory_name']) ?></td>
+                    <td><?= (int)$brow['quantity'] ?> szt</td>
+                    <td></td>
+                    <td></td>
+                    <td class="text-muted small"><?= h($brow['notes'] ?? '') ?></td>
+                    <td></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php else: // single row ?>
+                <tr>
+                    <td class="text-muted small"><?= formatDateTime($first['issued_at']) ?></td>
+                    <td class="fw-semibold"><?= h($first['accessory_name']) ?></td>
+                    <td class="fw-bold"><?= (int)$first['quantity'] ?> szt</td>
+                    <td>
+                        <?php if ($first['inst_id']): ?>
+                        <a href="installations.php?action=view&id=<?= $first['inst_id'] ?>"><?= h($first['order_num']) ?></a>
+                        <?php else: ?>
+                        <span class="badge bg-secondary">Pobranie</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= h($first['user_name']) ?></td>
+                    <td class="text-muted small"><?= h($first['notes'] ?? '') ?></td>
+                    <td class="text-nowrap">
+                        <a href="inventory.php?action=wz_print&ids=<?= $first['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj W/Z">
                             <i class="fas fa-print"></i>
                         </a>
                         <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="accessory_issue_delete">
-                            <input type="hidden" name="issue_id" value="<?= $ah['id'] ?>">
+                            <input type="hidden" name="issue_id" value="<?= $first['id'] ?>">
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
                                     data-confirm="Usunąć ten wpis z historii?"><i class="fas fa-trash"></i></button>
                         </form>
                         <?php endif; ?>
                     </td>
                 </tr>
+                <?php endif; ?>
                 <?php endforeach; ?>
-                <?php if (empty($accHistory)): ?>
+                <?php if (empty($accHistoryGroups)): ?>
                 <tr><td colspan="7" class="text-center text-muted p-3">Brak historii wydań.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
     </div>
 </div>
+<script>
+function toggleBatchHist(uid, btn) {
+    var rows = document.querySelectorAll('[data-batch-hist="' + uid + '"]');
+    var icon = btn.querySelector('i');
+    var label = btn.querySelector('.toggle-label');
+    rows.forEach(function(r) { r.classList.toggle('d-none'); });
+    if (icon) { icon.classList.toggle('fa-chevron-down'); icon.classList.toggle('fa-chevron-up'); }
+    if (label) { label.textContent = icon && icon.classList.contains('fa-chevron-up') ? ' zwiń' : ' rozwiń'; }
+}
+function deleteBatch(ids) {
+    if (!confirm('Usunąć wszystkie pozycje tej grupy z historii?')) return;
+    var form = document.createElement('form');
+    form.method = 'POST';
+    var csrf = document.querySelector('input[name="csrf_token"]');
+    if (csrf) { var c = document.createElement('input'); c.type='hidden'; c.name='csrf_token'; c.value=csrf.value; form.appendChild(c); }
+    var act = document.createElement('input'); act.type='hidden'; act.name='action'; act.value='accessory_batch_delete'; form.appendChild(act);
+    var iids = document.createElement('input'); iids.type='hidden'; iids.name='issue_ids'; iids.value=ids.join(','); form.appendChild(iids);
+    document.body.appendChild(form);
+    form.submit();
+}
+</script>
 
 <!-- Add Accessory Modal -->
 <?php if (isAdmin()): ?>
@@ -852,7 +951,8 @@ $allNotes = array_unique(array_filter(array_map(fn($r) => $r['notes'] ?? '', $wz
 .wz-sig-row { display:flex; gap:32px; margin-top:40px; }
 .wz-sig-box { flex:1; text-align:center; }
 .wz-sig-line { border-top:2px solid #1a1a2e; padding-top:6px; margin-top:48px; font-size:.78rem; color:#444; }
-@media print { .no-print { display:none !important; } body { background:#fff !important; } .navbar, footer { display:none !important; } .container-fluid { padding:0 !important; } .wz-doc { max-width:100%; } }
+@media print { .no-print { display:none !important; } body { background:#fff !important; } .navbar, footer, .page-header { display:none !important; } .container-fluid { padding:0 !important; } .wz-doc { max-width:100%; } }
+@page { margin: 12mm; }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-4 no-print">
@@ -915,11 +1015,6 @@ $allNotes = array_unique(array_filter(array_map(fn($r) => $r['notes'] ?? '', $wz
                 <td style="color:#666;font-size:.8rem"><?= h($wzRow['notes'] ?? '') ?></td>
             </tr>
             <?php endforeach; ?>
-            <tr style="background:#f0f4ff">
-                <td colspan="2" style="font-weight:700;text-align:right">Razem:</td>
-                <td style="text-align:center;font-weight:800"><?= array_sum(array_column($wzIssues,'quantity')) ?> szt.</td>
-                <td></td>
-            </tr>
         </tbody>
     </table>
     <?php else: ?>
@@ -933,10 +1028,6 @@ $allNotes = array_unique(array_filter(array_map(fn($r) => $r['notes'] ?? '', $wz
         <div class="wz-sig-box">
             <div class="wz-sig-line">Podpis odbierającego<br>&nbsp;</div>
         </div>
-    </div>
-
-    <div style="text-align:center;font-size:.72rem;color:#999;margin-top:28px;padding-top:12px;border-top:1px solid #e0e7ff">
-        Dokument wygenerowany przez <?= $wzCompanyName ? h($wzCompanyName) : 'FleetLink Magazyn' ?> &mdash; <?= date('d.m.Y H:i') ?>
     </div>
 </div>
 
