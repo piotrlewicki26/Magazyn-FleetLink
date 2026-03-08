@@ -21,3 +21,11 @@ ALTER TABLE `devices`
 -- 4. Add lease_end_date (date until which the device is on lease)
 ALTER TABLE `devices`
   ADD COLUMN IF NOT EXISTS `lease_end_date` DATE DEFAULT NULL AFTER `sale_date`;
+
+-- 5. Add batch_id to installations (links all installations created in one batch)
+ALTER TABLE `installations`
+  ADD COLUMN IF NOT EXISTS `batch_id` INT UNSIGNED DEFAULT NULL AFTER `location_in_vehicle`;
+
+-- 6. Add installation_address to installations (address of the installation site)
+ALTER TABLE `installations`
+  ADD COLUMN IF NOT EXISTS `installation_address` VARCHAR(200) DEFAULT NULL AFTER `location_in_vehicle`;

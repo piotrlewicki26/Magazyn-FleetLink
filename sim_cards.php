@@ -127,7 +127,7 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-sim-card me-2 text-primary"></i>Karty SIM</h1>
     <?php if ($action === 'list'): ?>
-    <a href="sim_cards.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Przypisz kartę SIM</a>
+    <a href="sim_cards.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Dodaj kartę SIM</a>
     <?php else: ?>
     <a href="sim_cards.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -156,7 +156,7 @@ include __DIR__ . '/includes/header.php';
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Karty SIM przypisane do urządzeń (<?= count($simDevices) ?>)</span>
         <a href="sim_cards.php?action=add" class="btn btn-sm btn-primary">
-            <i class="fas fa-plus me-1"></i>Przypisz kartę SIM
+            <i class="fas fa-plus me-1"></i>Dodaj kartę SIM
         </a>
     </div>
     <div class="table-responsive">
@@ -206,7 +206,7 @@ include __DIR__ . '/includes/header.php';
                 <tr>
                     <td colspan="7" class="text-center text-muted p-3">
                         Brak urządzeń z przypisaną kartą SIM.
-                        <a href="sim_cards.php?action=add">Przypisz pierwszą kartę SIM.</a>
+                        <a href="sim_cards.php?action=add">Dodaj pierwszą kartę SIM.</a>
                     </td>
                 </tr>
                 <?php endif; ?>
@@ -218,7 +218,7 @@ include __DIR__ . '/includes/header.php';
 <?php elseif ($action === 'add'): ?>
 
 <div class="card" style="max-width:600px">
-    <div class="card-header"><i class="fas fa-plus me-2"></i>Przypisz kartę SIM do urządzenia</div>
+    <div class="card-header"><i class="fas fa-plus me-2"></i>Dodaj kartę SIM do urządzenia</div>
     <div class="card-body">
         <form method="POST">
             <?= csrfField() ?>
@@ -252,7 +252,7 @@ include __DIR__ . '/includes/header.php';
                            placeholder="+48 123 456 789" maxlength="30">
                 </div>
                 <div class="col-12">
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Przypisz SIM</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Dodaj kartę SIM</button>
                     <a href="sim_cards.php" class="btn btn-outline-secondary ms-2">Anuluj</a>
                 </div>
             </div>

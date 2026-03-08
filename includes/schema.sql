@@ -141,6 +141,8 @@ CREATE TABLE IF NOT EXISTS `installations` (
   `installation_date` DATE NOT NULL,
   `uninstallation_date` DATE DEFAULT NULL,
   `status` ENUM('aktywna','zakonczona','anulowana') NOT NULL DEFAULT 'aktywna',
+  `batch_id` INT UNSIGNED DEFAULT NULL,
+  `installation_address` VARCHAR(200) DEFAULT NULL,
   `location_in_vehicle` VARCHAR(100) DEFAULT NULL,
   `notes` TEXT DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

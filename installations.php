@@ -26,8 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $uninstallationDate = sanitize($_POST['uninstallation_date'] ?? '') ?: null;
     $status             = sanitize($_POST['status'] ?? 'aktywna');
     // $locationInVehicle is a single string used for both 'add' (shared across all devices in batch) and 'edit'.
-    $locationInVehicle  = is_array($_POST['location_in_vehicle'] ?? null) ? '' : sanitize($_POST['location_in_vehicle'] ?? '');
-    $notes              = sanitize($_POST['notes'] ?? '');
+    $locationInVehicle    = is_array($_POST['location_in_vehicle'] ?? null) ? '' : sanitize($_POST['location_in_vehicle'] ?? '');
+    $installationAddress  = sanitize($_POST['installation_address'] ?? '');
+    $notes                = sanitize($_POST['notes'] ?? '');
     $currentUser        = getCurrentUser();
 
     if (!$technicianId) $technicianId = $currentUser['id'];
@@ -132,8 +133,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 // Create installation record
-                $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, notes) VALUES (?,?,?,?,?,?,?,?,?)")
-                   ->execute([$dId, $rowVehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes]);
+                $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, uninstallation_date, status, location_in_vehicle, installation_address, notes) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                   ->execute([$dId, $rowVehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $installationAddress, $notes]);
                 $allocatedInstallationIds[] = (int)$db->lastInsertId();
 
                 // Update device status + auto inventory adjust
@@ -142,6 +143,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 adjustInventoryForStatusChange($db, $devRow['model_id'], $oldStatus, 'zamontowany');
 
                 $allocatedDeviceIds[] = $dId;
+            }
+            // Tag all installations in a multi-device batch with a shared batch_id
+            if (count($allocatedInstallationIds) > 1) {
+                $batchId = $allocatedInstallationIds[0];
+                $phBatch = implode(',', array_fill(0, count($allocatedInstallationIds), '?'));
+                $db->prepare("UPDATE installations SET batch_id=? WHERE id IN ($phBatch)")
+                   ->execute(array_merge([$batchId], $allocatedInstallationIds));
             }
             $db->commit();
             $n = count($allocatedDeviceIds);
@@ -180,8 +188,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($postAction === 'edit') {
         $editId = (int)($_POST['id'] ?? 0);
-        $db->prepare("UPDATE installations SET vehicle_id=?, client_id=?, technician_id=?, installation_date=?, uninstallation_date=?, status=?, location_in_vehicle=?, notes=? WHERE id=?")
-           ->execute([$vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $notes, $editId]);
+        $db->prepare("UPDATE installations SET vehicle_id=?, client_id=?, technician_id=?, installation_date=?, uninstallation_date=?, status=?, location_in_vehicle=?, installation_address=?, notes=? WHERE id=?")
+           ->execute([$vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $installationAddress, $notes, $editId]);
         flashSuccess('Montaż zaktualizowany.');
         redirect(getBaseUrl() . 'installations.php?action=view&id=' . $editId);
 
@@ -275,15 +283,16 @@ $availableDevices = $db->query("
     ORDER BY mf.name, m.name, d.serial_number
 ")->fetchAll();
 
-$clients  = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
+$clients  = $db->query("SELECT id, contact_name, company_name, address, city, postal_code FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 $users    = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
 
 $installations = [];
+$installationGroups = []; // processed for grouped display
 if ($action === 'list') {
     $filterStatus = sanitize($_GET['status'] ?? '');
     $search = sanitize($_GET['search'] ?? '');
     $sql = "
-        SELECT i.id, i.installation_date, i.uninstallation_date, i.status,
+        SELECT i.id, i.device_id, i.batch_id, i.installation_date, i.uninstallation_date, i.status,
                d.serial_number, m.name as model_name, mf.name as manufacturer_name,
                v.registration, v.make,
                c.contact_name, c.company_name,
@@ -303,10 +312,28 @@ if ($action === 'list') {
         $sql .= " AND (d.serial_number LIKE ? OR v.registration LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ?)";
         $params = array_merge($params, ["%$search%","%$search%","%$search%","%$search%"]);
     }
-    $sql .= " ORDER BY i.installation_date DESC";
+    $sql .= " ORDER BY i.installation_date DESC, i.batch_id, i.id";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $installations = $stmt->fetchAll();
+
+    // Group by batch_id in PHP
+    $seenBatches = [];
+    foreach ($installations as $inst) {
+        $bid = $inst['batch_id'];
+        if ($bid !== null) {
+            if (!isset($seenBatches[$bid])) {
+                $seenBatches[$bid] = count($installationGroups);
+                $installationGroups[] = ['is_batch' => true, 'items' => [$inst], 'ids' => [$inst['id']]];
+            } else {
+                $idx = $seenBatches[$bid];
+                $installationGroups[$idx]['items'][] = $inst;
+                $installationGroups[$idx]['ids'][]   = $inst['id'];
+            }
+        } else {
+            $installationGroups[] = ['is_batch' => false, 'items' => [$inst], 'ids' => [$inst['id']]];
+        }
+    }
 }
 
 // Fetch data for print-batch view
@@ -318,11 +345,12 @@ if ($action === 'print_batch') {
     if (!empty($batchIds)) {
         $ph = implode(',', array_fill(0, count($batchIds), '?'));
         $batchStmt = $db->prepare("
-            SELECT i.id, i.installation_date, i.status, i.location_in_vehicle, i.notes,
+            SELECT i.id, i.installation_date, i.status, i.location_in_vehicle, i.installation_address, i.notes,
                    d.serial_number, d.imei, d.sim_number,
                    m.name as model_name, mf.name as manufacturer_name,
                    v.registration, v.make, v.model_name as vehicle_model,
                    c.contact_name, c.company_name, c.phone as client_phone,
+                   c.address as client_address, c.city as client_city, c.postal_code as client_postal_code,
                    u.name as technician_name
             FROM installations i
             JOIN devices d ON d.id = i.device_id
@@ -376,14 +404,77 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <div class="card">
-    <div class="card-header">Montaże (<?= count($installations) ?>)</div>
+    <div class="card-header">Montaże (<?= count($installationGroups) ?> pozycji / <?= count($installations) ?> urządzeń)</div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
-                <tr><th>Data montażu</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Technik</th><th>Status</th><th>Akcje</th></tr>
+                <tr><th>Data montażu</th><th>Urządzenie / Zlecenie</th><th>Pojazd</th><th>Klient</th><th>Technik</th><th>Status</th><th>Akcje</th></tr>
             </thead>
             <tbody>
-                <?php foreach ($installations as $inst): ?>
+                <?php foreach ($installationGroups as $gi => $group): ?>
+                <?php $first = $group['items'][0]; ?>
+                <?php if ($group['is_batch'] && count($group['items']) > 1): ?>
+                <!-- Batch row -->
+                <tr class="table-info batch-header-row" data-batch-toggle="batch-<?= $gi ?>">
+                    <td><?= formatDate($first['installation_date']) ?></td>
+                    <td>
+                        <span class="badge bg-primary me-1"><?= count($group['items']) ?> urządzeń</span>
+                        <span class="text-muted small">Zlecenie grupowe</span>
+                        <div class="small text-muted mt-1">
+                            <?= h(implode(', ', array_column($group['items'], 'serial_number'))) ?>
+                        </div>
+                    </td>
+                    <td>
+                        <?php $regs = array_unique(array_column($group['items'], 'registration')); ?>
+                        <?= h(implode(', ', $regs)) ?>
+                    </td>
+                    <td><?= h($first['company_name'] ?: $first['contact_name'] ?? '—') ?></td>
+                    <td><?= h($first['technician_name'] ?? '—') ?></td>
+                    <td><?= getStatusBadge($first['status'], 'installation') ?></td>
+                    <td>
+                        <a href="installations.php?action=print_batch&ids=<?= implode(',', $group['ids']) ?>"
+                           class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie montażu"><i class="fas fa-print"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
+                                onclick="toggleBatchRows('batch-<?= $gi ?>', this)"
+                                title="Rozwiń / zwiń urządzenia">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </td>
+                </tr>
+                <!-- Batch child rows (collapsed by default) -->
+                <?php foreach ($group['items'] as $inst): ?>
+                <tr class="batch-child-row d-none" data-batch-group="batch-<?= $gi ?>">
+                    <td class="ps-4 text-muted small"><?= formatDate($inst['installation_date']) ?></td>
+                    <td class="ps-4">
+                        <a href="devices.php?action=view&id=<?= $inst['device_id'] ?? '' ?>"><?= h($inst['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?></small>
+                    </td>
+                    <td><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
+                    <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
+                    <td><?= h($inst['technician_name'] ?? '—') ?></td>
+                    <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
+                    <td>
+                        <a href="installations.php?action=view&id=<?= $inst['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <?php if ($inst['status'] === 'aktywna'): ?>
+                        <button type="button" class="btn btn-sm btn-outline-warning btn-action"
+                                onclick="showUninstallModal(<?= $inst['id'] ?>, <?= $inst['device_id'] ?? 0 ?>, '<?= h($inst['serial_number']) ?>')">
+                            <i class="fas fa-minus-circle"></i>
+                        </button>
+                        <?php endif; ?>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $inst['id'] ?>">
+                            <input type="hidden" name="device_id" value="<?= $inst['device_id'] ?? 0 ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń montaż #<?= $inst['id'] ?>? Urządzenie zostanie oznaczone jako sprawne."><i class="fas fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php else: ?>
+                <!-- Single / non-batch row -->
+                <?php $inst = $first; ?>
                 <tr>
                     <td><?= formatDate($inst['installation_date']) ?></td>
                     <td>
@@ -412,12 +503,24 @@ include __DIR__ . '/includes/header.php';
                         </form>
                     </td>
                 </tr>
+                <?php endif; ?>
                 <?php endforeach; ?>
-                <?php if (empty($installations)): ?><tr><td colspan="7" class="text-center text-muted p-3">Brak montaży.</td></tr><?php endif; ?>
+                <?php if (empty($installationGroups)): ?><tr><td colspan="7" class="text-center text-muted p-3">Brak montaży.</td></tr><?php endif; ?>
             </tbody>
         </table>
     </div>
 </div>
+<script>
+function toggleBatchRows(groupKey, btn) {
+    var rows = document.querySelectorAll('[data-batch-group="' + groupKey + '"]');
+    var icon = btn.querySelector('i');
+    rows.forEach(function(r) { r.classList.toggle('d-none'); });
+    if (icon) {
+        icon.classList.toggle('fa-chevron-down');
+        icon.classList.toggle('fa-chevron-up');
+    }
+}
+</script>
 
 <?php elseif ($action === 'view' && isset($installation)): ?>
 <div class="row g-3">
@@ -431,6 +534,7 @@ include __DIR__ . '/includes/header.php';
                     <tr><th class="text-muted">Data demontażu</th><td><?= formatDate($installation['uninstallation_date']) ?></td></tr>
                     <tr><th class="text-muted">Pojazd</th><td><a href="vehicles.php"><?= h($installation['registration']) ?></a><br><?= h($installation['make'] . ' ' . $installation['vehicle_model']) ?></td></tr>
                     <tr><th class="text-muted">Klient</th><td><?= $installation['contact_name'] ? h($installation['company_name'] ?: $installation['contact_name']) : '—' ?></td></tr>
+                    <tr><th class="text-muted">Adres instalacji</th><td><?= h($installation['installation_address'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Urządzenie</th><td><a href="devices.php?action=view&id=<?= $installation['device_id'] ?>"><?= h($installation['serial_number']) ?></a><br><small><?= h($installation['manufacturer_name'] . ' ' . $installation['model_name']) ?></small></td></tr>
                     <tr><th class="text-muted">IMEI</th><td><?= h($installation['imei'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Technik</th><td><?= h($installation['technician_name'] ?? '—') ?></td></tr>
@@ -593,6 +697,13 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
                 <div class="col-md-6">
+                    <label class="form-label">Adres instalacji</label>
+                    <input type="text" name="installation_address" id="installationAddressField" class="form-control"
+                           value="<?= h($installation['installation_address'] ?? '') ?>"
+                           placeholder="Adres miejsca montażu (opcjonalne)">
+                    <div class="form-text">Automatycznie uzupełniany adresem klienta po jego wyborze. Możesz edytować.</div>
+                </div>
+                <div class="col-md-6">
                     <label class="form-label">Technik</label>
                     <select name="technician_id" class="form-select">
                         <option value="">— aktualny użytkownik —</option>
@@ -635,6 +746,32 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+<?php if ($action === 'add'): ?>
+<script>
+(function () {
+    // Embed client address data so JS can auto-fill the installation address field
+    var clientAddresses = <?= json_encode(array_reduce($clients, function ($carry, $c) {
+        $parts = array_filter([$c['address'] ?? '', trim(($c['postal_code'] ?? '') . ' ' . ($c['city'] ?? ''))]);
+        $carry[(string)$c['id']] = implode(', ', $parts);
+        return $carry;
+    }, []), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
+    var sel  = document.getElementById('clientSelect');
+    var addr = document.getElementById('installationAddressField');
+    if (sel && addr) {
+        sel.addEventListener('change', function () {
+            var val = this.value;
+            // Only auto-fill if the field is empty or was previously auto-filled
+            if (val && clientAddresses[val]) {
+                addr.value = clientAddresses[val];
+            } else if (!val) {
+                addr.value = '';
+            }
+        });
+    }
+}());
+</script>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if ($action === 'print_batch'): ?>
@@ -647,12 +784,21 @@ $installDate    = $firstRow['installation_date'] ?? date('Y-m-d');
 $batchFirstId   = $firstRow['id'] ?? 0;
 $batchCount     = count($batchInstallations);
 $orderNumber    = sprintf('ZM/%s/%d-%d', date('Y', strtotime($installDate ?: 'now')), $batchFirstId, $batchCount);
+// Client address
+$clientAddrParts = array_filter([
+    $firstRow['client_address'] ?? '',
+    trim(($firstRow['client_postal_code'] ?? '') . ' ' . ($firstRow['client_city'] ?? '')),
+]);
+$clientAddrFull = implode(', ', $clientAddrParts);
+// Installation address (from first row)
+$installAddr = $firstRow['installation_address'] ?? '';
 ?>
 <style>
 @media print {
     .no-print { display: none !important; }
     .card { border: none !important; box-shadow: none !important; }
     body { font-size: 12pt; }
+    .table th, .table td { font-size: 11pt; }
 }
 </style>
 <div class="d-flex justify-content-between align-items-center mb-3 no-print">
@@ -679,21 +825,28 @@ $orderNumber    = sprintf('ZM/%s/%d-%d', date('Y', strtotime($installDate ?: 'no
         </div>
         <hr>
 
-        <!-- Client & technician info -->
+        <!-- Client & install address & technician info -->
         <div class="row g-3 mb-4">
-            <div class="col-md-6">
+            <div class="col-md-5">
                 <div class="fw-semibold text-muted small text-uppercase mb-1">Klient</div>
-                <div class="fw-bold fs-5"><?= h($clientLabel) ?></div>
+                <div class="fw-bold"><?= h($clientLabel) ?></div>
                 <?php if ($firstRow && $firstRow['client_phone']): ?>
-                <div class="text-muted small"><?= h($firstRow['client_phone']) ?></div>
+                <div class="text-muted small"><i class="fas fa-phone me-1"></i><?= h($firstRow['client_phone']) ?></div>
+                <?php endif; ?>
+                <?php if ($clientAddrFull): ?>
+                <div class="text-muted small"><i class="fas fa-map-marker-alt me-1"></i><?= h($clientAddrFull) ?></div>
                 <?php endif; ?>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4">
+                <div class="fw-semibold text-muted small text-uppercase mb-1">Adres instalacji</div>
+                <div><?= $installAddr ? h($installAddr) : '<span class="text-muted">—</span>' ?></div>
+            </div>
+            <div class="col-md-2">
                 <div class="fw-semibold text-muted small text-uppercase mb-1">Technik</div>
                 <div><?= h($technicianName) ?></div>
             </div>
-            <div class="col-md-3">
-                <div class="fw-semibold text-muted small text-uppercase mb-1">Liczba urządzeń</div>
+            <div class="col-md-1">
+                <div class="fw-semibold text-muted small text-uppercase mb-1">Urządzeń</div>
                 <div class="fw-bold fs-5"><?= count($batchInstallations) ?></div>
             </div>
         </div>

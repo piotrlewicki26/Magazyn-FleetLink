@@ -441,6 +441,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="col-md-6">
                     <label class="form-label">Nr telefonu SIM</label>
                     <input type="text" name="sim_number" class="form-control" value="<?= h($device['sim_number'] ?? '') ?>" placeholder="np. +48 600 000 000">
+                    <div class="form-text">Po zapisaniu urządzenia z wypełnionym numerem SIM, karta pojawi się automatycznie w zakładce <a href="sim_cards.php" target="_blank">Karty SIM</a>.</div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Status</label>
