@@ -33,6 +33,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $leaseEndDate  = sanitize($_POST['lease_end_date'] ?? '');
     $notes         = sanitize($_POST['notes'] ?? '');
 
+    if ($postAction === 'sim_edit') {
+        // Only Technician or Admin may update SIM number
+        if (!isAdmin() && !isTechnician()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'devices.php'); }
+        $simEditId = (int)($_POST['id'] ?? 0);
+        if (!$simEditId) {
+            flashError('Nieprawidłowe dane.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        $newSim = sanitize($_POST['sim_number'] ?? '');
+        // Fetch old SIM
+        $oldSimRow = $db->prepare("SELECT sim_number FROM devices WHERE id=?");
+        $oldSimRow->execute([$simEditId]);
+        $oldSimRec = $oldSimRow->fetch();
+        $db->prepare("UPDATE devices SET sim_number=? WHERE id=?")->execute([$newSim ?: null, $simEditId]);
+        // Sync sim_cards
+        if (!empty($newSim)) {
+            try {
+                $existingSimStmt = $db->prepare("SELECT id FROM sim_cards WHERE device_id=? LIMIT 1");
+                $existingSimStmt->execute([$simEditId]);
+                $existingSim = $existingSimStmt->fetch();
+                if ($existingSim) {
+                    $db->prepare("UPDATE sim_cards SET phone_number=? WHERE id=?")->execute([$newSim, $existingSim['id']]);
+                } else {
+                    $checkSim = $db->prepare("SELECT id FROM sim_cards WHERE phone_number=? LIMIT 1");
+                    $checkSim->execute([$newSim]);
+                    if (!$checkSim->fetch()) {
+                        $db->prepare("INSERT INTO sim_cards (phone_number, device_id) VALUES (?,?)")->execute([$newSim, $simEditId]);
+                    } else {
+                        $db->prepare("UPDATE sim_cards SET device_id=? WHERE phone_number=? AND device_id IS NULL")->execute([$simEditId, $newSim]);
+                    }
+                }
+            } catch (PDOException $e) { /* sim_cards table may not exist */ }
+        } elseif ($oldSimRec && !empty($oldSimRec['sim_number'])) {
+            try {
+                $db->prepare("UPDATE sim_cards SET device_id=NULL WHERE device_id=?")->execute([$simEditId]);
+            } catch (PDOException $e) {}
+        }
+        flashSuccess('Numer telefonu SIM został zaktualizowany.');
+        redirect(getBaseUrl() . 'devices.php');
+    }
+
     $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'];
     if (!in_array($status, $validStatuses)) $status = 'nowy';
 
@@ -228,6 +269,14 @@ if ($action === 'list') {
     $devices = $stmt->fetchAll();
 }
 
+// SIM cards list for datalist (available / unassigned) — used in SIM-edit modal
+$simCardOptions = [];
+if ($action === 'list') {
+    try {
+        $simCardOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Exception $e) { $simCardOptions = []; }
+}
+
 $activePage = 'devices';
 $pageTitle = 'Urządzenia';
 include __DIR__ . '/includes/header.php';
@@ -323,6 +372,11 @@ include __DIR__ . '/includes/header.php';
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
                                     data-confirm="Usuń urządzenie <?= h($d['serial_number']) ?>?"><i class="fas fa-trash"></i></button>
                         </form>
+                        <?php elseif (isTechnician()): ?>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień nr SIM"
+                                onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
+                            <i class="fas fa-sim-card"></i>
+                        </button>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -334,6 +388,48 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<?php if (isTechnician()): ?>
+<!-- SIM-edit modal (Technician only) -->
+<div class="modal fade" id="simEditModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST" id="simEditForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="sim_edit">
+                <input type="hidden" name="id" id="simEditDeviceId" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-sim-card me-2 text-primary"></i>Nr telefonu SIM</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label">Numer telefonu</label>
+                    <input type="text" name="sim_number" id="simEditNumber" class="form-control"
+                           list="simCardList" placeholder="np. +48 600 000 000" autocomplete="off">
+                    <datalist id="simCardList">
+                        <?php foreach ($simCardOptions as $sc): ?>
+                        <option value="<?= h($sc) ?>">
+                        <?php endforeach; ?>
+                    </datalist>
+                    <div class="form-text">Wpisz ręcznie lub wybierz z listy kart SIM.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Zapisz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openSimEdit(deviceId, currentSim) {
+    document.getElementById('simEditDeviceId').value = deviceId;
+    document.getElementById('simEditNumber').value = currentSim || '';
+    var modal = new bootstrap.Modal(document.getElementById('simEditModal'));
+    modal.show();
+}
+</script>
+<?php endif; ?>
 
 <?php elseif ($action === 'view' && isset($device)): ?>
 <div class="row g-3">
@@ -398,9 +494,11 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
             <div class="card-footer d-flex gap-2">
+                <?php if (!isTechnician()): ?>
                 <a href="devices.php?action=edit&id=<?= $device['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
                 <a href="installations.php?action=add&device=<?= $device['id'] ?>" class="btn btn-sm btn-success"><i class="fas fa-car me-1"></i>Montaż</a>
                 <a href="services.php?action=add&device=<?= $device['id'] ?>" class="btn btn-sm btn-warning"><i class="fas fa-wrench me-1"></i>Serwis</a>
+                <?php endif; ?>
             </div>
         </div>
     </div>
