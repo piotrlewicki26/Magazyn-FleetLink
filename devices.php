@@ -44,8 +44,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, status, purchase_date, purchase_price, sale_date, lease_end_date, notes) VALUES (?,?,?,?,?,?,?,?,?,?)");
             $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes]);
+            $newDeviceId = (int)$db->lastInsertId();
             // Auto-adjust inventory: new device with status 'nowy' enters stock
             adjustInventoryForStatusChange($db, $modelId, '', $status);
+            // Auto-create sim_cards entry when SIM number is provided
+            if (!empty($simNumber)) {
+                try {
+                    // Only insert if no sim_card with this phone_number already exists
+                    $checkSim = $db->prepare("SELECT id FROM sim_cards WHERE phone_number=? LIMIT 1");
+                    $checkSim->execute([$simNumber]);
+                    if (!$checkSim->fetch()) {
+                        $db->prepare("INSERT INTO sim_cards (phone_number, device_id) VALUES (?,?)")
+                           ->execute([$simNumber, $newDeviceId]);
+                    } else {
+                        // Link existing sim_card entry to the new device
+                        $db->prepare("UPDATE sim_cards SET device_id=? WHERE phone_number=? AND (device_id IS NULL OR device_id=?)")
+                           ->execute([$newDeviceId, $simNumber, $newDeviceId]);
+                    }
+                } catch (PDOException $e) { /* sim_cards table may not exist yet */ }
+            }
             flashSuccess("Urządzenie $serialNumber zostało dodane.");
         } catch (PDOException $e) {
             flashError('Numer seryjny już istnieje w systemie.');
@@ -58,8 +75,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Nieprawidłowe dane.');
             redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $editId);
         }
-        // Fetch old status for inventory adjustment
-        $oldRow = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+        // Fetch old status and old sim_number for inventory/SIM sync
+        $oldRow = $db->prepare("SELECT model_id, status, sim_number FROM devices WHERE id=?");
         $oldRow->execute([$editId]);
         $oldDevice = $oldRow->fetch();
         try {
@@ -68,6 +85,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Auto-adjust inventory on status change
             if ($oldDevice) {
                 adjustInventoryForStatusChange($db, $modelId, $oldDevice['status'], $status);
+            }
+            // Sync sim_cards: if SIM number changed or added
+            if (!empty($simNumber)) {
+                try {
+                    // Upsert: update existing entry for this device, or insert new one
+                    $existingSimStmt = $db->prepare("SELECT id FROM sim_cards WHERE device_id=? LIMIT 1");
+                    $existingSimStmt->execute([$editId]);
+                    $existingSim = $existingSimStmt->fetch();
+                    if ($existingSim) {
+                        $db->prepare("UPDATE sim_cards SET phone_number=? WHERE id=?")
+                           ->execute([$simNumber, $existingSim['id']]);
+                    } else {
+                        // Only insert if no sim_card with this phone_number already exists
+                        $checkSim = $db->prepare("SELECT id FROM sim_cards WHERE phone_number=? LIMIT 1");
+                        $checkSim->execute([$simNumber]);
+                        if (!$checkSim->fetch()) {
+                            $db->prepare("INSERT INTO sim_cards (phone_number, device_id) VALUES (?,?)")
+                               ->execute([$simNumber, $editId]);
+                        } else {
+                            // Link the existing sim_card to this device if it has no device
+                            $db->prepare("UPDATE sim_cards SET device_id=? WHERE phone_number=? AND device_id IS NULL")
+                               ->execute([$editId, $simNumber]);
+                        }
+                    }
+                } catch (PDOException $e) { /* sim_cards table may not exist yet */ }
+            } elseif ($oldDevice && !empty($oldDevice['sim_number'])) {
+                // SIM number was cleared — unlink from sim_cards
+                try {
+                    $db->prepare("UPDATE sim_cards SET device_id=NULL WHERE device_id=?")
+                       ->execute([$editId]);
+                } catch (PDOException $e) { /* sim_cards table may not exist yet */ }
             }
             flashSuccess('Urządzenie zostało zaktualizowane.');
         } catch (PDOException $e) {

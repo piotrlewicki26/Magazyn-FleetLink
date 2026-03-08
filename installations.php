@@ -313,9 +313,21 @@ if ($action === 'list') {
         $params = array_merge($params, ["%$search%","%$search%","%$search%","%$search%"]);
     }
     $sql .= " ORDER BY i.installation_date DESC, i.batch_id, i.id";
-    $stmt = $db->prepare($sql);
-    $stmt->execute($params);
-    $installations = $stmt->fetchAll();
+    try {
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+        $installations = $stmt->fetchAll();
+    } catch (PDOException $e) {
+        // batch_id column does not exist yet (migration not run) — fall back gracefully
+        $sqlFallback = str_replace(
+            ['i.device_id, i.batch_id,', 'i.batch_id, i.id'],
+            ['i.device_id, NULL as batch_id,', 'i.id'],
+            $sql
+        );
+        $stmt = $db->prepare($sqlFallback);
+        $stmt->execute($params);
+        $installations = $stmt->fetchAll();
+    }
 
     // Group by batch_id in PHP
     $seenBatches = [];
@@ -344,7 +356,7 @@ if ($action === 'print_batch') {
     $batchIds = array_filter(array_map('intval', explode(',', $rawIds)));
     if (!empty($batchIds)) {
         $ph = implode(',', array_fill(0, count($batchIds), '?'));
-        $batchStmt = $db->prepare("
+        $batchSql = "
             SELECT i.id, i.installation_date, i.status, i.location_in_vehicle, i.installation_address, i.notes,
                    d.serial_number, d.imei, d.sim_number,
                    m.name as model_name, mf.name as manufacturer_name,
@@ -361,9 +373,22 @@ if ($action === 'print_batch') {
             LEFT JOIN users u ON u.id = i.technician_id
             WHERE i.id IN ($ph)
             ORDER BY i.id
-        ");
-        $batchStmt->execute($batchIds);
-        $batchInstallations = $batchStmt->fetchAll();
+        ";
+        try {
+            $batchStmt = $db->prepare($batchSql);
+            $batchStmt->execute($batchIds);
+            $batchInstallations = $batchStmt->fetchAll();
+        } catch (PDOException $e) {
+            // installation_address column may not exist yet — fall back without it
+            $batchSqlFallback = str_replace(
+                'i.location_in_vehicle, i.installation_address,',
+                'i.location_in_vehicle, NULL as installation_address,',
+                $batchSql
+            );
+            $batchStmt = $db->prepare($batchSqlFallback);
+            $batchStmt->execute($batchIds);
+            $batchInstallations = $batchStmt->fetchAll();
+        }
     }
 }
 
