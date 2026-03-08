@@ -108,6 +108,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare("UPDATE inventory SET min_quantity=? WHERE model_id=?")->execute([$minQty, $modelId]);
         flashSuccess('Minimalny stan magazynowy zaktualizowany.');
         redirect(getBaseUrl() . 'inventory.php');
+
+    } elseif ($postAction === 'accessory_add') {
+        if (!isAdmin()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        $name  = sanitize($_POST['name'] ?? '');
+        $qty   = max(0, (int)($_POST['quantity_initial'] ?? 0));
+        $notes = sanitize($_POST['notes'] ?? '');
+        if (empty($name)) { flashError('Nazwa akcesoriów jest wymagana.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        try {
+            $db->prepare("INSERT INTO accessories (name, quantity_initial, notes) VALUES (?,?,?)")->execute([$name, $qty, $notes]);
+            flashSuccess('Akcesorium dodane.');
+        } catch (Exception $e) { flashError('Błąd: ' . $e->getMessage()); }
+        redirect(getBaseUrl() . 'inventory.php?action=accessories');
+
+    } elseif ($postAction === 'accessory_edit') {
+        if (!isAdmin()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        $accId = (int)($_POST['accessory_id'] ?? 0);
+        $name  = sanitize($_POST['name'] ?? '');
+        $qty   = max(0, (int)($_POST['quantity_initial'] ?? 0));
+        $notes = sanitize($_POST['notes'] ?? '');
+        if (!$accId || empty($name)) { flashError('Dane niepoprawne.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        $db->prepare("UPDATE accessories SET name=?, quantity_initial=?, notes=? WHERE id=?")->execute([$name, $qty, $notes, $accId]);
+        flashSuccess('Akcesorium zaktualizowane.');
+        redirect(getBaseUrl() . 'inventory.php?action=accessories');
+
+    } elseif ($postAction === 'accessory_delete') {
+        if (!isAdmin()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'inventory.php?action=accessories'); }
+        $accId = (int)($_POST['accessory_id'] ?? 0);
+        try {
+            $db->prepare("DELETE FROM accessories WHERE id=?")->execute([$accId]);
+            flashSuccess('Akcesorium usunięte.');
+        } catch (PDOException $e) { flashError('Nie można usunąć — akcesorium jest powiązane z wydaniami.'); }
+        redirect(getBaseUrl() . 'inventory.php?action=accessories');
     }
 }
 
@@ -147,8 +179,38 @@ if ($action === 'movements') {
     ")->fetchAll();
 }
 
-// SIM cards list
-$simCards = [];
+// Accessories list
+$accessories = [];
+if ($action === 'accessories') {
+    try {
+        $accessories = $db->query("
+            SELECT a.*,
+                   COALESCE((SELECT SUM(ai.quantity) FROM accessory_issues ai WHERE ai.accessory_id = a.id), 0) AS issued
+            FROM accessories a
+            WHERE a.active = 1
+            ORDER BY a.name
+        ")->fetchAll();
+    } catch (Exception $e) { $accessories = []; }
+}
+
+// Accessories issue history
+$accHistory = [];
+if ($action === 'accessories') {
+    try {
+        $accHistory = $db->query("
+            SELECT ai.*, a.name AS accessory_name, u.name AS user_name,
+                   i.id AS inst_id,
+                   CONCAT('ZM/', YEAR(i.installation_date), '/', LPAD(i.id,4,'0')) AS order_num
+            FROM accessory_issues ai
+            JOIN accessories a ON a.id = ai.accessory_id
+            JOIN users u ON u.id = ai.user_id
+            LEFT JOIN installations i ON i.id = ai.installation_id
+            ORDER BY ai.issued_at DESC
+            LIMIT 200
+        ")->fetchAll();
+    } catch (Exception $e) { $accHistory = []; }
+}
+
 if ($action === 'sim_cards') {
     $simCards = $db->query("
         SELECT d.id, d.serial_number, d.sim_number, d.status,
@@ -178,6 +240,9 @@ include __DIR__ . '/includes/header.php';
     <div>
         <a href="inventory.php" class="btn <?= $action === 'list' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
             <i class="fas fa-boxes me-1"></i>Stany
+        </a>
+        <a href="inventory.php?action=accessories" class="btn <?= $action === 'accessories' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
+            <i class="fas fa-toolbox me-1"></i>Akcesoria
         </a>
         <a href="inventory.php?action=movements" class="btn <?= $action === 'movements' ? 'btn-primary' : 'btn-outline-primary' ?> btn-sm me-1">
             <i class="fas fa-history me-1"></i>Historia ruchów
@@ -213,12 +278,14 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
             <div class="text-muted small">Łącznie szt.</div>
         </div>
     </div>
+    <?php if (isAdmin()): ?>
     <div class="col-6 col-md-3">
         <div class="card text-center p-3">
             <div class="h3 text-success fw-bold"><?= formatMoney($totalValue) ?></div>
             <div class="text-muted small">Wartość magazynu</div>
         </div>
     </div>
+    <?php endif; ?>
     <div class="col-6 col-md-3">
         <div class="card text-center p-3">
             <div class="h3 fw-bold <?= $lowStockCount > 0 ? 'text-danger' : 'text-success' ?>"><?= $lowStockCount ?></div>
@@ -240,7 +307,7 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Producent</th><th>Model</th><th>Stan magazynowy</th><th>Faktyczny stan urządzeń</th><th>Min. stan</th><th>Wartość (zakup)</th><th>Wartość (sprzedaż)</th><th>Ostatnia zmiana</th><th>Akcje</th>
+                    <th>Producent</th><th>Model</th><th>Stan magazynowy</th><th>Faktyczny stan urządzeń</th><th>Min. stan</th><?php if (isAdmin()): ?><th>Wartość (zakup)</th><th>Wartość (sprzedaż)</th><?php endif; ?><th>Ostatnia zmiana</th><th>Akcje</th>
                 </tr>
             </thead>
             <tbody>
@@ -269,8 +336,10 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
                         <?php endif; ?>
                     </td>
                     <td><?= (int)$item['min_quantity'] ?> szt</td>
+                    <?php if (isAdmin()): ?>
                     <td><?= formatMoney($item['quantity'] * $item['price_purchase']) ?></td>
                     <td><?= formatMoney($item['quantity'] * $item['price_sale']) ?></td>
+                    <?php endif; ?>
                     <td class="text-muted small"><?= $item['updated_at'] ? formatDateTime($item['updated_at']) : '—' ?></td>
                     <td>
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action"
@@ -285,7 +354,7 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($inventory)): ?>
-                <tr><td colspan="9" class="text-center text-muted p-3">Brak modeli w magazynie z urządzeniami. Dodaj <a href="models.php">modele urządzeń</a> i <a href="devices.php?action=add">urządzenia</a> najpierw. Po dodaniu użyj przycisku <strong>Synchronizuj z urządzeniami</strong>, aby zaktualizować stany.</td></tr>
+                <tr><td colspan="<?= isAdmin() ? 9 : 7 ?>" class="text-center text-muted p-3">Brak modeli w magazynie z urządzeniami. Dodaj <a href="models.php">modele urządzeń</a> i <a href="devices.php?action=add">urządzenia</a> najpierw. Po dodaniu użyj przycisku <strong>Synchronizuj z urządzeniami</strong>, aby zaktualizować stany.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -324,6 +393,213 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
         </table>
     </div>
 </div>
+
+<?php elseif ($action === 'accessories'): ?>
+<!-- ── Accessories section ──────────────────────── -->
+<div class="row g-3 mb-3">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria magazynowe (<?= count($accessories) ?>)</span>
+                <?php if (isAdmin()): ?>
+                <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addAccessoryModal">
+                    <i class="fas fa-plus me-1"></i>Dodaj akcesorium
+                </button>
+                <?php endif; ?>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">L.p.</th>
+                            <th>Nazwa</th>
+                            <th class="text-center">Ilość początkowa</th>
+                            <th class="text-center">Ilość wydana</th>
+                            <th class="text-center">Pozostało</th>
+                            <th>Uwagi</th>
+                            <?php if (isAdmin()): ?><th style="width:80px">Akcje</th><?php endif; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($accessories as $lp => $acc):
+                            $issued    = (int)$acc['issued'];
+                            $remaining = (int)$acc['quantity_initial'] - $issued;
+                        ?>
+                        <tr>
+                            <td class="text-muted"><?= $lp + 1 ?></td>
+                            <td class="fw-semibold"><?= h($acc['name']) ?></td>
+                            <td class="text-center"><?= (int)$acc['quantity_initial'] ?></td>
+                            <td class="text-center text-warning fw-bold"><?= $issued ?></td>
+                            <td class="text-center fw-bold <?= $remaining <= 0 ? 'text-danger' : ($remaining <= 3 ? 'text-warning' : 'text-success') ?>">
+                                <?= $remaining ?>
+                            </td>
+                            <td class="text-muted small"><?= h($acc['notes'] ?? '') ?></td>
+                            <?php if (isAdmin()): ?>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-action acc-edit-btn"
+                                        data-id="<?= $acc['id'] ?>"
+                                        data-name="<?= h($acc['name']) ?>"
+                                        data-qty="<?= (int)$acc['quantity_initial'] ?>"
+                                        data-notes="<?= h($acc['notes'] ?? '') ?>">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <form method="POST" class="d-inline">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="accessory_delete">
+                                    <input type="hidden" name="accessory_id" value="<?= $acc['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                            data-confirm="Usunąć akcesorium „<?= h($acc['name']) ?>"?"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </td>
+                            <?php endif; ?>
+                        </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($accessories)): ?>
+                        <tr><td colspan="<?= isAdmin() ? 7 : 6 ?>" class="text-center text-muted p-3">Brak akcesoriów. <?= isAdmin() ? 'Kliknij „Dodaj akcesorium", aby dodać pierwszy wpis.' : '' ?></td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <?php
+        $totalAcc       = count($accessories);
+        $totalInitial   = array_sum(array_column($accessories, 'quantity_initial'));
+        $totalIssued    = array_sum(array_column($accessories, 'issued'));
+        $totalRemaining = $totalInitial - $totalIssued;
+        ?>
+        <div class="card text-center p-3 mb-3">
+            <div class="h3 text-primary fw-bold"><?= $totalAcc ?></div>
+            <div class="text-muted small">Rodzajów akcesoriów</div>
+        </div>
+        <div class="card text-center p-3 mb-3">
+            <div class="h3 text-warning fw-bold"><?= $totalIssued ?></div>
+            <div class="text-muted small">Łącznie wydano</div>
+        </div>
+        <div class="card text-center p-3">
+            <div class="h3 fw-bold <?= $totalRemaining <= 0 ? 'text-danger' : 'text-success' ?>"><?= $totalRemaining ?></div>
+            <div class="text-muted small">Łącznie pozostało</div>
+        </div>
+    </div>
+</div>
+
+<!-- Accessory issues history -->
+<div class="card">
+    <div class="card-header"><i class="fas fa-history me-2 text-info"></i>Historia wydań z magazynu (akcesoria)</div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr><th>Data wydania</th><th>Akcesorium</th><th>Ilość</th><th>Zlecenie montażu</th><th>Wydał</th><th>Uwagi</th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($accHistory as $ah): ?>
+                <tr>
+                    <td class="text-muted small"><?= formatDateTime($ah['issued_at']) ?></td>
+                    <td class="fw-semibold"><?= h($ah['accessory_name']) ?></td>
+                    <td class="fw-bold"><?= (int)$ah['quantity'] ?> szt</td>
+                    <td>
+                        <?php if ($ah['inst_id']): ?>
+                        <a href="installations.php?action=view&id=<?= $ah['inst_id'] ?>"><?= h($ah['order_num']) ?></a>
+                        <?php else: ?>
+                        <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= h($ah['user_name']) ?></td>
+                    <td class="text-muted small"><?= h($ah['notes'] ?? '') ?></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($accHistory)): ?>
+                <tr><td colspan="6" class="text-center text-muted p-3">Brak historii wydań.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Accessory Modal -->
+<?php if (isAdmin()): ?>
+<div class="modal fade" id="addAccessoryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="accessory_add">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plus me-2 text-success"></i>Nowe akcesorium</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label required-star">Nazwa</label>
+                        <input type="text" name="name" class="form-control" required placeholder="np. Kabel zasilający, Taśma montażowa">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ilość początkowa (szt.)</label>
+                        <input type="number" name="quantity_initial" class="form-control" min="0" value="0">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Uwagi</label>
+                        <input type="text" name="notes" class="form-control" placeholder="Opcjonalny opis">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success"><i class="fas fa-save me-2"></i>Dodaj</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Accessory Modal -->
+<div class="modal fade" id="editAccessoryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="accessory_edit">
+                <input type="hidden" name="accessory_id" id="editAccId">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-edit me-2 text-primary"></i>Edytuj akcesorium</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label required-star">Nazwa</label>
+                        <input type="text" name="name" id="editAccName" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ilość początkowa (szt.)</label>
+                        <input type="number" name="quantity_initial" id="editAccQty" class="form-control" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Uwagi</label>
+                        <input type="text" name="notes" id="editAccNotes" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Zapisz zmiany</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.acc-edit-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.getElementById('editAccId').value    = btn.dataset.id;
+            document.getElementById('editAccName').value  = btn.dataset.name;
+            document.getElementById('editAccQty').value   = btn.dataset.qty;
+            document.getElementById('editAccNotes').value = btn.dataset.notes;
+            new bootstrap.Modal(document.getElementById('editAccessoryModal')).show();
+        });
+    });
+});
+</script>
+<?php endif; ?>
 
 <?php elseif ($action === 'sim_cards'): ?>
 <div class="card">

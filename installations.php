@@ -194,6 +194,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'installations.php?action=view&id=' . $editId);
 
     } elseif ($postAction === 'delete') {
+        if (!isAdmin()) { flashError('Kasowanie zleceń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'installations.php'); }
         $delId = (int)($_POST['id'] ?? 0);
         $devId = (int)($_POST['device_id'] ?? 0);
         $db->beginTransaction();
@@ -221,6 +222,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Nie można usunąć — powiązane rekordy istnieją.');
         }
         redirect(getBaseUrl() . 'installations.php');
+
+    } elseif ($postAction === 'accessory_issue') {
+        $instId  = (int)($_POST['installation_id'] ?? 0);
+        $accId   = (int)($_POST['accessory_id'] ?? 0);
+        $qty     = max(1, (int)($_POST['quantity'] ?? 1));
+        $notes   = sanitize($_POST['notes'] ?? '');
+        $curUser = getCurrentUser();
+        if (!$instId || !$accId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'installations.php?action=view&id=' . $instId); }
+        try {
+            // Check stock
+            $remStmt = $db->prepare("SELECT a.quantity_initial, COALESCE((SELECT SUM(ai.quantity) FROM accessory_issues ai WHERE ai.accessory_id = a.id),0) AS issued FROM accessories a WHERE a.id=?");
+            $remStmt->execute([$accId]);
+            $accRow = $remStmt->fetch();
+            if (!$accRow) { throw new Exception('Akcesorium nie istnieje.'); }
+            $remaining = (int)$accRow['quantity_initial'] - (int)$accRow['issued'];
+            if ($qty > $remaining) { throw new Exception('Niewystarczający stan: dostępne ' . $remaining . ' szt.'); }
+            $db->prepare("INSERT INTO accessory_issues (accessory_id, installation_id, user_id, quantity, notes) VALUES (?,?,?,?,?)")
+               ->execute([$accId, $instId, $curUser['id'], $qty, $notes]);
+            flashSuccess('Wydano ' . $qty . ' szt. z magazynu.');
+        } catch (Exception $e) {
+            flashError($e->getMessage());
+        }
+        redirect(getBaseUrl() . 'installations.php?action=view&id=' . $instId);
+
+    } elseif ($postAction === 'accessory_return') {
+        $issueId = (int)($_POST['issue_id'] ?? 0);
+        $instId  = (int)($_POST['installation_id'] ?? 0);
+        if (!$issueId) { flashError('Błąd.'); redirect(getBaseUrl() . 'installations.php?action=view&id=' . $instId); }
+        try {
+            $db->prepare("DELETE FROM accessory_issues WHERE id=?")->execute([$issueId]);
+            flashSuccess('Wydanie cofnięte — akcesorium zwrócono do stanu magazynowego.');
+        } catch (Exception $e) { flashError($e->getMessage()); }
+        redirect(getBaseUrl() . 'installations.php?action=view&id=' . $instId);
     }
 }
 
@@ -251,6 +285,35 @@ if ($action === 'view' && $id) {
     ");
     $installServices->execute([$id]);
     $services = $installServices->fetchAll();
+
+    // Accessories issued to this installation
+    $installAccessories = [];
+    try {
+        $accStmt = $db->prepare("
+            SELECT ai.id as issue_id, ai.quantity, ai.notes as issue_notes, ai.issued_at,
+                   a.name as accessory_name, u.name as user_name
+            FROM accessory_issues ai
+            JOIN accessories a ON a.id = ai.accessory_id
+            JOIN users u ON u.id = ai.user_id
+            WHERE ai.installation_id = ?
+            ORDER BY ai.issued_at DESC
+        ");
+        $accStmt->execute([$id]);
+        $installAccessories = $accStmt->fetchAll();
+    } catch (Exception $e) { $installAccessories = []; }
+
+    // Available accessories for issuing
+    $availableAccessories = [];
+    try {
+        $aaStmt = $db->query("
+            SELECT a.id, a.name,
+                   (a.quantity_initial - COALESCE((SELECT SUM(ai2.quantity) FROM accessory_issues ai2 WHERE ai2.accessory_id = a.id),0)) AS remaining
+            FROM accessories a
+            WHERE a.active = 1
+            ORDER BY a.name
+        ");
+        $availableAccessories = $aaStmt->fetchAll();
+    } catch (Exception $e) { $availableAccessories = []; }
 }
 
 if ($action === 'edit' && $id) {
@@ -392,6 +455,25 @@ if ($action === 'print_batch') {
     }
 }
 
+// Accessories data for print_batch view
+$batchAccessories = [];
+if ($action === 'print_batch' && !empty($batchIds)) {
+    try {
+        $phAcc = implode(',', array_fill(0, count($batchIds), '?'));
+        $batchAccStmt = $db->prepare("
+            SELECT ai.quantity, ai.notes, ai.issued_at,
+                   a.name AS accessory_name, u.name AS user_name
+            FROM accessory_issues ai
+            JOIN accessories a ON a.id = ai.accessory_id
+            JOIN users u ON u.id = ai.user_id
+            WHERE ai.installation_id IN ($phAcc)
+            ORDER BY a.name, ai.issued_at
+        ");
+        $batchAccStmt->execute($batchIds);
+        $batchAccessories = $batchAccStmt->fetchAll();
+    } catch (Exception $e) { $batchAccessories = []; }
+}
+
 $activePage = 'installations';
 $pageTitle = 'Montaże';
 include __DIR__ . '/includes/header.php';
@@ -486,6 +568,7 @@ include __DIR__ . '/includes/header.php';
                             <i class="fas fa-minus-circle"></i>
                         </button>
                         <?php endif; ?>
+                        <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="delete">
@@ -494,6 +577,7 @@ include __DIR__ . '/includes/header.php';
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
                                     data-confirm="Usuń montaż #<?= $inst['id'] ?>? Urządzenie zostanie oznaczone jako sprawne."><i class="fas fa-trash"></i></button>
                         </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -518,6 +602,7 @@ include __DIR__ . '/includes/header.php';
                             <i class="fas fa-minus-circle"></i>
                         </button>
                         <?php endif; ?>
+                        <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="delete">
@@ -526,6 +611,7 @@ include __DIR__ . '/includes/header.php';
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
                                     data-confirm="Usuń montaż #<?= $inst['id'] ?>? Urządzenie zostanie oznaczone jako sprawne."><i class="fas fa-trash"></i></button>
                         </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endif; ?>
@@ -604,6 +690,97 @@ function toggleBatchRows(groupKey, btn) {
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Accessories section -->
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria użyte przy tym montażu</span>
+        <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#issueAccModal">
+            <i class="fas fa-plus me-1"></i>Wydaj akcesorium
+        </button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr><th>Akcesorium</th><th class="text-center">Ilość</th><th>Wydał</th><th>Data wydania</th><th>Uwagi</th><th></th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($installAccessories as $ia): ?>
+                <tr>
+                    <td class="fw-semibold"><?= h($ia['accessory_name']) ?></td>
+                    <td class="text-center fw-bold"><?= (int)$ia['quantity'] ?> szt</td>
+                    <td><?= h($ia['user_name']) ?></td>
+                    <td class="text-muted small"><?= formatDateTime($ia['issued_at']) ?></td>
+                    <td class="text-muted small"><?= h($ia['issue_notes'] ?? '') ?></td>
+                    <td>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="accessory_return">
+                            <input type="hidden" name="issue_id" value="<?= $ia['issue_id'] ?>">
+                            <input type="hidden" name="installation_id" value="<?= $installation['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Cofnąć wydanie tego akcesorium?" title="Cofnij wydanie / zwróć do magazynu">
+                                <i class="fas fa-undo"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($installAccessories)): ?>
+                <tr><td colspan="6" class="text-center text-muted p-2">Brak akcesoriów przypisanych do tego zlecenia.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Issue Accessory Modal -->
+<div class="modal fade" id="issueAccModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="accessory_issue">
+                <input type="hidden" name="installation_id" value="<?= $installation['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-toolbox me-2 text-warning"></i>Wydaj akcesorium ze stanu</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <?php if (empty($availableAccessories)): ?>
+                    <div class="alert alert-warning">Brak dostępnych akcesoriów. <a href="inventory.php?action=accessories">Dodaj akcesoria w magazynie.</a></div>
+                    <?php else: ?>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Akcesorium</label>
+                        <select name="accessory_id" class="form-select" required>
+                            <option value="">— wybierz —</option>
+                            <?php foreach ($availableAccessories as $aa): ?>
+                            <option value="<?= $aa['id'] ?>" <?= (int)$aa['remaining'] <= 0 ? 'disabled' : '' ?>>
+                                <?= h($aa['name']) ?> (dostępne: <?= max(0,(int)$aa['remaining']) ?> szt.)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Ilość (szt.)</label>
+                        <input type="number" name="quantity" class="form-control" required min="1" value="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Uwagi</label>
+                        <input type="text" name="notes" class="form-control" placeholder="Opcjonalne">
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <?php if (!empty($availableAccessories)): ?>
+                    <button type="submit" class="btn btn-warning"><i class="fas fa-check me-2"></i>Wydaj z magazynu</button>
+                    <?php endif; ?>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -976,6 +1153,33 @@ $installAddr = $firstRow['installation_address'] ?? '';
     <div style="font-size:.87rem;color:#333;margin-bottom:24px;padding:10px 14px;background:#f8faff;border-radius:6px;border:1px solid #e0e7ff">
         <?= h($firstRow['notes']) ?>
     </div>
+    <?php endif; ?>
+
+    <!-- ── Accessories ──────────────────── -->
+    <?php if (!empty($batchAccessories)): ?>
+    <div class="print-section-label">Materiały eksploatacyjne / Akcesoria</div>
+    <table class="print-device-table" style="margin-bottom:24px">
+        <thead>
+            <tr>
+                <th style="width:32px">#</th>
+                <th>Akcesorium</th>
+                <th style="width:80px;text-align:center">Ilość</th>
+                <th>Wydał</th>
+                <th>Uwagi</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($batchAccessories as $ai => $bacc): ?>
+            <tr>
+                <td style="color:#2563eb;font-weight:700"><?= $ai + 1 ?></td>
+                <td style="font-weight:600"><?= h($bacc['accessory_name']) ?></td>
+                <td style="text-align:center;font-weight:700"><?= (int)$bacc['quantity'] ?> szt</td>
+                <td style="color:#666"><?= h($bacc['user_name']) ?></td>
+                <td style="color:#666;font-size:.78rem"><?= h($bacc['notes'] ?? '') ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
     <?php endif; ?>
 
     <!-- ── Signatures ─────────────────────── -->

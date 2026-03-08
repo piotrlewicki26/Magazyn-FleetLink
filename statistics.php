@@ -11,6 +11,11 @@ require_once __DIR__ . '/includes/functions.php';
 date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
 
+if (!isAdmin()) {
+    flashError('Brak dostępu do statystyk.');
+    redirect(getBaseUrl() . 'dashboard.php');
+}
+
 $db = getDb();
 
 $year = (int)($_GET['year'] ?? date('Y'));
