@@ -113,6 +113,16 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                     </a>
                 </li>
                 <?php endif; ?>
+                <li class="nav-item">
+                    <a class="nav-link" href="https://system.le-mar.eu/partner/" target="_blank" rel="noopener noreferrer">
+                        <i class="fas fa-satellite-dish me-1"></i>Logowanie do systemu GPS
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="https://system.le-mar.eu/services/" target="_blank" rel="noopener noreferrer">
+                        <i class="fas fa-broadcast-tower me-1"></i>Status Urządzenia
+                    </a>
+                </li>
                 <?php if (isAdmin()): ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['users','settings','email']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">

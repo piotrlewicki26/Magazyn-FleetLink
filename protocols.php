@@ -118,6 +118,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare("DELETE FROM protocols WHERE id=?")->execute([$delId]);
         flashSuccess('Protokół usunięty.');
         redirect(getBaseUrl() . 'protocols.php');
+
+    } elseif ($postAction === 'send_email') {
+        $protoId  = (int)($_POST['id'] ?? 0);
+        $emailTo  = sanitize($_POST['email_to'] ?? '');
+        $emailName= sanitize($_POST['email_to_name'] ?? '');
+        $emailMsg = sanitize($_POST['email_message'] ?? '');
+
+        if (!$protoId || !$emailTo || !filter_var($emailTo, FILTER_VALIDATE_EMAIL)) {
+            flashError('Podaj poprawny adres e-mail odbiorcy.');
+        } else {
+            // Fetch protocol summary
+            $pStmt = $db->prepare("
+                SELECT p.protocol_number, p.type, p.date,
+                       u.name as technician_name,
+                       v.registration, v.make,
+                       d.serial_number, m.name as model_name, mf.name as manufacturer_name
+                FROM protocols p
+                LEFT JOIN users u ON u.id=p.technician_id
+                LEFT JOIN installations i ON i.id=p.installation_id
+                LEFT JOIN vehicles v ON v.id=i.vehicle_id
+                LEFT JOIN devices d ON d.id=i.device_id
+                LEFT JOIN models m ON m.id=d.model_id
+                LEFT JOIN manufacturers mf ON mf.id=m.manufacturer_id
+                WHERE p.id=?
+            ");
+            $pStmt->execute([$protoId]);
+            $pData = $pStmt->fetch();
+
+            if ($pData) {
+                $typeLabel = ['PP' => 'Protokół Przekazania', 'PU' => 'Protokół Uruchomienia', 'PS' => 'Protokół Serwisowy'];
+                $subject = h($typeLabel[$pData['type']] ?? 'Protokół') . ' nr ' . h($pData['protocol_number']);
+                $msgHtml = nl2br(h($emailMsg));
+                $body = getEmailTemplate('general', [
+                    'MESSAGE'     => "<strong>Dotyczy: {$subject}</strong><br>Data: " . formatDate($pData['date']) . "<br><br>{$msgHtml}",
+                    'SENDER_NAME' => getCurrentUser()['name'],
+                    'DATE'        => date('d.m.Y'),
+                ]);
+                if (sendAppEmail($emailTo, $emailName, $subject, $body)) {
+                    flashSuccess("Wiadomość została wysłana na adres {$emailTo}.");
+                } else {
+                    flashError('Nie udało się wysłać wiadomości. Sprawdź konfigurację e-mail w ustawieniach.');
+                }
+            }
+        }
+        redirect(getBaseUrl() . 'protocols.php?action=view&id=' . $protoId);
     }
 }
 
@@ -132,7 +177,7 @@ if (in_array($action, ['view','edit','print']) && $id) {
                d.serial_number, d.imei,
                m.name as model_name, mf.name as manufacturer_name,
                v.registration, v.make, v.model_name as vehicle_model, v.vin,
-               c.contact_name, c.company_name, c.nip,
+               c.contact_name, c.company_name, c.nip, c.email as client_email,
                sd.serial_number  as svc_serial,  sd.imei  as svc_imei,
                sm.name           as svc_model,   smf.name as svc_manufacturer,
                rd.serial_number  as rep_serial,  rd.imei  as rep_imei,
@@ -407,6 +452,9 @@ include __DIR__ . '/includes/header.php';
             <div class="card-footer d-flex gap-2 flex-wrap">
                 <a href="protocols.php?action=print&id=<?= $protocol['id'] ?>" target="_blank" class="btn btn-sm btn-primary"><i class="fas fa-print me-1"></i>Drukuj</a>
                 <a href="protocols.php?action=edit&id=<?= $protocol['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                <button type="button" class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#sendEmailModal">
+                    <i class="fas fa-envelope me-1"></i>Wyślij do klienta
+                </button>
                 <?php if (isAdmin()): ?>
                 <form method="POST" class="d-inline">
                     <?= csrfField() ?>
@@ -419,6 +467,45 @@ include __DIR__ . '/includes/header.php';
                 </form>
                 <?php endif; ?>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Send Email Modal -->
+<div class="modal fade" id="sendEmailModal" tabindex="-1" aria-labelledby="sendEmailModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="send_email">
+                <input type="hidden" name="id" value="<?= $protocol['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="sendEmailModalLabel"><i class="fas fa-envelope me-2 text-info"></i>Wyślij protokół do klienta</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label required-star">Adres e-mail odbiorcy</label>
+                        <input type="email" name="email_to" class="form-control" required
+                               value="<?= h($protocol['client_email'] ?? '') ?>"
+                               placeholder="adres@email.pl">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nazwa odbiorcy</label>
+                        <input type="text" name="email_to_name" class="form-control"
+                               value="<?= h($protocol['company_name'] ?: ($protocol['contact_name'] ?? '')) ?>">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Treść wiadomości</label>
+                        <textarea name="email_message" class="form-control" rows="5" required
+                                  placeholder="Wpisz treść wiadomości do klienta…"><?= "Szanowni Państwo,\n\nW załączeniu przekazujemy protokół nr " . h($protocol['protocol_number']) . " z dnia " . formatDate($protocol['date']) . ".\n\nZ poważaniem," ?></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-info text-white"><i class="fas fa-paper-plane me-2"></i>Wyślij</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

@@ -169,6 +169,24 @@ function generateProtocolNumber($type = 'PP') {
 function sendAppEmail($to, $toName, $subject, $body, $replyTo = null) {
     require_once __DIR__ . '/config.php';
 
+    // Check DB settings first (override config.php constants)
+    $dbSmtpEnabled = false;
+    $dbSmtpSettings = [];
+    try {
+        $db = getDb();
+        $rows = $db->query("SELECT `key`, `value` FROM settings WHERE `key` LIKE 'smtp_%'")->fetchAll();
+        foreach ($rows as $r) { $dbSmtpSettings[$r['key']] = $r['value']; }
+        $dbSmtpEnabled = !empty($dbSmtpSettings['smtp_enabled']) && $dbSmtpSettings['smtp_enabled'] === '1'
+                      && !empty($dbSmtpSettings['smtp_host']);
+    } catch (Exception $e) {
+        // DB not available — fall through to config.php constants below
+        error_log('FleetLink: could not load SMTP settings from DB: ' . $e->getMessage());
+    }
+
+    if ($dbSmtpEnabled) {
+        return sendSmtpEmail($to, $toName, $subject, $body, $replyTo, $dbSmtpSettings);
+    }
+
     if (defined('MAIL_SMTP') && MAIL_SMTP) {
         return sendSmtpEmail($to, $toName, $subject, $body, $replyTo);
     }
@@ -186,15 +204,15 @@ function sendAppEmail($to, $toName, $subject, $body, $replyTo = null) {
     return $result;
 }
 
-function sendSmtpEmail($to, $toName, $subject, $body, $replyTo = null) {
+function sendSmtpEmail($to, $toName, $subject, $body, $replyTo = null, $dbSettings = []) {
     // Simple SMTP implementation using fsockopen
     // Supports port 465 (implicit SSL/TLS) and port 587 (STARTTLS)
-    $host     = defined('MAIL_HOST') ? MAIL_HOST : 'localhost';
-    $port     = defined('MAIL_PORT') ? (int)MAIL_PORT : 587;
-    $user     = defined('MAIL_USER') ? MAIL_USER : '';
-    $pass     = defined('MAIL_PASS') ? MAIL_PASS : '';
-    $from     = defined('MAIL_FROM') ? MAIL_FROM : '';
-    $fromName = defined('MAIL_FROM_NAME') ? MAIL_FROM_NAME : 'FleetLink';
+    $host     = !empty($dbSettings['smtp_host']) ? $dbSettings['smtp_host'] : (defined('MAIL_HOST') ? MAIL_HOST : 'localhost');
+    $port     = !empty($dbSettings['smtp_port']) ? (int)$dbSettings['smtp_port'] : (defined('MAIL_PORT') ? (int)MAIL_PORT : 587);
+    $user     = !empty($dbSettings['smtp_user']) ? $dbSettings['smtp_user'] : (defined('MAIL_USER') ? MAIL_USER : '');
+    $pass     = !empty($dbSettings['smtp_pass']) ? $dbSettings['smtp_pass'] : (defined('MAIL_PASS') ? MAIL_PASS : '');
+    $from     = !empty($dbSettings['smtp_from']) ? $dbSettings['smtp_from'] : (defined('MAIL_FROM') ? MAIL_FROM : '');
+    $fromName = !empty($dbSettings['smtp_from_name']) ? $dbSettings['smtp_from_name'] : (defined('MAIL_FROM_NAME') ? MAIL_FROM_NAME : 'FleetLink');
 
     try {
         // Port 465 uses implicit SSL; port 587/25 use plain + optional STARTTLS

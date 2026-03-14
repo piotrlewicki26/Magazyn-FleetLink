@@ -27,7 +27,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'offer_footer'      => sanitize($_POST['offer_footer'] ?? ''),
         'contract_template' => sanitize($_POST['contract_template'] ?? ''),
         'vat_rate'          => (string)(int)($_POST['vat_rate'] ?? 23),
+        // Email / SMTP settings
+        'smtp_enabled'      => !empty($_POST['smtp_enabled']) ? '1' : '0',
+        'smtp_host'         => sanitize($_POST['smtp_host'] ?? ''),
+        'smtp_port'         => (string)(int)($_POST['smtp_port'] ?? 587),
+        'smtp_user'         => sanitize($_POST['smtp_user'] ?? ''),
+        'smtp_from'         => sanitize($_POST['smtp_from'] ?? ''),
+        'smtp_from_name'    => sanitize($_POST['smtp_from_name'] ?? ''),
     ];
+    // Only save password if provided (to avoid wiping it when left blank)
+    if (!empty($_POST['smtp_pass'])) {
+        $settingsToSave['smtp_pass'] = $_POST['smtp_pass'];
+    }
 
     $stmt = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
     foreach ($settingsToSave as $key => $value) {
@@ -111,11 +122,46 @@ include __DIR__ . '/includes/header.php';
             </div>
 
             <hr>
-            <div class="alert alert-info small">
-                <i class="fas fa-info-circle me-2"></i>
-                <strong>Konfiguracja e-mail</strong> jest przechowywana w pliku <code>includes/config.php</code>.
-                Aby zmienić ustawienia e-mail, uruchom ponownie kreator <a href="setup.php">setup.php</a> (po usunięciu pliku config.php)
-                lub ręcznie edytuj plik konfiguracyjny.
+            <h6 class="fw-bold text-muted mb-3"><i class="fas fa-envelope me-2"></i>Konfiguracja e-mail (SMTP)</h6>
+            <div class="row g-3 mb-4">
+                <div class="col-12">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="smtp_enabled" id="smtpEnabled"
+                               value="1" <?= !empty($settings['smtp_enabled']) && $settings['smtp_enabled'] === '1' ? 'checked' : '' ?>
+                               onchange="document.getElementById('smtpFields').style.display=this.checked?'block':'none'">
+                        <label class="form-check-label" for="smtpEnabled">Używaj SMTP do wysyłania e-maili</label>
+                    </div>
+                    <small class="text-muted">Gdy wyłączone, system używa funkcji <code>mail()</code> serwera PHP.</small>
+                </div>
+                <div id="smtpFields" style="display:<?= (!empty($settings['smtp_enabled']) && $settings['smtp_enabled'] === '1') ? 'block' : 'none' ?>">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Serwer SMTP</label>
+                            <input type="text" name="smtp_host" class="form-control" value="<?= h($settings['smtp_host'] ?? '') ?>" placeholder="mail.twojadomena.pl">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Port</label>
+                            <input type="number" name="smtp_port" class="form-control" value="<?= h($settings['smtp_port'] ?? '587') ?>" placeholder="587">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Login SMTP</label>
+                            <input type="text" name="smtp_user" class="form-control" value="<?= h($settings['smtp_user'] ?? '') ?>" placeholder="login@domena.pl" autocomplete="off">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Hasło SMTP</label>
+                            <input type="password" name="smtp_pass" class="form-control" placeholder="Zostaw puste, aby nie zmieniać" autocomplete="new-password">
+                            <small class="text-muted">Zostaw puste, aby zachować dotychczasowe hasło.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Adres nadawcy (From)</label>
+                            <input type="email" name="smtp_from" class="form-control" value="<?= h($settings['smtp_from'] ?? '') ?>" placeholder="noreply@twojadomena.pl">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Nazwa nadawcy</label>
+                            <input type="text" name="smtp_from_name" class="form-control" value="<?= h($settings['smtp_from_name'] ?? 'FleetLink Magazyn') ?>" placeholder="FleetLink Magazyn">
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Zapisz ustawienia</button>
