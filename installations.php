@@ -241,6 +241,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(getBaseUrl() . 'installations.php');
 
+    } elseif ($postAction === 'delete_batch') {
+        if (!isAdmin()) { flashError('Kasowanie grup jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'installations.php'); }
+        $batchId = (int)($_POST['batch_id'] ?? 0);
+        if (!$batchId) { flashError('Nieprawidłowy identyfikator grupy.'); redirect(getBaseUrl() . 'installations.php'); }
+        $db->beginTransaction();
+        try {
+            $batchInstStmt = $db->prepare("SELECT id, device_id FROM installations WHERE batch_id=? OR (id=? AND batch_id IS NULL)");
+            $batchInstStmt->execute([$batchId, $batchId]);
+            $batchInsts = $batchInstStmt->fetchAll();
+            if (empty($batchInsts)) { throw new Exception('Grupa montażu nie istnieje.'); }
+            foreach ($batchInsts as $binst) {
+                $bdevId = (int)$binst['device_id'];
+                if ($bdevId) {
+                    $bdevInfoStmt = $db->prepare("SELECT model_id, status FROM devices WHERE id=? FOR UPDATE");
+                    $bdevInfoStmt->execute([$bdevId]);
+                    $bdevInfo = $bdevInfoStmt->fetch();
+                    if ($bdevInfo && $bdevInfo['status'] === 'zamontowany') {
+                        $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$bdevId]);
+                        adjustInventoryForStatusChange($db, $bdevInfo['model_id'], 'zamontowany', 'sprawny');
+                    }
+                }
+                $db->prepare("DELETE FROM installations WHERE id=?")->execute([$binst['id']]);
+            }
+            $db->commit();
+            $deleted = count($batchInsts);
+            flashSuccess('Usunięto grupę montażu (' . $deleted . ' urządzeń).');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'installations.php');
+
     } elseif ($postAction === 'accessory_issue') {
         $instId  = (int)($_POST['installation_id'] ?? 0);
         $accId   = (int)($_POST['accessory_id'] ?? 0);
@@ -303,6 +335,14 @@ if ($action === 'view' && $id) {
     ");
     $installServices->execute([$id]);
     $services = $installServices->fetchAll();
+
+    // Fetch existing PP (Protokół Przekazania) for this installation
+    $existingPP = null;
+    try {
+        $ppStmt = $db->prepare("SELECT id, protocol_number FROM protocols WHERE installation_id=? AND type='PP' ORDER BY id DESC LIMIT 1");
+        $ppStmt->execute([$id]);
+        $existingPP = $ppStmt->fetch() ?: null;
+    } catch (Exception $e) { $existingPP = null; }
 
     // Accessories issued to this installation
     $installAccessories = [];
@@ -505,6 +545,24 @@ if ($action === 'print_batch' && !empty($batchIds)) {
     } catch (Exception $e) { $batchAccessories = []; }
 }
 
+// Fetch installation-related protocols for the Protocols tab
+$installationProtocols = [];
+if ($action === 'list') {
+    try {
+        $installationProtocols = $db->query("
+            SELECT p.id, p.type, p.protocol_number, p.date,
+                   u.name as technician_name, v.registration, d.serial_number
+            FROM protocols p
+            LEFT JOIN users u ON u.id=p.technician_id
+            LEFT JOIN installations i ON i.id=p.installation_id
+            LEFT JOIN vehicles v ON v.id=i.vehicle_id
+            LEFT JOIN devices d ON d.id=i.device_id
+            WHERE p.installation_id IS NOT NULL
+            ORDER BY p.date DESC, p.id DESC
+        ")->fetchAll();
+    } catch (Exception $e) { $installationProtocols = []; }
+}
+
 $activePage = 'installations';
 $pageTitle = 'Montaże';
 include __DIR__ . '/includes/header.php';
@@ -522,6 +580,20 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($action === 'list'): ?>
+<ul class="nav nav-tabs mb-3" id="installTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-montaze" data-bs-toggle="tab" data-bs-target="#pane-montaze" type="button" role="tab">
+            <i class="fas fa-car me-1"></i>Montaże
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-protokoly" data-bs-toggle="tab" data-bs-target="#pane-protokoly" type="button" role="tab">
+            <i class="fas fa-clipboard-check me-1"></i>Protokoły
+        </button>
+    </li>
+</ul>
+<div class="tab-content">
+<div class="tab-pane fade show active" id="pane-montaze" role="tabpanel">
 <div class="card mb-3">
     <div class="card-body py-2">
         <form method="GET" class="row g-2">
@@ -579,6 +651,17 @@ include __DIR__ . '/includes/header.php';
                                 title="Rozwiń / zwiń urządzenia">
                             <i class="fas fa-chevron-down"></i>
                         </button>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete_batch">
+                            <input type="hidden" name="batch_id" value="<?= $group['ids'][0] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń całą grupę montażu (<?= count($group['items']) ?> urządzeń)? Urządzenia zostaną oznaczone jako sprawne.">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <!-- Batch child rows (collapsed by default) -->
@@ -666,6 +749,49 @@ function toggleBatchRows(groupKey, btn) {
 }
 </script>
 
+</div><!-- /pane-montaze -->
+<div class="tab-pane fade" id="pane-protokoly" role="tabpanel">
+<div class="card">
+    <div class="card-header">Protokoły montaży (<?= count($installationProtocols) ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead><tr><th>Nr protokołu</th><th>Typ</th><th>Data</th><th>Pojazd</th><th>Urządzenie</th><th>Technik</th><th>Akcje</th></tr></thead>
+            <tbody>
+                <?php
+                    $typeLabel = ['PP' => 'Przekazania', 'PU' => 'Uruchomienia', 'PS' => 'Serwisowy'];
+                    $typeColor = ['PP' => 'primary', 'PU' => 'success', 'PS' => 'warning'];
+                    foreach ($installationProtocols as $ip):
+                ?>
+                <tr>
+                    <td class="fw-bold"><a href="protocols.php?action=view&id=<?= $ip['id'] ?>"><?= h($ip['protocol_number']) ?></a></td>
+                    <td><span class="badge bg-<?= $typeColor[$ip['type']] ?? 'secondary' ?>"><?= $typeLabel[$ip['type']] ?? h($ip['type']) ?></span></td>
+                    <td><?= formatDate($ip['date']) ?></td>
+                    <td><?= h($ip['registration'] ?? '—') ?></td>
+                    <td><?= h($ip['serial_number'] ?? '—') ?></td>
+                    <td><?= h($ip['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <a href="protocols.php?action=view&id=<?= $ip['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <a href="protocols.php?action=print&id=<?= $ip['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary btn-action"><i class="fas fa-print"></i></a>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" action="protocols.php" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $ip['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń protokół <?= h($ip['protocol_number']) ?>?"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($installationProtocols)): ?><tr><td colspan="7" class="text-center text-muted p-3">Brak protokołów.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+</div><!-- /pane-protokoly -->
+</div><!-- /tab-content -->
+
 <?php elseif ($action === 'view' && isset($installation)): ?>
 <div class="row g-3">
     <div class="col-md-4">
@@ -694,7 +820,15 @@ function toggleBatchRows(groupKey, btn) {
                 <button onclick="showUninstallModal(<?= $installation['id'] ?>, <?= $installation['device_id'] ?>, '<?= h($installation['serial_number']) ?>')" class="btn btn-sm btn-warning"><i class="fas fa-minus-circle me-1"></i>Demontaż</button>
                 <?php endif; ?>
                 <a href="services.php?action=add&installation=<?= $installation['id'] ?>&device=<?= $installation['device_id'] ?>" class="btn btn-sm btn-outline-warning"><i class="fas fa-wrench me-1"></i>Serwis</a>
+                <?php if (isTechnician()): ?>
+                    <?php if ($existingPP): ?>
+                    <a href="protocols.php?action=print&id=<?= $existingPP['id'] ?>" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fas fa-print me-1"></i>Drukuj PP</a>
+                    <?php else: ?>
+                    <a href="protocols.php?action=add&installation=<?= $installation['id'] ?>&type=PP" class="btn btn-sm btn-outline-primary"><i class="fas fa-clipboard-check me-1"></i>Protokół Przekazania</a>
+                    <?php endif; ?>
+                <?php else: ?>
                 <a href="protocols.php?action=add&installation=<?= $installation['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
+                <?php endif; ?>
                 <button type="button" class="btn btn-sm btn-outline-dark" onclick="window.print()"><i class="fas fa-print me-1"></i>Drukuj</button>
             </div>
         </div>
@@ -819,7 +953,7 @@ function toggleBatchRows(groupKey, btn) {
 </div>
 
 <?php elseif ($action === 'add' || $action === 'edit'): ?>
-<div class="card" style="max-width:1050px">
+<div class="card" style="max-width:1400px">
     <div class="card-header">
         <i class="fas fa-<?= $action === 'add' ? 'plus' : 'edit' ?> me-2"></i>
         <?= $action === 'add' ? 'Nowy montaż' : 'Edytuj montaż' ?>
@@ -830,6 +964,7 @@ function toggleBatchRows(groupKey, btn) {
             <input type="hidden" name="action" value="<?= $action ?>">
             <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $installation['id'] ?>"><input type="hidden" name="vehicle_id" value="<?= $installation['vehicle_id'] ?? 0 ?>"><?php endif; ?>
             <div class="row g-3">
+                <?php if ($action === 'add' && !empty($availableAccessories)): ?><div class="col-lg-8"><div class="row g-3"><?php endif; ?>
                 <?php if ($action === 'add'): ?>
                 <!-- Multi-device selection rows -->
                 <div class="col-12">
@@ -974,8 +1109,9 @@ function toggleBatchRows(groupKey, btn) {
                     <textarea name="notes" class="form-control" rows="3"><?= h($installation['notes'] ?? '') ?></textarea>
                 </div>
                 <?php if ($action === 'add' && !empty($availableAccessories)): ?>
-                <div class="col-12">
-                    <div class="card bg-light border-0 mt-2">
+                </div></div><!-- /inner row g-3 + /col-lg-8 -->
+                <div class="col-lg-4">
+                    <div class="card bg-light border-0 h-100">
                         <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
                             <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria do pobrania z magazynu (opcjonalnie)</span>
                             <button type="button" class="btn btn-outline-warning btn-sm" id="instAddAccRow">
@@ -1006,7 +1142,7 @@ function toggleBatchRows(groupKey, btn) {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div><!-- /col-lg-4 accessories -->
                 <?php endif; ?>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i><?= $action === 'add' ? 'Zarejestruj montaż' : 'Zapisz zmiany' ?></button>
