@@ -134,28 +134,44 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         $allcan300Pass = $navSchemaRow;
                     }
                 } catch (Exception $e) {}
+                $navSchemas = [
+                    ['label' => 'ALL-CAN 300',        'url' => 'https://share.teltonika.lt/index.php/s/rFHo99iWX8BHMaZ/authenticate/showshare',    'pass' => $allcan300Pass],
+                    ['label' => 'CAN-CONTROL',        'url' => 'https://share.teltonika.lt/index.php/s/srTkkTW57jczcAT/authenticate/showshare',    'pass' => "3dmU~I{_@;W'OVL"],
+                    ['label' => 'CAN-CONTROL 6C IMMO','url' => 'https://share.teltonika.lt/index.php/s/k7CaQNcbjTRmSSL/authenticate/showshare',    'pass' => "f_n8n}G'sK+j4fx"],
+                    ['label' => 'CAN-CONTROL 6C',     'url' => 'https://share.teltonika.lt/index.php/s/Ad6P4Ea93Nptjnn/authenticate/showshare',    'pass' => 'q1{nGYAfw3-!5y#'],
+                    ['label' => 'CAN-CONTROL DTC',    'url' => 'https://share.teltonika.lt/index.php/s/Y2YYfPMi9e7kyTK/authenticate/showshare',    'pass' => "Hm!oo7jW-#kgxu'"],
+                    ['label' => 'CAN-CONTROL IMMO',   'url' => 'https://share.teltonika.lt/index.php/s/jEq22Dcqonq86p9/authenticate/showshare',    'pass' => 'F6evA;eIYTji~f('],
+                    ['label' => 'CAN-CONTROL IMMO P1','url' => 'https://share.teltonika.lt/index.php/s/73jkTnDko8PTJCe/authenticate/showshare',    'pass' => '#F+B9Q1OJS#uSI@'],
+                    ['label' => 'FMB 140 ALL-CAN',    'url' => 'https://share.teltonika.lt/index.php/s/xsxZPknB78S9763/authenticate/showshare',    'pass' => 'EmNj+l%3g!aaSqQ'],
+                    ['label' => 'FMB 140 LV-CAN',     'url' => 'https://share.teltonika.lt/index.php/s/mmrjRCGkicBjAtz/authenticate/showshare',    'pass' => 'IrL@nhJuyvdD=96'],
+                    ['label' => 'FMC 150',             'url' => 'https://share.teltonika.lt/index.php/s/w8Xi3txtHLB3B4H/authenticate/showshare',    'pass' => 'i-evHv6#hu5I(ei'],
+                    ['label' => 'LV-CAN200',           'url' => 'https://share.teltonika.lt/index.php/s/F9nGxssycArbkem/authenticate/showshare',    'pass' => ',J8RPt%_EgEFzOY'],
+                    ['label' => 'LV-CAN200 DTC',       'url' => 'https://share.teltonika.lt/index.php/s/JnEzJEeTDMQFqbX/authenticate/showshare',    'pass' => "W.#2}~MaqY]]w'D"],
+                ];
                 ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
                         <i class="fas fa-sitemap me-1"></i>Schematy
                     </a>
                     <ul class="dropdown-menu">
+                        <?php foreach ($navSchemas as $schemaIdx => $schema): $schemaId = 'schemaPass' . $schemaIdx; ?>
                         <li>
-                            <a class="dropdown-item" href="https://share.teltonika.lt/index.php/s/rFHo99iWX8BHMaZ/authenticate/showshare" target="_blank" rel="noopener noreferrer">
-                                <i class="fas fa-file-alt me-2"></i>ALL-CAN 300
+                            <a class="dropdown-item" href="<?= h($schema['url']) ?>" target="_blank" rel="noopener noreferrer">
+                                <i class="fas fa-file-alt me-2"></i><?= h($schema['label']) ?>
                             </a>
                         </li>
                         <li>
                             <span class="dropdown-item d-flex align-items-center gap-2" style="cursor:default">
                                 <i class="fas fa-key text-muted"></i>
-                                <span class="text-muted small" id="allcan300PassText"><?= h($allcan300Pass) ?></span>
+                                <span class="text-muted small" id="<?= h($schemaId) ?>"><?= h($schema['pass']) ?></span>
                                 <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-auto" style="font-size:.75rem"
-                                     onclick="(function(btn){var t=document.getElementById('allcan300PassText').textContent;navigator.clipboard.writeText(t).then(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-check\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);}).catch(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-times\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);});})(this)"
+                                    onclick="(function(btn,id){var t=document.getElementById(id).textContent;navigator.clipboard.writeText(t).then(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-check\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);}).catch(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-times\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);});})(this,'<?= h($schemaId) ?>')"
                                     title="Kopiuj hasło">
                                     <i class="fas fa-copy"></i>
                                 </button>
                             </span>
                         </li>
+                        <?php endforeach; ?>
                     </ul>
                 </li>
                 <?php if (isAdmin()): ?>
