@@ -115,7 +115,7 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                 <?php endif; ?>
                 <li class="nav-item">
                     <a class="nav-link" href="https://system.le-mar.eu/partner/" target="_blank" rel="noopener noreferrer">
-                        <i class="fas fa-satellite-dish me-1"></i>Logowanie do systemu GPS
+                        <i class="fas fa-satellite-dish me-1"></i>Logowanie GPS
                     </a>
                 </li>
                 <li class="nav-item">
@@ -143,8 +143,18 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         <li>
                             <a class="dropdown-item" href="https://share.teltonika.lt/index.php/s/rFHo99iWX8BHMaZ/authenticate/showshare" target="_blank" rel="noopener noreferrer">
                                 <i class="fas fa-file-alt me-2"></i>ALL-CAN 300
-                                <br><small class="text-muted ms-4"><i class="fas fa-key me-1"></i><?= h($allcan300Pass) ?></small>
                             </a>
+                        </li>
+                        <li>
+                            <span class="dropdown-item d-flex align-items-center gap-2" style="cursor:default">
+                                <i class="fas fa-key text-muted"></i>
+                                <span class="text-muted small" id="allcan300PassText"><?= h($allcan300Pass) ?></span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-auto" style="font-size:.75rem"
+                                     onclick="(function(btn){var t=document.getElementById('allcan300PassText').textContent;navigator.clipboard.writeText(t).then(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-check\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);}).catch(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-times\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);});})(this)"
+                                    title="Kopiuj hasło">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </span>
                         </li>
                     </ul>
                 </li>
