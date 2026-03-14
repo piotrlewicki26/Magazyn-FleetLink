@@ -34,6 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'smtp_user'         => sanitize($_POST['smtp_user'] ?? ''),
         'smtp_from'         => sanitize($_POST['smtp_from'] ?? ''),
         'smtp_from_name'    => sanitize($_POST['smtp_from_name'] ?? ''),
+        // Schema document passwords
+        'schema_allcan300_pass' => sanitize($_POST['schema_allcan300_pass'] ?? 'Pj0;Gm6$.g2rnd9'),
     ];
     // Only save password if provided (to avoid wiping it when left blank)
     if (!empty($_POST['smtp_pass'])) {
@@ -161,6 +163,17 @@ include __DIR__ . '/includes/header.php';
                             <input type="text" name="smtp_from_name" class="form-control" value="<?= h($settings['smtp_from_name'] ?? 'FleetLink Magazyn') ?>" placeholder="FleetLink Magazyn">
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <hr>
+            <h6 class="fw-bold text-muted mb-3"><i class="fas fa-sitemap me-2"></i>Schematy — hasła dostępu</h6>
+            <div class="row g-3 mb-4">
+                <div class="col-md-6">
+                    <label class="form-label">ALL-CAN 300 — hasło do dokumentu</label>
+                    <input type="text" name="schema_allcan300_pass" class="form-control"
+                           value="<?= h($settings['schema_allcan300_pass'] ?? 'Pj0;Gm6$.g2rnd9') ?>">
+                    <small class="text-muted">Hasło wyświetlane obok linku "ALL-CAN 300" w menu Schematy.</small>
                 </div>
             </div>
 

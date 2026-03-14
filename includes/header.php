@@ -123,6 +123,31 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         <i class="fas fa-broadcast-tower me-1"></i>Status Urządzenia
                     </a>
                 </li>
+                <?php
+                // Load schema settings for Schematy dropdown
+                $allcan300Pass = 'Pj0;Gm6$.g2rnd9';
+                try {
+                    $navSchemaStmt = getDb()->prepare("SELECT `value` FROM settings WHERE `key` = 'schema_allcan300_pass' LIMIT 1");
+                    $navSchemaStmt->execute();
+                    $navSchemaRow = $navSchemaStmt->fetchColumn();
+                    if ($navSchemaRow !== false && $navSchemaRow !== '') {
+                        $allcan300Pass = $navSchemaRow;
+                    }
+                } catch (Exception $e) {}
+                ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-sitemap me-1"></i>Schematy
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li>
+                            <a class="dropdown-item" href="https://share.teltonika.lt/index.php/s/rFHo99iWX8BHMaZ/authenticate/showshare" target="_blank" rel="noopener noreferrer">
+                                <i class="fas fa-file-alt me-2"></i>ALL-CAN 300
+                                <br><small class="text-muted ms-4"><i class="fas fa-key me-1"></i><?= h($allcan300Pass) ?></small>
+                            </a>
+                        </li>
+                    </ul>
+                </li>
                 <?php if (isAdmin()): ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['users','settings','email']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
