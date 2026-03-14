@@ -206,9 +206,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($postAction === 'edit') {
         $editId = (int)($_POST['id'] ?? 0);
-        $db->prepare("UPDATE installations SET vehicle_id=?, client_id=?, technician_id=?, installation_date=?, uninstallation_date=?, status=?, location_in_vehicle=?, installation_address=?, notes=? WHERE id=?")
-           ->execute([$vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $installationAddress, $notes, $editId]);
-        flashSuccess('Montaż zaktualizowany.');
+        if (isTechnician()) {
+            // Technicians may only update the notes field
+            $db->prepare("UPDATE installations SET notes=? WHERE id=?")->execute([$notes, $editId]);
+            flashSuccess('Uwagi zaktualizowane.');
+        } else {
+            $db->prepare("UPDATE installations SET vehicle_id=?, client_id=?, technician_id=?, installation_date=?, uninstallation_date=?, status=?, location_in_vehicle=?, installation_address=?, notes=? WHERE id=?")
+               ->execute([$vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $installationAddress, $notes, $editId]);
+            flashSuccess('Montaż zaktualizowany.');
+        }
         redirect(getBaseUrl() . 'installations.php?action=view&id=' . $editId);
 
     } elseif ($postAction === 'delete') {
@@ -375,6 +381,10 @@ if ($action === 'view' && $id) {
 }
 
 if ($action === 'edit' && $id) {
+    if (isTechnician()) {
+        // Technicians cannot access the full edit page — redirect to view
+        redirect(getBaseUrl() . 'installations.php?action=view&id=' . $id);
+    }
     $stmt = $db->prepare("SELECT * FROM installations WHERE id=?");
     $stmt->execute([$id]);
     $installation = $stmt->fetch();
@@ -810,16 +820,31 @@ function toggleBatchRows(groupKey, btn) {
                     <tr><th class="text-muted">Technik</th><td><?= h($installation['technician_name'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Miejsce montażu</th><td><?= h($installation['location_in_vehicle'] ?? '—') ?></td></tr>
                 </table>
-                <?php if ($installation['notes']): ?>
+                <?php if (isTechnician()): ?>
+                <!-- Technician: notes-only inline edit form -->
+                <hr>
+                <form method="POST" class="mt-1">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="id" value="<?= $installation['id'] ?>">
+                    <label class="form-label fw-semibold small">Uwagi</label>
+                    <textarea name="notes" class="form-control form-control-sm" rows="3" placeholder="Wpisz uwagi..."><?= h($installation['notes'] ?? '') ?></textarea>
+                    <button type="submit" class="btn btn-sm btn-primary mt-2"><i class="fas fa-save me-1"></i>Zapisz uwagi</button>
+                </form>
+                <?php elseif ($installation['notes']): ?>
                 <hr><p class="small text-muted mb-0"><?= h($installation['notes']) ?></p>
                 <?php endif; ?>
             </div>
             <div class="card-footer d-flex gap-2 flex-wrap">
+                <?php if (!isTechnician()): ?>
                 <a href="installations.php?action=edit&id=<?= $installation['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                <?php endif; ?>
                 <?php if ($installation['status'] === 'aktywna'): ?>
                 <button onclick="showUninstallModal(<?= $installation['id'] ?>, <?= $installation['device_id'] ?>, '<?= h($installation['serial_number']) ?>')" class="btn btn-sm btn-warning"><i class="fas fa-minus-circle me-1"></i>Demontaż</button>
                 <?php endif; ?>
+                <?php if (!isTechnician()): ?>
                 <a href="services.php?action=add&installation=<?= $installation['id'] ?>&device=<?= $installation['device_id'] ?>" class="btn btn-sm btn-outline-warning"><i class="fas fa-wrench me-1"></i>Serwis</a>
+                <?php endif; ?>
                 <?php if (isTechnician()): ?>
                     <?php if ($existingPP): ?>
                     <a href="protocols.php?action=print&id=<?= $existingPP['id'] ?>" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fas fa-print me-1"></i>Drukuj PP</a>
@@ -829,7 +854,7 @@ function toggleBatchRows(groupKey, btn) {
                 <?php else: ?>
                 <a href="protocols.php?action=add&installation=<?= $installation['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
                 <?php endif; ?>
-                <button type="button" class="btn btn-sm btn-outline-dark" onclick="window.print()"><i class="fas fa-print me-1"></i>Drukuj</button>
+                <a href="installations.php?action=print_batch&ids=<?= $installation['id'] ?>" class="btn btn-sm btn-outline-dark"><i class="fas fa-print me-1"></i>Drukuj</a>
             </div>
         </div>
     </div>

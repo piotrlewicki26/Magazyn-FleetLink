@@ -109,30 +109,41 @@ if ($action === 'print' && $protocol) {
 $preType = sanitize($_GET['type'] ?? 'PP');
 if (!in_array($preType, ['PP','PU','PS'])) $preType = 'PP';
 
+$filterContext = sanitize($_GET['filter'] ?? '');
 $protocols = [];
 if ($action === 'list') {
-    $protocols = $db->query("
+    $filterSql = '';
+    if ($filterContext === 'installation') {
+        $filterSql = 'WHERE p.installation_id IS NOT NULL';
+    } elseif ($filterContext === 'service') {
+        $filterSql = "WHERE p.type = 'PS'";
+    }
+    $stmt = $db->prepare("
         SELECT p.*, u.name as technician_name, v.registration, d.serial_number
         FROM protocols p
         LEFT JOIN users u ON u.id=p.technician_id
         LEFT JOIN installations i ON i.id=p.installation_id
         LEFT JOIN vehicles v ON v.id=i.vehicle_id
         LEFT JOIN devices d ON d.id=i.device_id
+        $filterSql
         ORDER BY p.date DESC, p.id DESC
-    ")->fetchAll();
+    ");
+    $stmt->execute([]);
+    $protocols = $stmt->fetchAll();
 }
 
-$activePage = 'offers';
-$pageTitle = 'Protokoły';
+$activePage = $filterContext === 'installation' ? 'installations' : ($filterContext === 'service' ? 'services' : 'offers');
+$contextTitles = ['installation' => 'Protokoły montaży', 'service' => 'Protokoły serwisu'];
+$pageTitle = $contextTitles[$filterContext] ?? 'Protokoły';
 include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="page-header">
-    <h1><i class="fas fa-clipboard-check me-2 text-primary"></i>Protokoły</h1>
+    <h1><i class="fas fa-clipboard-check me-2 text-primary"></i><?= h($pageTitle) ?></h1>
     <?php if ($action === 'list'): ?>
     <a href="protocols.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowy protokół</a>
     <?php else: ?>
-    <a href="protocols.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
+    <a href="protocols.php<?= $filterContext ? '?filter=' . h($filterContext) : '' ?>" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
 </div>
 

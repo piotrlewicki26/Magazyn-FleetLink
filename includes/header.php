@@ -84,6 +84,8 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         <?php if (!isTechnician()): ?>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php?action=add"><i class="fas fa-plus me-2"></i>Nowy montaż</a></li>
                         <?php endif; ?>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php?filter=installation"><i class="fas fa-clipboard-check me-2"></i>Protokoły montaży</a></li>
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
@@ -95,6 +97,8 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         <?php if (!isTechnician()): ?>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php?action=add"><i class="fas fa-plus me-2"></i>Nowy serwis</a></li>
                         <?php endif; ?>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php?filter=service"><i class="fas fa-clipboard-check me-2"></i>Protokoły serwisu</a></li>
                     </ul>
                 </li>
                 <li class="nav-item">
