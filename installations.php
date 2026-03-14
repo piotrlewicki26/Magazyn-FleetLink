@@ -1629,12 +1629,66 @@ function showUninstallModal(id, deviceId, serial) {
 </template>
 
 <script>
+// All available devices for manual selection — used by syncDeviceDropdowns()
+window.flDevices = <?= json_encode(array_values(array_map(function($d) {
+    $text = $d['serial_number'];
+    if ($d['imei'])       $text .= ' [' . $d['imei'] . ']';
+    if ($d['sim_number']) $text .= ' (' . $d['sim_number'] . ')';
+    return ['value' => (string)$d['id'], 'text' => $text];
+}, $availableDevices))) ?>;
+</script>
+
+<script>
 (function () {
     var container = document.getElementById('deviceRowsContainer');
     var addBtn    = document.getElementById('addDeviceRowBtn');
     if (!container || !addBtn) return;
 
     var rowCounter = 1; // Row 0 is already rendered by PHP
+
+    // ── Sync device dropdowns: hide devices already selected in other rows ──
+    function syncDeviceDropdowns() {
+        var rows = Array.from(container.querySelectorAll('.device-row'));
+
+        // Build map: row element → currently selected device id (string)
+        var rowValues = new Map();
+        rows.forEach(function (row) {
+            var sel = row.querySelector('select.ts-device');
+            if (!sel || !sel.tomselect) return;
+            var val = sel.tomselect.getValue() || '';
+            rowValues.set(row, val);
+        });
+
+        // For each row rebuild the available options
+        rows.forEach(function (row) {
+            var sel = row.querySelector('select.ts-device');
+            if (!sel || !sel.tomselect) return;
+            var ts    = sel.tomselect;
+            var myVal = rowValues.get(row) || '';
+
+            // IDs taken by OTHER rows
+            var othersTaken = new Set();
+            rowValues.forEach(function (val, r) {
+                if (r !== row && val) othersTaken.add(val);
+            });
+
+            // Single pass: add back freed options and remove taken ones
+            (window.flDevices || []).forEach(function (dev) {
+                if (othersTaken.has(dev.value)) {
+                    if (ts.options[dev.value]) ts.removeOption(dev.value);
+                } else {
+                    if (!ts.options[dev.value]) ts.addOption({ value: dev.value, text: dev.text });
+                }
+            });
+
+            ts.refreshOptions(false);
+
+            // Restore this row's selection (removeOption clears the value too)
+            if (myVal && ts.options[myVal]) {
+                ts.setValue(myVal, true);
+            }
+        });
+    }
 
     // ── Tom Select helpers ──────────────────────────────────
     function initTomSelectOnRow(row) {
@@ -1680,6 +1734,8 @@ function showUninstallModal(id, deviceId, serial) {
         // so that TomSelect never initializes on a hidden element (prevents dark/broken dropdown)
         if (mode === 'manual') {
             initTomSelectOnRow(row);
+            // After init, apply current exclusions so this row doesn't show already-taken devices
+            syncDeviceDropdowns();
         }
     }
 
@@ -1687,6 +1743,10 @@ function showUninstallModal(id, deviceId, serial) {
     container.addEventListener('change', function (e) {
         if (e.target.type === 'radio' && e.target.name && e.target.name.startsWith('device_mode')) {
             applyModeToRow(e.target.closest('.device-row'), e.target.value);
+        }
+        // Device selection changed in any manual row — re-sync all rows
+        if (e.target.classList.contains('ts-device') || e.target.closest('select.ts-device')) {
+            syncDeviceDropdowns();
         }
     });
 
@@ -1698,6 +1758,8 @@ function showUninstallModal(id, deviceId, serial) {
             destroyTomSelectOnRow(row);
             row.remove();
             updateRowNumbers();
+            // Removed row may have held a device — free it in remaining rows
+            syncDeviceDropdowns();
         }
     });
 
