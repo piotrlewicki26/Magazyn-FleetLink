@@ -177,6 +177,24 @@ if ($action === 'list') {
     $services = $stmt->fetchAll();
 }
 
+// Fetch service protocols for the Protocols tab
+$serviceProtocols = [];
+if ($action === 'list') {
+    try {
+        $serviceProtocols = $db->query("
+            SELECT p.id, p.type, p.protocol_number, p.date,
+                   u.name as technician_name, d.serial_number, m.name as model_name
+            FROM protocols p
+            LEFT JOIN users u ON u.id=p.technician_id
+            LEFT JOIN services s ON s.id=p.service_id
+            LEFT JOIN devices d ON d.id=s.device_id
+            LEFT JOIN models m ON m.id=d.model_id
+            WHERE p.type='PS'
+            ORDER BY p.date DESC, p.id DESC
+        ")->fetchAll();
+    } catch (Exception $e) { $serviceProtocols = []; }
+}
+
 $activePage = 'services';
 $pageTitle = $action === 'print' ? 'Zlecenie serwisowe' : 'Serwisy';
 include __DIR__ . '/includes/header.php';
@@ -194,6 +212,20 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($action === 'list'): ?>
+<ul class="nav nav-tabs mb-3" id="serviceTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-serwisy" data-bs-toggle="tab" data-bs-target="#pane-serwisy" type="button" role="tab">
+            <i class="fas fa-wrench me-1"></i>Serwisy
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-protokoly-s" data-bs-toggle="tab" data-bs-target="#pane-protokoly-s" type="button" role="tab">
+            <i class="fas fa-clipboard-check me-1"></i>Protokoły serwisu
+        </button>
+    </li>
+</ul>
+<div class="tab-content">
+<div class="tab-pane fade show active" id="pane-serwisy" role="tabpanel">
 <div class="card mb-3">
     <div class="card-body py-2">
         <form method="GET" class="row g-2">
@@ -268,6 +300,47 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+</div><!-- /pane-serwisy -->
+<div class="tab-pane fade" id="pane-protokoly-s" role="tabpanel">
+<div class="card">
+    <div class="card-header">Protokoły serwisowe (<?= count($serviceProtocols) ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead><tr><th>Nr protokołu</th><th>Data</th><th>Urządzenie</th><th>Technik</th><th>Akcje</th></tr></thead>
+            <tbody>
+                <?php foreach ($serviceProtocols as $sp): ?>
+                <tr>
+                    <td class="fw-bold"><a href="protocols.php?action=view&id=<?= $sp['id'] ?>"><?= h($sp['protocol_number']) ?></a></td>
+                    <td><?= formatDate($sp['date']) ?></td>
+                    <td><?= h($sp['serial_number'] ?? '—') ?><br><small class="text-muted"><?= h($sp['model_name'] ?? '') ?></small></td>
+                    <td><?= h($sp['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <a href="protocols.php?action=view&id=<?= $sp['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <a href="protocols.php?action=print&id=<?= $sp['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary btn-action"><i class="fas fa-print"></i></a>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" action="protocols.php" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $sp['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń protokół <?= h($sp['protocol_number']) ?>?"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($serviceProtocols)): ?>
+                <tr><td colspan="5" class="text-center text-muted p-3">Brak protokołów serwisowych.<br>
+                    <a href="protocols.php?action=add&type=PS" class="btn btn-sm btn-outline-primary mt-2"><i class="fas fa-plus me-1"></i>Dodaj protokół serwisowy</a>
+                </td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+</div><!-- /pane-protokoly-s -->
+</div><!-- /tab-content -->
 
 <?php elseif ($action === 'view' && isset($service)): ?>
 <div class="row g-3">

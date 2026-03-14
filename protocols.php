@@ -106,6 +106,9 @@ if ($action === 'print' && $protocol) {
     exit;
 }
 
+$preType = sanitize($_GET['type'] ?? 'PP');
+if (!in_array($preType, ['PP','PU','PS'])) $preType = 'PP';
+
 $protocols = [];
 if ($action === 'list') {
     $protocols = $db->query("
@@ -163,6 +166,15 @@ include __DIR__ . '/includes/header.php';
                         <a href="protocols.php?action=view&id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
                         <a href="protocols.php?action=print&id=<?= $p['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary btn-action"><i class="fas fa-print"></i></a>
                         <a href="protocols.php?action=edit&id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $p['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń protokół <?= h($p['protocol_number']) ?>?"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -205,9 +217,20 @@ include __DIR__ . '/includes/header.php';
                 <hr><strong class="small">Podpis klienta:</strong><p class="small mt-1"><?= h($protocol['client_signature']) ?></p>
                 <?php endif; ?>
             </div>
-            <div class="card-footer d-flex gap-2">
+            <div class="card-footer d-flex gap-2 flex-wrap">
                 <a href="protocols.php?action=print&id=<?= $protocol['id'] ?>" target="_blank" class="btn btn-sm btn-primary"><i class="fas fa-print me-1"></i>Drukuj</a>
                 <a href="protocols.php?action=edit&id=<?= $protocol['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                <?php if (isAdmin()): ?>
+                <form method="POST" class="d-inline">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="id" value="<?= $protocol['id'] ?>">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                            data-confirm="Usuń protokół <?= h($protocol['protocol_number']) ?>? Tej operacji nie można cofnąć.">
+                        <i class="fas fa-trash me-1"></i>Usuń
+                    </button>
+                </form>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -226,9 +249,9 @@ include __DIR__ . '/includes/header.php';
                 <div class="col-md-6">
                     <label class="form-label required-star">Typ protokołu</label>
                     <select name="type" class="form-select" required>
-                        <option value="PP">PP — Protokół Przekazania</option>
-                        <option value="PU">PU — Protokół Uruchomienia</option>
-                        <option value="PS">PS — Protokół Serwisowy</option>
+                        <option value="PP" <?= $preType === 'PP' ? 'selected' : '' ?>>PP — Protokół Przekazania</option>
+                        <option value="PU" <?= $preType === 'PU' ? 'selected' : '' ?>>PU — Protokół Uruchomienia</option>
+                        <option value="PS" <?= $preType === 'PS' ? 'selected' : '' ?>>PS — Protokół Serwisowy</option>
                     </select>
                 </div>
                 <?php endif; ?>
