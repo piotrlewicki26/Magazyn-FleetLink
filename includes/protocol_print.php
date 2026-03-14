@@ -140,6 +140,30 @@
     </table>
     <?php endif; ?>
 
+    <!-- PS service device section -->
+    <?php if ($protocol['type'] === 'PS' && ($protocol['svc_serial'] ?? '')): ?>
+    <?php
+    $stLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+    ?>
+    <div class="pp-section-label">Urządzenie — serwis dotyczy</div>
+    <table class="pp-table">
+        <tr><th>Producent / Model</th><td><strong><?= h(trim(($protocol['svc_manufacturer'] ?? '') . ' ' . ($protocol['svc_model'] ?? ''))) ?></strong></td></tr>
+        <tr><th>Nr seryjny</th><td><?= h($protocol['svc_serial']) ?></td></tr>
+        <?php if ($protocol['svc_imei'] ?? ''): ?><tr><th>IMEI</th><td><?= h($protocol['svc_imei']) ?></td></tr><?php endif; ?>
+        <?php if ($protocol['service_type'] ?? ''): ?>
+        <tr><th>Typ czynności</th><td><strong><?= h($stLabels[$protocol['service_type']] ?? $protocol['service_type']) ?></strong></td></tr>
+        <?php endif; ?>
+    </table>
+    <?php if ($protocol['service_type'] === 'wymiana' && ($protocol['rep_serial'] ?? '')): ?>
+    <div class="pp-section-label">Urządzenie zastępcze (wymiana na)</div>
+    <table class="pp-table">
+        <tr><th>Producent / Model</th><td><strong><?= h(trim(($protocol['rep_manufacturer'] ?? '') . ' ' . ($protocol['rep_model'] ?? ''))) ?></strong></td></tr>
+        <tr><th>Nr seryjny</th><td><?= h($protocol['rep_serial']) ?></td></tr>
+        <?php if ($protocol['rep_imei'] ?? ''): ?><tr><th>IMEI</th><td><?= h($protocol['rep_imei']) ?></td></tr><?php endif; ?>
+    </table>
+    <?php endif; ?>
+    <?php endif; ?>
+
     <!-- Notes / Work scope -->
     <?php if ($protocol['notes']): ?>
     <div class="pp-section-label">Zakres prac / Uwagi</div>

@@ -26,26 +26,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes          = sanitize($_POST['notes'] ?? '');
     $clientSignature = sanitize($_POST['client_signature'] ?? '');
 
+    // PS-specific fields
+    $serviceDeviceId    = (int)($_POST['service_device_id'] ?? 0) ?: null;
+    $serviceType        = sanitize($_POST['service_type'] ?? '');
+    $replacementDeviceId = (int)($_POST['replacement_device_id'] ?? 0) ?: null;
+    $validServiceTypes  = ['przeglad','naprawa','wymiana','aktualizacja','inne'];
+    if (!in_array($serviceType, $validServiceTypes)) $serviceType = null;
+
     $validTypes = ['PP','PU','PS'];
     if (!in_array($type, $validTypes)) $type = 'PP';
 
+    // Clear PS fields for non-PS protocols
+    if ($type !== 'PS') {
+        $serviceDeviceId    = null;
+        $serviceType        = null;
+        $replacementDeviceId = null;
+    }
+
+    // For 'wymiana' both device and replacement must make sense; clear replacement if no device
+    if ($serviceType !== 'wymiana') $replacementDeviceId = null;
+
     if ($postAction === 'add') {
         $protocolNum = generateProtocolNumber($type);
-        $db->prepare("INSERT INTO protocols (installation_id, service_id, type, protocol_number, date, technician_id, client_signature, notes) VALUES (?,?,?,?,?,?,?,?)")
-           ->execute([$installationId, $serviceId, $type, $protocolNum, $date, $technicianId, $clientSignature, $notes]);
+        $db->prepare("INSERT INTO protocols (installation_id, service_id, service_device_id, service_type, replacement_device_id, type, protocol_number, date, technician_id, client_signature, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+           ->execute([$installationId, $serviceId, $serviceDeviceId, $serviceType, $replacementDeviceId, $type, $protocolNum, $date, $technicianId, $clientSignature, $notes]);
         $newId = $db->lastInsertId();
+
+        // Record device history for "wymiana"
+        if ($type === 'PS' && $serviceType === 'wymiana' && $serviceDeviceId && $replacementDeviceId) {
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, protocol_id) VALUES (?,?,?,?)")
+               ->execute([$serviceDeviceId, 'wymieniono_na', $replacementDeviceId, $newId]);
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, protocol_id) VALUES (?,?,?,?)")
+               ->execute([$replacementDeviceId, 'wymieniono_z', $serviceDeviceId, $newId]);
+        }
+
         flashSuccess("Protokół $protocolNum został utworzony.");
         redirect(getBaseUrl() . 'protocols.php?action=view&id=' . $newId);
 
     } elseif ($postAction === 'edit') {
         $editId = (int)($_POST['id'] ?? 0);
-        $db->prepare("UPDATE protocols SET installation_id=?, service_id=?, date=?, technician_id=?, client_signature=?, notes=? WHERE id=?")
-           ->execute([$installationId, $serviceId, $date, $technicianId, $clientSignature, $notes, $editId]);
+
+        // Fetch old values to compare wymiana state
+        $oldP = $db->prepare("SELECT type, service_type, service_device_id, replacement_device_id FROM protocols WHERE id=?");
+        $oldP->execute([$editId]);
+        $oldProtocol = $oldP->fetch();
+
+        $db->prepare("UPDATE protocols SET installation_id=?, service_id=?, service_device_id=?, service_type=?, replacement_device_id=?, date=?, technician_id=?, client_signature=?, notes=? WHERE id=?")
+           ->execute([$installationId, $serviceId, $serviceDeviceId, $serviceType, $replacementDeviceId, $date, $technicianId, $clientSignature, $notes, $editId]);
+
+        // Re-record device history for "wymiana" if relevant fields changed
+        $wasWymiana = ($oldProtocol['service_type'] === 'wymiana' && $oldProtocol['service_device_id'] && $oldProtocol['replacement_device_id']);
+        $isWymiana  = ($serviceType === 'wymiana' && $serviceDeviceId && $replacementDeviceId);
+
+        $deviceChanged = ($oldProtocol['service_device_id'] != $serviceDeviceId)
+                      || ($oldProtocol['replacement_device_id'] != $replacementDeviceId)
+                      || (!$wasWymiana && $isWymiana);
+
+        if ($isWymiana && $deviceChanged) {
+            // Remove old history entries for this protocol
+            if ($wasWymiana) {
+                $db->prepare("DELETE FROM device_history WHERE protocol_id=?")->execute([$editId]);
+            }
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, protocol_id) VALUES (?,?,?,?)")
+               ->execute([$serviceDeviceId, 'wymieniono_na', $replacementDeviceId, $editId]);
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, protocol_id) VALUES (?,?,?,?)")
+               ->execute([$replacementDeviceId, 'wymieniono_z', $serviceDeviceId, $editId]);
+        } elseif ($wasWymiana && !$isWymiana) {
+            // wymiana removed – delete old history rows
+            $db->prepare("DELETE FROM device_history WHERE protocol_id=?")->execute([$editId]);
+        }
+
         flashSuccess('Protokół zaktualizowany.');
         redirect(getBaseUrl() . 'protocols.php?action=view&id=' . $editId);
 
     } elseif ($postAction === 'delete') {
         $delId = (int)($_POST['id'] ?? 0);
+        $db->prepare("DELETE FROM device_history WHERE protocol_id=?")->execute([$delId]);
         $db->prepare("DELETE FROM protocols WHERE id=?")->execute([$delId]);
         flashSuccess('Protokół usunięty.');
         redirect(getBaseUrl() . 'protocols.php');
@@ -62,7 +118,11 @@ if (in_array($action, ['view','edit','print']) && $id) {
                d.serial_number, d.imei,
                m.name as model_name, mf.name as manufacturer_name,
                v.registration, v.make, v.model_name as vehicle_model, v.vin,
-               c.contact_name, c.company_name, c.nip
+               c.contact_name, c.company_name, c.nip,
+               sd.serial_number  as svc_serial,  sd.imei  as svc_imei,
+               sm.name           as svc_model,   smf.name as svc_manufacturer,
+               rd.serial_number  as rep_serial,  rd.imei  as rep_imei,
+               rm.name           as rep_model,   rmf.name as rep_manufacturer
         FROM protocols p
         LEFT JOIN users u ON u.id=p.technician_id
         LEFT JOIN installations i ON i.id=p.installation_id
@@ -71,6 +131,12 @@ if (in_array($action, ['view','edit','print']) && $id) {
         LEFT JOIN manufacturers mf ON mf.id=m.manufacturer_id
         LEFT JOIN vehicles v ON v.id=i.vehicle_id
         LEFT JOIN clients c ON c.id=v.client_id
+        LEFT JOIN devices sd  ON sd.id=p.service_device_id
+        LEFT JOIN models sm   ON sm.id=sd.model_id
+        LEFT JOIN manufacturers smf ON smf.id=sm.manufacturer_id
+        LEFT JOIN devices rd  ON rd.id=p.replacement_device_id
+        LEFT JOIN models rm   ON rm.id=rd.model_id
+        LEFT JOIN manufacturers rmf ON rmf.id=rm.manufacturer_id
         WHERE p.id=?
     ");
     $stmt->execute([$id]);
@@ -95,11 +161,22 @@ $recentServices = $db->query("
     ORDER BY s.created_at DESC
     LIMIT 50
 ")->fetchAll();
+// All devices for PS device pickers (id + label)
+$allDevices = $db->query("
+    SELECT d.id, d.serial_number, d.imei, m.name as model_name, mf.name as manufacturer_name
+    FROM devices d
+    JOIN models m ON m.id=d.model_id
+    JOIN manufacturers mf ON mf.id=m.manufacturer_id
+    ORDER BY mf.name, m.name, d.serial_number
+")->fetchAll();
 
 $settings = [];
 foreach ($db->query("SELECT `key`, `value` FROM settings")->fetchAll() as $row) {
     $settings[$row['key']] = $row['value'];
 }
+
+// Service type labels used in form, view and print template
+$psServiceTypeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
 
 if ($action === 'print' && $protocol) {
     include __DIR__ . '/includes/protocol_print.php';
@@ -217,6 +294,23 @@ include __DIR__ . '/includes/header.php';
                     <tr><th class="text-muted">Urządzenie</th><td><?= h($protocol['manufacturer_name'] . ' ' . $protocol['model_name']) ?><br><small><?= h($protocol['serial_number']) ?></small></td></tr>
                     <tr><th class="text-muted">IMEI</th><td><?= h($protocol['imei'] ?? '—') ?></td></tr>
                     <?php endif; ?>
+                    <?php if ($protocol['type'] === 'PS'): ?>
+                    <?php if ($protocol['svc_serial']): ?>
+                    <tr><th class="text-muted">Serwis dotyczy</th><td>
+                        <?= h(trim($protocol['svc_manufacturer'] . ' ' . $protocol['svc_model'])) ?><br>
+                        <small><?= h($protocol['svc_serial']) ?><?= $protocol['svc_imei'] ? ' [' . h($protocol['svc_imei']) . ']' : '' ?></small>
+                    </td></tr>
+                    <?php endif; ?>
+                    <?php if ($protocol['service_type']): ?>
+                    <tr><th class="text-muted">Typ czynności</th><td><strong><?= h($psServiceTypeLabels[$protocol['service_type']] ?? $protocol['service_type']) ?></strong></td></tr>
+                    <?php endif; ?>
+                    <?php if ($protocol['service_type'] === 'wymiana' && $protocol['rep_serial']): ?>
+                    <tr><th class="text-muted">Urządzenie zastępcze</th><td>
+                        <?= h(trim($protocol['rep_manufacturer'] . ' ' . $protocol['rep_model'])) ?><br>
+                        <small><?= h($protocol['rep_serial']) ?><?= $protocol['rep_imei'] ? ' [' . h($protocol['rep_imei']) . ']' : '' ?></small>
+                    </td></tr>
+                    <?php endif; ?>
+                    <?php endif; ?>
                     <?php if ($protocol['contact_name']): ?>
                     <tr><th class="text-muted">Klient</th><td><?= h($protocol['company_name'] ?: $protocol['contact_name']) ?></td></tr>
                     <?php endif; ?>
@@ -248,10 +342,18 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php elseif ($action === 'add' || $action === 'edit'): ?>
-<div class="card" style="max-width:600px">
+<?php
+// Determine current protocol type for showing PS-specific section
+$formType    = ($action === 'edit') ? ($protocol['type'] ?? 'PP') : $preType;
+$showPsNow   = ($formType === 'PS');
+$curSvcDev   = (int)($protocol['service_device_id']    ?? 0);
+$curSvcType  = $protocol['service_type'] ?? '';
+$curRepDev   = (int)($protocol['replacement_device_id'] ?? 0);
+?>
+<div class="card" style="max-width:700px">
     <div class="card-header"><i class="fas fa-clipboard me-2"></i><?= $action === 'add' ? 'Nowy protokół' : 'Edytuj protokół: ' . h($protocol['protocol_number'] ?? '') ?></div>
     <div class="card-body">
-        <form method="POST">
+        <form method="POST" id="protocolForm">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="<?= $action ?>">
             <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $protocol['id'] ?>"><?php endif; ?>
@@ -259,7 +361,7 @@ include __DIR__ . '/includes/header.php';
                 <?php if ($action === 'add'): ?>
                 <div class="col-md-6">
                     <label class="form-label required-star">Typ protokołu</label>
-                    <select name="type" class="form-select" required>
+                    <select name="type" id="protocolType" class="form-select" required>
                         <option value="PP" <?= $preType === 'PP' ? 'selected' : '' ?>>PP — Protokół Przekazania</option>
                         <option value="PU" <?= $preType === 'PU' ? 'selected' : '' ?>>PU — Protokół Uruchomienia</option>
                         <option value="PS" <?= $preType === 'PS' ? 'selected' : '' ?>>PS — Protokół Serwisowy</option>
@@ -302,6 +404,48 @@ include __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </select>
                 </div>
+
+                <!-- PS-specific section (shown only for PS protocols) -->
+                <div id="psSectionWrapper" class="col-12" <?= !$showPsNow ? 'style="display:none"' : '' ?>>
+                    <hr class="my-1">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold text-warning-emphasis"><i class="fas fa-tools me-1"></i>Serwis dotyczy urządzenia</label>
+                            <select name="service_device_id" id="serviceDeviceSelect" class="form-select ts-device-ps">
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php foreach ($allDevices as $dev): ?>
+                                <option value="<?= $dev['id'] ?>" <?= $curSvcDev === $dev['id'] ? 'selected' : '' ?>>
+                                    <?= h($dev['manufacturer_name'] . ' ' . $dev['model_name'] . ' — ' . $dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold text-warning-emphasis"><i class="fas fa-wrench me-1"></i>Typ czynności serwisowej</label>
+                            <select name="service_type" id="serviceTypeSelect" class="form-select">
+                                <option value="">— wybierz —</option>
+                                <?php foreach ($stLabels as $val => $lbl): ?>
+                                <option value="<?= $val ?>" <?= $curSvcType === $val ? 'selected' : '' ?>><?= h($lbl) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <!-- Replacement device (wymiana only) -->
+                        <div id="replacementDeviceWrapper" class="col-12" <?= $curSvcType !== 'wymiana' ? 'style="display:none"' : '' ?>>
+                            <label class="form-label fw-semibold text-danger"><i class="fas fa-exchange-alt me-1"></i>Urządzenie zastępcze (wymiana na)</label>
+                            <select name="replacement_device_id" id="replacementDeviceSelect" class="form-select ts-device-ps">
+                                <option value="">— wybierz urządzenie zastępcze —</option>
+                                <?php foreach ($allDevices as $dev): ?>
+                                <option value="<?= $dev['id'] ?>" <?= $curRepDev === $dev['id'] ? 'selected' : '' ?>>
+                                    <?= h($dev['manufacturer_name'] . ' ' . $dev['model_name'] . ' — ' . $dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text text-danger"><i class="fas fa-info-circle me-1"></i>Historia "wymieniono na/z" zostanie zapisana w obu urządzeniach.</div>
+                        </div>
+                    </div>
+                    <hr class="my-1">
+                </div>
+
                 <div class="col-12">
                     <label class="form-label">Uwagi / Zakres prac</label>
                     <textarea name="notes" class="form-control" rows="4"><?= h($protocol['notes'] ?? '') ?></textarea>
@@ -318,6 +462,45 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+
+<script>
+(function () {
+    // Show/hide PS section when protocol type changes (add form only)
+    var typeSelect = document.getElementById('protocolType');
+    var psSection  = document.getElementById('psSectionWrapper');
+    var svcType    = document.getElementById('serviceTypeSelect');
+    var repWrapper = document.getElementById('replacementDeviceWrapper');
+
+    function applyTypeVisibility(val) {
+        if (psSection) psSection.style.display = (val === 'PS') ? '' : 'none';
+    }
+    if (typeSelect) {
+        typeSelect.addEventListener('change', function () { applyTypeVisibility(this.value); });
+        applyTypeVisibility(typeSelect.value);
+    }
+
+    // Show/hide replacement device when service type = wymiana
+    if (svcType) {
+        svcType.addEventListener('change', function () {
+            repWrapper.style.display = (this.value === 'wymiana') ? '' : 'none';
+        });
+    }
+
+    // Init TomSelect on PS device pickers
+    if (typeof TomSelect !== 'undefined') {
+        document.querySelectorAll('select.ts-device-ps').forEach(function (sel) {
+            if (!sel.tomselect) {
+                new TomSelect(sel, {
+                    placeholder: '— szukaj urządzenia —',
+                    allowEmptyOption: true,
+                    maxOptions: null,
+                    searchField: ['text', 'value']
+                });
+            }
+        });
+    }
+}());
+</script>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

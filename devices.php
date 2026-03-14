@@ -228,6 +228,23 @@ if ($action === 'view' && $id) {
     ");
     $services->execute([$id]);
     $deviceServices = $services->fetchAll();
+
+    // Device history (replacement events from PS protocols)
+    $histStmt = $db->prepare("
+        SELECT dh.*, dh.event_type,
+               p.protocol_number, p.date as protocol_date,
+               rd.serial_number as related_serial, rd.imei as related_imei,
+               rm.name as related_model, rmf.name as related_manufacturer
+        FROM device_history dh
+        LEFT JOIN protocols p   ON p.id=dh.protocol_id
+        LEFT JOIN devices rd    ON rd.id=dh.related_device_id
+        LEFT JOIN models rm     ON rm.id=rd.model_id
+        LEFT JOIN manufacturers rmf ON rmf.id=rm.manufacturer_id
+        WHERE dh.device_id=?
+        ORDER BY dh.created_at DESC
+    ");
+    $histStmt->execute([$id]);
+    $deviceHistory = $histStmt->fetchAll();
 }
 
 // Models for select
@@ -546,6 +563,38 @@ function openSimEdit(deviceId, currentSim) {
                 </table>
             </div>
         </div>
+        <?php if (!empty($deviceHistory)): ?>
+        <div class="card mt-3">
+            <div class="card-header"><i class="fas fa-exchange-alt me-2 text-danger"></i>Historia wymian</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Zdarzenie</th><th>Powiązane urządzenie</th><th>Protokół</th><th>Data</th></tr></thead>
+                    <tbody>
+                        <?php
+                        $histLabels = ['wymieniono_na' => '🔄 Wymieniono na', 'wymieniono_z' => '🔄 Wymieniono z', 'serwis' => '🔧 Serwis'];
+                        foreach ($deviceHistory as $h_row):
+                        ?>
+                        <tr>
+                            <td><?= h($histLabels[$h_row['event_type']] ?? $h_row['event_type']) ?></td>
+                            <td>
+                                <?php if ($h_row['related_serial']): ?>
+                                <?= h(trim(($h_row['related_manufacturer'] ?? '') . ' ' . ($h_row['related_model'] ?? ''))) ?><br>
+                                <small class="text-muted"><?= h($h_row['related_serial']) ?><?= $h_row['related_imei'] ? ' [' . h($h_row['related_imei']) . ']' : '' ?></small>
+                                <?php else: ?>—<?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if ($h_row['protocol_number']): ?>
+                                <a href="protocols.php?action=view&id=<?= (int)$h_row['protocol_id'] ?>"><?= h($h_row['protocol_number']) ?></a>
+                                <?php else: ?>—<?php endif; ?>
+                            </td>
+                            <td><?= formatDate($h_row['protocol_date'] ?? $h_row['created_at']) ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 

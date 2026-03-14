@@ -232,6 +232,9 @@ CREATE TABLE IF NOT EXISTS `protocols` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `installation_id` INT UNSIGNED DEFAULT NULL,
   `service_id` INT UNSIGNED DEFAULT NULL,
+  `service_device_id` INT UNSIGNED DEFAULT NULL,
+  `service_type` ENUM('przeglad','naprawa','wymiana','aktualizacja','inne') DEFAULT NULL,
+  `replacement_device_id` INT UNSIGNED DEFAULT NULL,
   `type` ENUM('PP','PU','PS') NOT NULL DEFAULT 'PP',
   `protocol_number` VARCHAR(30) NOT NULL UNIQUE,
   `date` DATE NOT NULL,
@@ -242,7 +245,24 @@ CREATE TABLE IF NOT EXISTS `protocols` (
   PRIMARY KEY (`id`),
   FOREIGN KEY (`installation_id`) REFERENCES `installations`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`service_device_id`) REFERENCES `devices`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`replacement_device_id`) REFERENCES `devices`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`technician_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Device history (tracks replacement and service events per device)
+CREATE TABLE IF NOT EXISTS `device_history` (
+  `id`                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `device_id`         INT UNSIGNED NOT NULL,
+  `event_type`        ENUM('wymieniono_na','wymieniono_z','serwis') NOT NULL,
+  `related_device_id` INT UNSIGNED DEFAULT NULL,
+  `protocol_id`       INT UNSIGNED DEFAULT NULL,
+  `notes`             TEXT DEFAULT NULL,
+  `created_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`device_id`)         REFERENCES `devices`(`id`)   ON DELETE CASCADE,
+  FOREIGN KEY (`related_device_id`) REFERENCES `devices`(`id`)   ON DELETE SET NULL,
+  FOREIGN KEY (`protocol_id`)       REFERENCES `protocols`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Email log table
