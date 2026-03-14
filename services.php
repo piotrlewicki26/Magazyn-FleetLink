@@ -375,7 +375,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php elseif ($action === 'add' || $action === 'edit'): ?>
-<div class="card" style="max-width:700px">
+<div class="card" style="max-width:<?= ($action === 'add' && !empty($svcAvailableAccessories)) ? '1400px' : '700px' ?>">
     <div class="card-header"><i class="fas fa-wrench me-2"></i><?= $action === 'add' ? 'Nowy serwis' : 'Edytuj serwis' ?></div>
     <div class="card-body">
         <form method="POST">
@@ -383,6 +383,7 @@ include __DIR__ . '/includes/header.php';
             <input type="hidden" name="action" value="<?= $action ?>">
             <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $service['id'] ?>"><?php endif; ?>
             <div class="row g-3">
+                <?php if ($action === 'add' && !empty($svcAvailableAccessories)): ?><div class="col-lg-8"><div class="row g-3"><?php endif; ?>
                 <div class="col-md-6">
                     <label class="form-label required-star">Urządzenie GPS</label>
                     <input type="text" id="deviceSearch" class="form-control mb-1"
@@ -472,8 +473,9 @@ include __DIR__ . '/includes/header.php';
                     <textarea name="resolution" class="form-control" rows="3"><?= h($service['resolution'] ?? '') ?></textarea>
                 </div>
                 <?php if ($action === 'add' && !empty($svcAvailableAccessories)): ?>
-                <div class="col-12">
-                    <div class="card bg-light border-0 mt-2">
+                </div></div><!-- /inner row g-3 + /col-lg-8 -->
+                <div class="col-lg-4">
+                    <div class="card bg-light border-0 h-100">
                         <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
                             <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria do pobrania z magazynu (opcjonalnie)</span>
                             <button type="button" class="btn btn-outline-warning btn-sm" id="svcAddAccRow">
@@ -504,7 +506,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         </div>
                     </div>
-                </div>
+                </div><!-- /col-lg-4 accessories -->
                 <?php endif; ?>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i><?= $action === 'add' ? 'Zarejestruj serwis' : 'Zapisz zmiany' ?></button>

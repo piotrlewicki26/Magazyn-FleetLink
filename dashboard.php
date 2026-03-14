@@ -183,7 +183,7 @@ include __DIR__ . '/includes/header.php';
                 <?php else: ?>
                 <div class="list-group list-group-flush">
                     <?php foreach ($recentInstallations as $inst): ?>
-                    <a href="installations.php?action=view&id=<?= $inst['is_batch'] ? ($inst['batch_link_id'] ?? $inst['id']) : $inst['id'] ?>" class="list-group-item list-group-item-action">
+                    <a href="<?= $inst['is_batch'] ? 'installations.php' : 'installations.php?action=view&id=' . $inst['id'] ?>" class="list-group-item list-group-item-action">
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
                                 <?php if ($inst['is_batch']): ?>
@@ -249,35 +249,6 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 
-    <!-- Low Stock Alert -->
-    <?php if (!empty($lowStock)): ?>
-    <div class="col-12">
-        <div class="card border-danger">
-            <div class="card-header bg-danger bg-opacity-10 text-danger d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</span>
-                <a href="inventory.php" class="btn btn-sm btn-outline-danger">Magazyn</a>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <tbody>
-                        <?php foreach ($lowStock as $item): ?>
-                        <tr>
-                            <td><?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?></td>
-                            <td class="text-end">
-                                <span class="<?= $item['quantity'] == 0 ? 'text-danger fw-bold' : 'text-warning fw-bold' ?>">
-                                    <?= $item['quantity'] ?> szt
-                                </span>
-                                <span class="text-muted"> / min <?= $item['min_quantity'] ?></span>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    <?php endif; ?>
-
     <!-- Quick Actions -->
     <div class="col-12">
         <div class="card">
@@ -324,6 +295,37 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+
+    <!-- Low Stock Alert -->
+    <div class="col-12">
+        <div class="card border-danger">
+            <div class="card-header bg-danger bg-opacity-10 text-danger d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</span>
+                <a href="inventory.php" class="btn btn-sm btn-outline-danger">Magazyn</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <?php if (empty($lowStock)): ?>
+                        <tr><td colspan="2" class="text-center text-muted p-2">Brak pozycji poniżej minimalnego stanu.</td></tr>
+                        <?php else: ?>
+                        <?php foreach ($lowStock as $item): ?>
+                        <tr>
+                            <td><?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?></td>
+                            <td class="text-end">
+                                <span class="<?= $item['quantity'] == 0 ? 'text-danger fw-bold' : 'text-warning fw-bold' ?>">
+                                    <?= $item['quantity'] ?> szt
+                                </span>
+                                <span class="text-muted"> / min <?= $item['min_quantity'] ?></span>
+                            </td>
+                        </tr>
+                        <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
