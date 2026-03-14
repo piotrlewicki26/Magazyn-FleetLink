@@ -14,9 +14,11 @@ requireLogin();
 $db = getDb();
 $stats = getDashboardStats();
 
-// Recent installations
-$recentInstallations = $db->query("
-    SELECT i.id, i.installation_date, i.status,
+// Recent installations – grouped by batch_id so multi-device batches appear as one row
+// Fetch more rows than needed so PHP grouping can collapse batches into 5 display items
+$dashInstallationsFetchLimit = 30;
+$recentInstallationRows = $db->query("
+    SELECT i.id, i.installation_date, i.status, i.batch_id,
            d.serial_number, m.name as model_name, mf.name as manufacturer_name,
            v.registration, v.make, v.model_name as vehicle_model,
            c.contact_name as client_name, c.company_name
@@ -27,8 +29,35 @@ $recentInstallations = $db->query("
     JOIN vehicles v ON v.id = i.vehicle_id
     LEFT JOIN clients c ON c.id = i.client_id
     ORDER BY i.created_at DESC
-    LIMIT 5
+    LIMIT $dashInstallationsFetchLimit
 ")->fetchAll();
+
+// Collapse rows into display items: batches become a single grouped entry
+$recentInstallations = [];
+$seenBatches = [];
+foreach ($recentInstallationRows as $row) {
+    $bid = $row['batch_id'] ?? null;
+    if ($bid !== null) {
+        if (isset($seenBatches[$bid])) {
+            // Append extra device info to existing batch entry
+            $idx = $seenBatches[$bid];
+            $recentInstallations[$idx]['device_count']++;
+            $recentInstallations[$idx]['extra_serials'][] = $row['serial_number'];
+        } else {
+            $seenBatches[$bid] = count($recentInstallations);
+            $row['is_batch']       = true;
+            $row['device_count']   = 1;
+            $row['extra_serials']  = [];
+            $row['batch_link_id']  = $row['id']; // first installation id of batch
+            $recentInstallations[] = $row;
+        }
+    } else {
+        $row['is_batch']     = false;
+        $row['device_count'] = 1;
+        $recentInstallations[] = $row;
+    }
+    if (count($recentInstallations) >= 5) break;
+}
 
 // Upcoming services
 $upcomingServices = $db->query("
@@ -154,11 +183,20 @@ include __DIR__ . '/includes/header.php';
                 <?php else: ?>
                 <div class="list-group list-group-flush">
                     <?php foreach ($recentInstallations as $inst): ?>
-                    <a href="installations.php?action=view&id=<?= $inst['id'] ?>" class="list-group-item list-group-item-action">
+                    <a href="installations.php?action=view&id=<?= $inst['is_batch'] ? ($inst['batch_link_id'] ?? $inst['id']) : $inst['id'] ?>" class="list-group-item list-group-item-action">
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
+                                <?php if ($inst['is_batch']): ?>
+                                <div class="fw-semibold">
+                                    <span class="badge bg-primary me-1"><?= $inst['device_count'] ?> urządz.</span>
+                                    <?= h($inst['registration']) ?> — <?= h($inst['make'] . ' ' . $inst['vehicle_model']) ?>
+                                </div>
+                                <small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?> / <?= h($inst['serial_number']) ?>
+                                <?php if (!empty($inst['extra_serials'])): ?> + <?= count($inst['extra_serials']) ?> więcej<?php endif; ?></small>
+                                <?php else: ?>
                                 <div class="fw-semibold"><?= h($inst['registration']) ?> — <?= h($inst['make'] . ' ' . $inst['vehicle_model']) ?></div>
                                 <small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?> / <?= h($inst['serial_number']) ?></small>
+                                <?php endif; ?>
                                 <?php if ($inst['client_name']): ?>
                                 <br><small class="text-muted"><i class="fas fa-user me-1"></i><?= h($inst['company_name'] ?: $inst['client_name']) ?></small>
                                 <?php endif; ?>

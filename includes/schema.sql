@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS `protocols` (
   `service_device_id` INT UNSIGNED DEFAULT NULL,
   `service_type` ENUM('przeglad','naprawa','wymiana','aktualizacja','inne') DEFAULT NULL,
   `replacement_device_id` INT UNSIGNED DEFAULT NULL,
+  `batch_id` INT UNSIGNED DEFAULT NULL,
   `type` ENUM('PP','PU','PS') NOT NULL DEFAULT 'PP',
   `protocol_number` VARCHAR(30) NOT NULL UNIQUE,
   `date` DATE NOT NULL,

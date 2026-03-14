@@ -1,15 +1,17 @@
 -- FleetLink Magazyn - Migration v4
 -- Adds device selection, service type and replacement device tracking to PS protocols.
+-- Adds batch_id to protocols for PP batch-group linking.
 -- Also creates device_history table for "wymieniono na/z" records.
 -- Run this script once against an existing database to apply the changes.
 
 SET NAMES utf8mb4;
 
--- 1. Add service-specific columns to the protocols table
+-- 1. Add service-specific and batch columns to the protocols table
 ALTER TABLE `protocols`
   ADD COLUMN IF NOT EXISTS `service_device_id`      INT UNSIGNED DEFAULT NULL AFTER `service_id`,
   ADD COLUMN IF NOT EXISTS `service_type`            ENUM('przeglad','naprawa','wymiana','aktualizacja','inne') DEFAULT NULL AFTER `service_device_id`,
-  ADD COLUMN IF NOT EXISTS `replacement_device_id`   INT UNSIGNED DEFAULT NULL AFTER `service_type`;
+  ADD COLUMN IF NOT EXISTS `replacement_device_id`   INT UNSIGNED DEFAULT NULL AFTER `service_type`,
+  ADD COLUMN IF NOT EXISTS `batch_id`                INT UNSIGNED DEFAULT NULL AFTER `replacement_device_id`;
 
 ALTER TABLE `protocols`
   ADD CONSTRAINT IF NOT EXISTS `fk_protocols_service_device`

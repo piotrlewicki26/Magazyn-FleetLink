@@ -26,6 +26,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes          = sanitize($_POST['notes'] ?? '');
     $clientSignature = sanitize($_POST['client_signature'] ?? '');
 
+    // PP batch group – when a batch is selected the form sends batch_ref=batch:N
+    $batchRef       = sanitize($_POST['batch_ref'] ?? '');
+    $batchId        = null;
+    $batchPrefix    = 'batch:';
+    $instPrefix     = 'inst:';
+    if ($batchRef !== '' && strpos($batchRef, $batchPrefix) === 0) {
+        $batchId        = (int)substr($batchRef, strlen($batchPrefix)) ?: null;
+        $installationId = null; // batch supersedes single installation
+    } elseif ($batchRef !== '' && strpos($batchRef, $instPrefix) === 0) {
+        $installationId = (int)substr($batchRef, strlen($instPrefix)) ?: null;
+        $batchId        = null;
+    }
+
     // PS-specific fields
     $serviceDeviceId    = (int)($_POST['service_device_id'] ?? 0) ?: null;
     $serviceType        = sanitize($_POST['service_type'] ?? '');
@@ -48,8 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($postAction === 'add') {
         $protocolNum = generateProtocolNumber($type);
-        $db->prepare("INSERT INTO protocols (installation_id, service_id, service_device_id, service_type, replacement_device_id, type, protocol_number, date, technician_id, client_signature, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-           ->execute([$installationId, $serviceId, $serviceDeviceId, $serviceType, $replacementDeviceId, $type, $protocolNum, $date, $technicianId, $clientSignature, $notes]);
+        $db->prepare("INSERT INTO protocols (installation_id, service_id, service_device_id, service_type, replacement_device_id, batch_id, type, protocol_number, date, technician_id, client_signature, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+           ->execute([$installationId, $serviceId, $serviceDeviceId, $serviceType, $replacementDeviceId, $batchId, $type, $protocolNum, $date, $technicianId, $clientSignature, $notes]);
         $newId = $db->lastInsertId();
 
         // Record device history for "wymiana"
@@ -71,8 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $oldP->execute([$editId]);
         $oldProtocol = $oldP->fetch();
 
-        $db->prepare("UPDATE protocols SET installation_id=?, service_id=?, service_device_id=?, service_type=?, replacement_device_id=?, date=?, technician_id=?, client_signature=?, notes=? WHERE id=?")
-           ->execute([$installationId, $serviceId, $serviceDeviceId, $serviceType, $replacementDeviceId, $date, $technicianId, $clientSignature, $notes, $editId]);
+        $db->prepare("UPDATE protocols SET installation_id=?, service_id=?, service_device_id=?, service_type=?, replacement_device_id=?, batch_id=?, date=?, technician_id=?, client_signature=?, notes=? WHERE id=?")
+           ->execute([$installationId, $serviceId, $serviceDeviceId, $serviceType, $replacementDeviceId, $batchId, $date, $technicianId, $clientSignature, $notes, $editId]);
 
         // Re-record device history for "wymiana" if relevant fields changed
         $wasWymiana = ($oldProtocol['service_type'] === 'wymiana' && $oldProtocol['service_device_id'] && $oldProtocol['replacement_device_id']);
@@ -110,6 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $protocol = null;
 $protocolData = [];
+$batchInstallations = []; // filled below when protocol has batch_id
 if (in_array($action, ['view','edit','print']) && $id) {
     $stmt = $db->prepare("
         SELECT p.*,
@@ -142,18 +156,66 @@ if (in_array($action, ['view','edit','print']) && $id) {
     $stmt->execute([$id]);
     $protocol = $stmt->fetch();
     if (!$protocol) { flashError('Protokół nie istnieje.'); redirect(getBaseUrl() . 'protocols.php'); }
+
+    // Fetch all installations of a batch (PP protocols with batch_id)
+    if (!empty($protocol['batch_id'])) {
+        $batchStmt = $db->prepare("
+            SELECT i.id, i.installation_date, i.location_in_vehicle, i.notes,
+                   d.serial_number, d.imei, d.sim_number,
+                   m.name as model_name, mf.name as manufacturer_name,
+                   v.registration, v.make, v.model_name as vehicle_model, v.vin,
+                   c.contact_name, c.company_name, c.nip, c.phone as client_phone,
+                   c.address as client_address, c.city as client_city,
+                   u.name as technician_name
+            FROM installations i
+            JOIN devices d ON d.id=i.device_id
+            JOIN models m ON m.id=d.model_id
+            JOIN manufacturers mf ON mf.id=m.manufacturer_id
+            JOIN vehicles v ON v.id=i.vehicle_id
+            LEFT JOIN clients c ON c.id=i.client_id
+            LEFT JOIN users u ON u.id=i.technician_id
+            WHERE i.batch_id=?
+            ORDER BY i.id
+        ");
+        $batchStmt->execute([$protocol['batch_id']]);
+        $batchInstallations = $batchStmt->fetchAll();
+    }
 }
 
 $users = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
-$activeInstallations = $db->query("
-    SELECT i.id, v.registration, d.serial_number
+
+// Fetch individual installations (no batch) and batch groups separately for the dropdown
+$activeInstallationsSingle = $db->query("
+    SELECT i.id, v.registration, d.serial_number, NULL as batch_id
     FROM installations i
     JOIN vehicles v ON v.id=i.vehicle_id
     JOIN devices d ON d.id=i.device_id
     WHERE i.status IN ('aktywna','zakonczona')
+      AND (i.batch_id IS NULL)
     ORDER BY i.installation_date DESC
     LIMIT 50
 ")->fetchAll();
+
+// Batch groups: one row per batch_id with device count and first vehicle registration
+$activeInstallationBatches = [];
+try {
+    $batchRows = $db->query("
+        SELECT i.batch_id,
+               MIN(i.id) as first_id,
+               COUNT(i.id) as device_count,
+               GROUP_CONCAT(DISTINCT v.registration ORDER BY v.registration SEPARATOR ', ') as registrations,
+               MIN(i.installation_date) as installation_date
+        FROM installations i
+        JOIN vehicles v ON v.id=i.vehicle_id
+        WHERE i.status IN ('aktywna','zakonczona')
+          AND i.batch_id IS NOT NULL
+        GROUP BY i.batch_id
+        ORDER BY MIN(i.installation_date) DESC
+        LIMIT 30
+    ")->fetchAll();
+    $activeInstallationBatches = $batchRows;
+} catch (PDOException $e) { /* batch_id column not yet available */ }
+
 $recentServices = $db->query("
     SELECT s.id, d.serial_number, s.planned_date, s.type
     FROM services s
@@ -274,7 +336,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php elseif ($action === 'view' && $protocol): ?>
 <div class="row g-3">
-    <div class="col-md-5">
+    <div class="col-md-<?= !empty($batchInstallations) ? '7' : '5' ?>">
         <div class="card">
             <div class="card-header">Protokół <?= h($protocol['protocol_number']) ?></div>
             <div class="card-body">
@@ -286,11 +348,13 @@ include __DIR__ . '/includes/header.php';
                     <tr><th class="text-muted">Nr protokołu</th><td><?= h($protocol['protocol_number']) ?></td></tr>
                     <tr><th class="text-muted">Data</th><td><?= formatDate($protocol['date']) ?></td></tr>
                     <tr><th class="text-muted">Technik</th><td><?= h($protocol['technician_name'] ?? '—') ?></td></tr>
-                    <?php if ($protocol['registration']): ?>
+                    <?php if (!empty($batchInstallations)): ?>
+                    <tr><th class="text-muted">Montaż grupowy</th><td><span class="badge bg-primary"><?= count($batchInstallations) ?> urządzenia/ń</span></td></tr>
+                    <?php elseif ($protocol['registration']): ?>
                     <tr><th class="text-muted">Pojazd</th><td><?= h($protocol['registration'] . ' ' . $protocol['make'] . ' ' . $protocol['vehicle_model']) ?></td></tr>
                     <tr><th class="text-muted">VIN</th><td><?= h($protocol['vin'] ?? '—') ?></td></tr>
                     <?php endif; ?>
-                    <?php if ($protocol['serial_number']): ?>
+                    <?php if (empty($batchInstallations) && $protocol['serial_number']): ?>
                     <tr><th class="text-muted">Urządzenie</th><td><?= h($protocol['manufacturer_name'] . ' ' . $protocol['model_name']) ?><br><small><?= h($protocol['serial_number']) ?></small></td></tr>
                     <tr><th class="text-muted">IMEI</th><td><?= h($protocol['imei'] ?? '—') ?></td></tr>
                     <?php endif; ?>
@@ -311,7 +375,7 @@ include __DIR__ . '/includes/header.php';
                     </td></tr>
                     <?php endif; ?>
                     <?php endif; ?>
-                    <?php if ($protocol['contact_name']): ?>
+                    <?php if (empty($batchInstallations) && $protocol['contact_name']): ?>
                     <tr><th class="text-muted">Klient</th><td><?= h($protocol['company_name'] ?: $protocol['contact_name']) ?></td></tr>
                     <?php endif; ?>
                 </table>
@@ -320,6 +384,24 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
                 <?php if ($protocol['client_signature']): ?>
                 <hr><strong class="small">Podpis klienta:</strong><p class="small mt-1"><?= h($protocol['client_signature']) ?></p>
+                <?php endif; ?>
+
+                <?php if (!empty($batchInstallations)): ?>
+                <hr>
+                <strong class="small text-primary">Urządzenia w grupie:</strong>
+                <table class="table table-sm mt-2">
+                    <thead><tr><th>Pojazd</th><th>Urządzenie</th><th>IMEI</th><th>Klient</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($batchInstallations as $bi): ?>
+                    <tr>
+                        <td><?= h($bi['registration']) ?><br><small class="text-muted"><?= h($bi['make'] . ' ' . $bi['vehicle_model']) ?></small></td>
+                        <td><?= h($bi['manufacturer_name'] . ' ' . $bi['model_name']) ?><br><small><?= h($bi['serial_number']) ?></small></td>
+                        <td><?= h($bi['imei'] ?? '—') ?></td>
+                        <td><?= h($bi['company_name'] ?: ($bi['contact_name'] ?? '—')) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
                 <?php endif; ?>
             </div>
             <div class="card-footer d-flex gap-2 flex-wrap">
@@ -374,14 +456,37 @@ $curRepDev   = (int)($protocol['replacement_device_id'] ?? 0);
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Powiązany montaż</label>
-                    <select name="installation_id" class="form-select">
+                    <?php
+                    // Determine currently selected batch_ref value for the edit form
+                    $curBatchRef = '';
+                    if (!empty($protocol['batch_id'])) {
+                        $curBatchRef = 'batch:' . $protocol['batch_id'];
+                    } elseif (!empty($protocol['installation_id'])) {
+                        $curBatchRef = 'inst:' . $protocol['installation_id'];
+                    } elseif ((int)($_GET['installation'] ?? 0)) {
+                        $curBatchRef = 'inst:' . (int)$_GET['installation'];
+                    }
+                    ?>
+                    <select name="batch_ref" class="form-select">
                         <option value="">— brak —</option>
-                        <?php foreach ($activeInstallations as $inst): ?>
-                        <option value="<?= $inst['id'] ?>"
-                                <?= ($protocol['installation_id'] ?? (int)($_GET['installation'] ?? 0)) == $inst['id'] ? 'selected' : '' ?>>
+                        <?php if (!empty($activeInstallationBatches)): ?>
+                        <optgroup label="🗂️ Montaże grupowe">
+                        <?php foreach ($activeInstallationBatches as $bg): ?>
+                        <?php $bgRef = 'batch:' . $bg['batch_id']; ?>
+                        <option value="<?= h($bgRef) ?>" <?= $curBatchRef === $bgRef ? 'selected' : '' ?>>
+                            Grupa <?= (int)$bg['device_count'] ?> urządz. — <?= h($bg['registrations']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                        </optgroup>
+                        <?php endif; ?>
+                        <optgroup label="📌 Montaże pojedyncze">
+                        <?php foreach ($activeInstallationsSingle as $inst): ?>
+                        <?php $instRef = 'inst:' . $inst['id']; ?>
+                        <option value="<?= h($instRef) ?>" <?= $curBatchRef === $instRef ? 'selected' : '' ?>>
                             <?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?>
                         </option>
                         <?php endforeach; ?>
+                        </optgroup>
                     </select>
                 </div>
                 <div class="col-md-6">
@@ -424,7 +529,7 @@ $curRepDev   = (int)($protocol['replacement_device_id'] ?? 0);
                             <label class="form-label fw-semibold text-warning-emphasis"><i class="fas fa-wrench me-1"></i>Typ czynności serwisowej</label>
                             <select name="service_type" id="serviceTypeSelect" class="form-select">
                                 <option value="">— wybierz —</option>
-                                <?php foreach ($stLabels as $val => $lbl): ?>
+                                <?php foreach ($psServiceTypeLabels as $val => $lbl): ?>
                                 <option value="<?= $val ?>" <?= $curSvcType === $val ? 'selected' : '' ?>><?= h($lbl) ?></option>
                                 <?php endforeach; ?>
                             </select>

@@ -118,8 +118,29 @@
         </div>
     </div>
 
-    <!-- Device section -->
-    <?php if ($protocol['serial_number'] || $protocol['model_name']): ?>
+    <!-- Device section: batch group or single -->
+    <?php if (!empty($batchInstallations)): ?>
+    <div class="pp-section-label">Urządzenia GPS — montaż grupowy (<?= count($batchInstallations) ?> szt.)</div>
+    <table class="pp-table">
+        <thead><tr style="background:#f0f4ff"><th style="width:5%">#</th><th>Pojazd</th><th>Producent / Model</th><th>Nr seryjny</th><th>IMEI</th></tr></thead>
+        <tbody>
+        <?php foreach ($batchInstallations as $idx => $bi): ?>
+        <tr>
+            <td><?= $idx + 1 ?></td>
+            <td>
+                <strong><?= h($bi['registration']) ?></strong>
+                <?php if ($bi['make'] || $bi['vehicle_model']): ?>
+                <br><span style="font-size:0.78rem;color:#666"><?= h(trim($bi['make'] . ' ' . $bi['vehicle_model'])) ?></span>
+                <?php endif; ?>
+            </td>
+            <td><?= h(trim(($bi['manufacturer_name'] ?? '') . ' ' . ($bi['model_name'] ?? ''))) ?></td>
+            <td><?= h($bi['serial_number']) ?></td>
+            <td><?= h($bi['imei'] ?? '—') ?></td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <?php elseif ($protocol['serial_number'] || $protocol['model_name']): ?>
     <div class="pp-section-label">Urządzenie GPS</div>
     <table class="pp-table">
         <?php if ($protocol['manufacturer_name'] || $protocol['model_name']): ?>
@@ -143,7 +164,7 @@
     <!-- PS service device section -->
     <?php if ($protocol['type'] === 'PS' && ($protocol['svc_serial'] ?? '')): ?>
     <?php
-    $stLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+    $stLabels = $psServiceTypeLabels ?? ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
     ?>
     <div class="pp-section-label">Urządzenie — serwis dotyczy</div>
     <table class="pp-table">
