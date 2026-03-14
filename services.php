@@ -39,7 +39,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($type !== 'wymiana') $replacementDeviceId = null;
 
     if ($postAction === 'add') {
-        if (isTechnician()) { flashError('Rola Technik nie może dodawać serwisów.'); redirect(getBaseUrl() . 'services.php'); }
         if (!$deviceId || empty($plannedDate)) {
             flashError('Urządzenie i data zaplanowanego serwisu są wymagane.');
             redirect(getBaseUrl() . 'services.php?action=add');
@@ -232,9 +231,7 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-wrench me-2 text-primary"></i>Serwisy</h1>
     <?php if ($action === 'list'): ?>
-    <?php if (!isTechnician()): ?>
     <a href="services.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowy serwis</a>
-    <?php endif; ?>
     <?php elseif ($action !== 'print'): ?>
     <a href="services.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
