@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS `services` (
   `installation_id` INT UNSIGNED DEFAULT NULL,
   `technician_id` INT UNSIGNED DEFAULT NULL,
   `type` ENUM('przeglad','naprawa','wymiana','aktualizacja','inne') NOT NULL DEFAULT 'przeglad',
+  `replacement_device_id` INT UNSIGNED DEFAULT NULL,
   `planned_date` DATE DEFAULT NULL,
   `completed_date` DATE DEFAULT NULL,
   `status` ENUM('zaplanowany','w_trakcie','zakończony','anulowany') NOT NULL DEFAULT 'zaplanowany',
@@ -171,6 +172,7 @@ CREATE TABLE IF NOT EXISTS `services` (
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`device_id`) REFERENCES `devices`(`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`replacement_device_id`) REFERENCES `devices`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`installation_id`) REFERENCES `installations`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`technician_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -258,12 +260,14 @@ CREATE TABLE IF NOT EXISTS `device_history` (
   `event_type`        ENUM('wymieniono_na','wymieniono_z','serwis') NOT NULL,
   `related_device_id` INT UNSIGNED DEFAULT NULL,
   `protocol_id`       INT UNSIGNED DEFAULT NULL,
+  `service_id`        INT UNSIGNED DEFAULT NULL,
   `notes`             TEXT DEFAULT NULL,
   `created_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   FOREIGN KEY (`device_id`)         REFERENCES `devices`(`id`)   ON DELETE CASCADE,
   FOREIGN KEY (`related_device_id`) REFERENCES `devices`(`id`)   ON DELETE SET NULL,
-  FOREIGN KEY (`protocol_id`)       REFERENCES `protocols`(`id`) ON DELETE SET NULL
+  FOREIGN KEY (`protocol_id`)       REFERENCES `protocols`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`service_id`)        REFERENCES `services`(`id`)  ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Email log table

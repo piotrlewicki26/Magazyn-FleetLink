@@ -22,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $installationId  = (int)($_POST['installation_id'] ?? 0) ?: null;
     $technicianId    = (int)($_POST['technician_id'] ?? 0) ?: null;
     $type            = sanitize($_POST['type'] ?? 'przeglad');
+    $replacementDeviceId = (int)($_POST['replacement_device_id'] ?? 0) ?: null;
     $plannedDate     = sanitize($_POST['planned_date'] ?? '') ?: null;
     $completedDate   = sanitize($_POST['completed_date'] ?? '') ?: null;
     $status          = sanitize($_POST['status'] ?? 'zaplanowany');
@@ -35,6 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!in_array($type, $validTypes)) $type = 'przeglad';
     if (!in_array($status, $validStatuses)) $status = 'zaplanowany';
     if (!$technicianId) $technicianId = $currentUser['id'];
+    if ($type !== 'wymiana') $replacementDeviceId = null;
 
     if ($postAction === 'add') {
         if (isTechnician()) { flashError('Rola Technik nie może dodawać serwisów.'); redirect(getBaseUrl() . 'services.php'); }
@@ -42,9 +44,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Urządzenie i data zaplanowanego serwisu są wymagane.');
             redirect(getBaseUrl() . 'services.php?action=add');
         }
-        $db->prepare("INSERT INTO services (device_id, installation_id, technician_id, type, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?)")
-           ->execute([$deviceId, $installationId, $technicianId, $type, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
+        $db->prepare("INSERT INTO services (device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+           ->execute([$deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
         $newServiceId = (int)$db->lastInsertId();
+        // Record device history for "wymiana"
+        if ($type === 'wymiana' && $deviceId && $replacementDeviceId) {
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$deviceId, 'wymieniono_na', $replacementDeviceId, $newServiceId]);
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$replacementDeviceId, 'wymieniono_z', $deviceId, $newServiceId]);
+        }
         // Update device status if in service
         if ($status === 'w_trakcie') {
             $db->prepare("UPDATE devices SET status='w_serwisie' WHERE id=?")->execute([$deviceId]);
@@ -69,8 +78,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($postAction === 'edit') {
         $editId = (int)($_POST['id'] ?? 0);
-        $db->prepare("UPDATE services SET device_id=?, installation_id=?, technician_id=?, type=?, planned_date=?, completed_date=?, status=?, description=?, resolution=?, cost=? WHERE id=?")
-           ->execute([$deviceId, $installationId, $technicianId, $type, $plannedDate, $completedDate, $status, $description, $resolution, $cost, $editId]);
+        // Fetch old values to compare wymiana state
+        $oldSvcStmt = $db->prepare("SELECT device_id, type, replacement_device_id FROM services WHERE id=?");
+        $oldSvcStmt->execute([$editId]);
+        $oldSvc = $oldSvcStmt->fetch() ?: [];
+        $db->prepare("UPDATE services SET device_id=?, installation_id=?, technician_id=?, type=?, replacement_device_id=?, planned_date=?, completed_date=?, status=?, description=?, resolution=?, cost=? WHERE id=?")
+           ->execute([$deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost, $editId]);
+        // Handle device_history for wymiana changes
+        $wasWymiana = ($oldSvc['type'] ?? '') === 'wymiana' && ($oldSvc['device_id'] ?? 0) && ($oldSvc['replacement_device_id'] ?? 0);
+        $isWymiana  = $type === 'wymiana' && $deviceId && $replacementDeviceId;
+        $deviceChanged = ($oldSvc['device_id'] ?? 0) !== $deviceId || ($oldSvc['replacement_device_id'] ?? 0) !== $replacementDeviceId;
+        if ($isWymiana && (!$wasWymiana || $deviceChanged)) {
+            if ($wasWymiana) {
+                $db->prepare("DELETE FROM device_history WHERE service_id=?")->execute([$editId]);
+            }
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$deviceId, 'wymieniono_na', $replacementDeviceId, $editId]);
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$replacementDeviceId, 'wymieniono_z', $deviceId, $editId]);
+        } elseif ($wasWymiana && !$isWymiana) {
+            $db->prepare("DELETE FROM device_history WHERE service_id=?")->execute([$editId]);
+        }
         // Update device status
         if ($status === 'w_trakcie') {
             $db->prepare("UPDATE devices SET status='w_serwisie' WHERE id=?")->execute([$deviceId]);
@@ -82,6 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($postAction === 'delete') {
         $delId = (int)($_POST['id'] ?? 0);
+        $db->prepare("DELETE FROM device_history WHERE service_id=?")->execute([$delId]);
         $db->prepare("DELETE FROM services WHERE id=?")->execute([$delId]);
         flashSuccess('Serwis usunięty.');
         redirect(getBaseUrl() . 'services.php');
@@ -423,13 +452,26 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <div class="col-md-6">
                     <label class="form-label required-star">Typ serwisu</label>
-                    <select name="type" class="form-select">
+                    <select name="type" id="svcTypeSelect" class="form-select">
                         <option value="przeglad" <?= ($service['type'] ?? 'przeglad') === 'przeglad' ? 'selected' : '' ?>>Przegląd</option>
                         <option value="naprawa" <?= ($service['type'] ?? '') === 'naprawa' ? 'selected' : '' ?>>Naprawa</option>
                         <option value="wymiana" <?= ($service['type'] ?? '') === 'wymiana' ? 'selected' : '' ?>>Wymiana</option>
                         <option value="aktualizacja" <?= ($service['type'] ?? '') === 'aktualizacja' ? 'selected' : '' ?>>Aktualizacja firmware</option>
                         <option value="inne" <?= ($service['type'] ?? '') === 'inne' ? 'selected' : '' ?>>Inne</option>
                     </select>
+                </div>
+                <!-- Replacement device (wymiana only) -->
+                <div id="svcReplacementWrapper" class="col-12" <?= ($service['type'] ?? '') !== 'wymiana' ? 'style="display:none"' : '' ?>>
+                    <label class="form-label fw-semibold text-danger"><i class="fas fa-exchange-alt me-1"></i>Urządzenie zastępcze (wymiana na)</label>
+                    <select name="replacement_device_id" class="form-select">
+                        <option value="">— wybierz urządzenie zastępcze —</option>
+                        <?php foreach ($allDevices as $repDev): ?>
+                        <option value="<?= $repDev['id'] ?>" <?= ($service['replacement_device_id'] ?? 0) == $repDev['id'] ? 'selected' : '' ?>>
+                            <?= h($repDev['serial_number']) ?> — <?= h($repDev['manufacturer_name'] . ' ' . $repDev['model_name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text text-danger"><i class="fas fa-info-circle me-1"></i>Historia "wymieniono na/z" zostanie zapisana w obu urządzeniach.</div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Status</label>
@@ -554,6 +596,17 @@ include __DIR__ . '/includes/header.php';
 })();
 </script>
 <?php endif; ?>
+<script>
+(function () {
+    var svcTypeSelect = document.getElementById('svcTypeSelect');
+    var svcRepWrapper = document.getElementById('svcReplacementWrapper');
+    if (svcTypeSelect && svcRepWrapper) {
+        svcTypeSelect.addEventListener('change', function () {
+            svcRepWrapper.style.display = (this.value === 'wymiana') ? '' : 'none';
+        });
+    }
+}());
+</script>
 <?php endif; ?>
 
 <?php if ($action === 'print' && isset($service)): ?>
