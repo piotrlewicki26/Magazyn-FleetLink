@@ -1,0 +1,210 @@
+<?php
+/**
+ * FleetLink Magazyn - HTML Header & Navigation
+ * $pageTitle, $activePage should be set before including this file
+ */
+if (!defined('IN_APP')) {
+    header('HTTP/1.0 403 Forbidden');
+    exit;
+}
+$currentUser = getCurrentUser();
+$pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
+?>
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= h($pageTitle) ?></title>
+    <!-- Apply saved theme before render to avoid flash -->
+    <script>
+        (function(){var t=localStorage.getItem('fl-theme')||'light';document.documentElement.setAttribute('data-bs-theme',t);})();
+    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
+    <link rel="stylesheet" href="<?= getBaseUrl() ?>assets/css/style.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-bold" href="<?= getBaseUrl() ?>dashboard.php">
+            <img src="<?= getBaseUrl() ?>assets/fleetlink-logo-v2.png" alt="FleetLink" height="34" style="display:block">
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarMain">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'dashboard' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>dashboard.php">
+                        <i class="fas fa-tachometer-alt me-1"></i>Dashboard
+                    </a>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['manufacturers','models','devices','sim_cards']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-microchip me-1"></i>Urządzenia
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php"><i class="fas fa-list me-2"></i>Lista urządzeń</a></li>
+                        <?php if (isAdmin()): ?>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php?action=add"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>device_import.php"><i class="fas fa-file-import me-2"></i>Importuj urządzenia</a></li>
+                        <?php endif; ?>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>sim_cards.php"><i class="fas fa-sim-card me-2"></i>Karty SIM</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>sim_cards.php?action=add"><i class="fas fa-plus me-2"></i>Dodaj kartę SIM</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>manufacturers.php"><i class="fas fa-industry me-2"></i>Producenci</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>models.php"><i class="fas fa-tags me-2"></i>Modele</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'inventory' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-warehouse me-1"></i>Magazyn
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php"><i class="fas fa-microchip me-2"></i>Urządzenia</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php?action=accessories"><i class="fas fa-toolbox me-2"></i>Akcesoria</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php?action=movements"><i class="fas fa-history me-2"></i>Historia ruchów</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'clients' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>clients.php">
+                        <i class="fas fa-users me-1"></i>Klienci
+                    </a>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'installations' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-car me-1"></i>Instalacje
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php"><i class="fas fa-list me-2"></i>Lista montaży</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php?action=add"><i class="fas fa-plus me-2"></i>Nowy montaż</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php?filter=installation"><i class="fas fa-clipboard-check me-2"></i>Protokoły montaży</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'services' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-wrench me-1"></i>Serwisy
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php"><i class="fas fa-list me-2"></i>Lista serwisów</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php?action=add"><i class="fas fa-plus me-2"></i>Nowy serwis</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php?filter=service"><i class="fas fa-clipboard-check me-2"></i>Protokoły serwisu</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'calendar' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>calendar.php">
+                        <i class="fas fa-calendar-alt me-1"></i>Kalendarz
+                    </a>
+                </li>
+                <?php if (isAdmin()): ?>
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'statistics' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>statistics.php">
+                        <i class="fas fa-chart-bar me-1"></i>Statystyki
+                    </a>
+                </li>
+                <?php endif; ?>
+                <li class="nav-item">
+                    <a class="nav-link" href="https://system.le-mar.eu/partner/" target="_blank" rel="noopener noreferrer">
+                        <i class="fas fa-satellite-dish me-1"></i>Logowanie GPS
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="https://system.le-mar.eu/services/" target="_blank" rel="noopener noreferrer">
+                        <i class="fas fa-broadcast-tower me-1"></i>Status Urządzenia
+                    </a>
+                </li>
+                <?php
+                // Load schema settings for Schematy dropdown
+                $allcan300Pass = 'Pj0;Gm6$.g2rnd9';
+                try {
+                    $navSchemaStmt = getDb()->prepare("SELECT `value` FROM settings WHERE `key` = 'schema_allcan300_pass' LIMIT 1");
+                    $navSchemaStmt->execute();
+                    $navSchemaRow = $navSchemaStmt->fetchColumn();
+                    if ($navSchemaRow !== false && $navSchemaRow !== '') {
+                        $allcan300Pass = $navSchemaRow;
+                    }
+                } catch (Exception $e) {}
+                $navSchemas = [
+                    ['label' => 'ALL-CAN 300',        'url' => 'https://share.teltonika.lt/index.php/s/rFHo99iWX8BHMaZ/authenticate/showshare',    'pass' => $allcan300Pass],
+                    ['label' => 'CAN-CONTROL',        'url' => 'https://share.teltonika.lt/index.php/s/srTkkTW57jczcAT/authenticate/showshare',    'pass' => "3dmU~I{_@;W'OVL"],
+                    ['label' => 'CAN-CONTROL 6C IMMO','url' => 'https://share.teltonika.lt/index.php/s/k7CaQNcbjTRmSSL/authenticate/showshare',    'pass' => "f_n8n}G'sK+j4fx"],
+                    ['label' => 'CAN-CONTROL 6C',     'url' => 'https://share.teltonika.lt/index.php/s/Ad6P4Ea93Nptjnn/authenticate/showshare',    'pass' => 'q1{nGYAfw3-!5y#'],
+                    ['label' => 'CAN-CONTROL DTC',    'url' => 'https://share.teltonika.lt/index.php/s/Y2YYfPMi9e7kyTK/authenticate/showshare',    'pass' => "Hm!oo7jW-#kgxu'"],
+                    ['label' => 'CAN-CONTROL IMMO',   'url' => 'https://share.teltonika.lt/index.php/s/jEq22Dcqonq86p9/authenticate/showshare',    'pass' => 'F6evA;eIYTji~f('],
+                    ['label' => 'CAN-CONTROL IMMO P1','url' => 'https://share.teltonika.lt/index.php/s/73jkTnDko8PTJCe/authenticate/showshare',    'pass' => '#F+B9Q1OJS#uSI@'],
+                    ['label' => 'FMB 140 ALL-CAN',    'url' => 'https://share.teltonika.lt/index.php/s/xsxZPknB78S9763/authenticate/showshare',    'pass' => 'EmNj+l%3g!aaSqQ'],
+                    ['label' => 'FMB 140 LV-CAN',     'url' => 'https://share.teltonika.lt/index.php/s/mmrjRCGkicBjAtz/authenticate/showshare',    'pass' => 'IrL@nhJuyvdD=96'],
+                    ['label' => 'FMC 150',             'url' => 'https://share.teltonika.lt/index.php/s/w8Xi3txtHLB3B4H/authenticate/showshare',    'pass' => 'i-evHv6#hu5I(ei'],
+                    ['label' => 'LV-CAN200',           'url' => 'https://share.teltonika.lt/index.php/s/F9nGxssycArbkem/authenticate/showshare',    'pass' => ',J8RPt%_EgEFzOY'],
+                    ['label' => 'LV-CAN200 DTC',       'url' => 'https://share.teltonika.lt/index.php/s/JnEzJEeTDMQFqbX/authenticate/showshare',    'pass' => "W.#2}~MaqY]]w'D"],
+                ];
+                ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-sitemap me-1"></i>Schematy
+                    </a>
+                    <ul class="dropdown-menu">
+                        <?php foreach ($navSchemas as $schemaIdx => $schema): $schemaId = 'schemaPass' . $schemaIdx; ?>
+                        <li>
+                            <a class="dropdown-item" href="<?= h($schema['url']) ?>" target="_blank" rel="noopener noreferrer">
+                                <i class="fas fa-file-alt me-2"></i><?= h($schema['label']) ?>
+                            </a>
+                        </li>
+                        <li>
+                            <span class="dropdown-item d-flex align-items-center gap-2" style="cursor:default">
+                                <i class="fas fa-key text-muted"></i>
+                                <span class="text-muted small" id="<?= h($schemaId) ?>"><?= h($schema['pass']) ?></span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-auto" style="font-size:.75rem"
+                                    onclick="(function(btn,id){var t=document.getElementById(id).textContent;navigator.clipboard.writeText(t).then(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-check\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);}).catch(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\'fas fa-times\'></i>';setTimeout(function(){btn.innerHTML=orig;},1500);});})(this,'<?= h($schemaId) ?>')"
+                                    title="Kopiuj hasło">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </span>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                </li>
+                <?php if (isAdmin()): ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['users','settings','email']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-cog me-1"></i>Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>users.php"><i class="fas fa-users-cog me-2"></i>Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>email.php"><i class="fas fa-envelope me-2"></i>Wyślij e-mail</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>settings.php"><i class="fas fa-sliders-h me-2"></i>Ustawienia</a></li>
+                    </ul>
+                </li>
+                <?php endif; ?>
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-center gap-2">
+                <!-- Dark mode toggle -->
+                <li class="nav-item">
+                    <button id="darkModeToggle" title="Tryb ciemny" aria-label="Przełącz tryb kolorów">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-user-circle me-1"></i><?= h($currentUser['name'] ?? 'Użytkownik') ?>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><span class="dropdown-item-text text-muted small"><?= h($currentUser['email'] ?? '') ?></span></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>account.php"><i class="fas fa-user me-2"></i>Moje konto</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>logout.php"><i class="fas fa-sign-out-alt me-2"></i>Wyloguj</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+<div class="container-fluid py-3">
+    <?= renderFlash() ?>
