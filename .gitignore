@@ -1,0 +1,24 @@
+# FleetLink Magazyn - Git Ignore
+
+# Generated config file (contains DB credentials)
+includes/config.php
+
+# Uploaded files (if implemented)
+uploads/
+
+# Logs
+*.log
+
+# IDE/Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PHP cache
+.php-cs-fixer.cache
