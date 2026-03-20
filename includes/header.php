@@ -1,0 +1,119 @@
+<?php
+/**
+ * FleetLink Magazyn - HTML Header & Navigation
+ * $pageTitle, $activePage should be set before including this file
+ */
+if (!defined('IN_APP')) {
+    header('HTTP/1.0 403 Forbidden');
+    exit;
+}
+$currentUser = getCurrentUser();
+$pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
+?>
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= h($pageTitle) ?></title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css">
+    <link rel="stylesheet" href="<?= getBaseUrl() ?>assets/css/style.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top shadow-sm">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-bold" href="<?= getBaseUrl() ?>dashboard.php">
+            <i class="fas fa-satellite-dish me-2"></i>FleetLink
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarMain">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'dashboard' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>dashboard.php">
+                        <i class="fas fa-tachometer-alt me-1"></i>Panel
+                    </a>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['manufacturers','models','devices']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-microchip me-1"></i>Urządzenia
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php"><i class="fas fa-list me-2"></i>Lista urządzeń</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php?action=add"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>manufacturers.php"><i class="fas fa-industry me-2"></i>Producenci</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>models.php"><i class="fas fa-tags me-2"></i>Modele</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'inventory' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>inventory.php">
+                        <i class="fas fa-warehouse me-1"></i>Magazyn
+                    </a>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['installations','services']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-tools me-1"></i>Operacje
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php"><i class="fas fa-car me-2"></i>Montaże</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php?action=add"><i class="fas fa-plus me-2"></i>Nowy montaż</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php"><i class="fas fa-wrench me-2"></i>Serwisy</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php?action=add"><i class="fas fa-plus me-2"></i>Nowy serwis</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'calendar' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>calendar.php">
+                        <i class="fas fa-calendar-alt me-1"></i>Kalendarz
+                    </a>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['clients','offers']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-file-contract me-1"></i>CRM
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>clients.php"><i class="fas fa-users me-2"></i>Klienci</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offers.php"><i class="fas fa-file-invoice-dollar me-2"></i>Oferty</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>contracts.php"><i class="fas fa-file-signature me-2"></i>Umowy</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php"><i class="fas fa-clipboard-check me-2"></i>Protokoły</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= ($activePage ?? '') === 'statistics' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>statistics.php">
+                        <i class="fas fa-chart-bar me-1"></i>Statystyki
+                    </a>
+                </li>
+                <?php if (isAdmin()): ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['users','settings','email']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-cog me-1"></i>Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>users.php"><i class="fas fa-users-cog me-2"></i>Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>email.php"><i class="fas fa-envelope me-2"></i>Wyślij e-mail</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>settings.php"><i class="fas fa-sliders-h me-2"></i>Ustawienia</a></li>
+                    </ul>
+                </li>
+                <?php endif; ?>
+            </ul>
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-user-circle me-1"></i><?= h($currentUser['name'] ?? 'Użytkownik') ?>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><span class="dropdown-item-text text-muted small"><?= h($currentUser['email'] ?? '') ?></span></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>logout.php"><i class="fas fa-sign-out-alt me-2"></i>Wyloguj</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+<div class="container-fluid py-3">
+    <?= renderFlash() ?>
