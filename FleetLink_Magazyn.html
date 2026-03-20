@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="pl" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetLink – Magazyn GPS</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<style>
+/* ─── THEME VARIABLES ─── */
+:root { font-size: 14px; }
+[data-theme="dark"] {
+  --bg-app:#0B2545; --sidebar-bg:linear-gradient(180deg,#0B2545 0%,#0D3464 100%);
+  --main-bg:linear-gradient(180deg,#0D2E5C 0%,#0F1F3D 100%);
+  --card-bg:rgba(255,255,255,.05); --card2-bg:rgba(255,255,255,.08);
+  --input-bg:rgba(255,255,255,.08); --input-focus:rgba(255,255,255,.12);
+  --modal-bg:#0D2E5C; --modal-head:linear-gradient(135deg,#0B2545,#1A4B8C);
+  --tabnav-bg:rgba(255,255,255,.08); --tab-active:linear-gradient(135deg,#27AE60,#2E7BCE);
+  --text1:#ffffff; --text2:rgba(255,255,255,.65); --text3:rgba(255,255,255,.4);
+  --label-color:rgba(255,255,255,.55); --border:rgba(255,255,255,.12);
+  --border-focus:#5BA4F5; --modal-border:rgba(255,255,255,.15);
+  --accent:#27AE60; --blue:#2E7BCE; --sky:#5BA4F5;
+  --danger:#E74C3C; --warn:#F39C12;
+  --shadow:0 4px 24px rgba(11,37,69,.18); --shadow-lg:0 12px 48px rgba(11,37,69,.3);
+  --opt-bg:#1a3a6b;
+  --arrow-svg:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(255,255,255,.4)' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+[data-theme="light"] {
+  --bg-app:#f0f4f8; --sidebar-bg:linear-gradient(180deg,#1A3A6B 0%,#1e4a8a 100%);
+  --main-bg:#f0f4f8;
+  --card-bg:#ffffff; --card2-bg:#f5f7fa;
+  --input-bg:#f5f7fa; --input-focus:#eef2f7;
+  --modal-bg:#ffffff; --modal-head:linear-gradient(135deg,#1A3A6B,#2E7BCE);
+  --tabnav-bg:rgba(0,0,0,.07); --tab-active:linear-gradient(135deg,#27AE60,#2E7BCE);
+  --text1:#1a2332; --text2:#4a5568; --text3:#718096;
+  --label-color:#4a5568; --border:#e2e8f0;
+  --border-focus:#3182CE; --modal-border:#e2e8f0;
+  --accent:#27AE60; --blue:#2E7BCE; --sky:#3182CE;
+  --danger:#E74C3C; --warn:#E67E22;
+  --shadow:0 2px 12px rgba(0,0,0,.08); --shadow-lg:0 8px 32px rgba(0,0,0,.14);
+  --opt-bg:#ffffff;
+  --arrow-svg:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234a5568' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg-app);min-height:100vh;color:var(--text1);transition:background .3s,color .3s;}
+/* ─── LAYOUT ─── */
+.app-shell{display:grid;grid-template-columns:276px 1fr;min-height:100vh;}
+.sidebar{background:var(--sidebar-bg);padding:20px 16px;display:flex;flex-direction:column;gap:14px;position:sticky;top:0;height:100vh;overflow-y:auto;}
+.main{padding:24px;background:var(--main-bg);display:flex;flex-direction:column;gap:0;transition:background .3s;}
+/* ─── LOGO ─── */
+.sidebar-logo-img{width:148px;height:auto;display:block;filter:drop-shadow(0 2px 8px rgba(0,120,255,.3));}
+/* ─── SIDEBAR HELPERS ─── */
+.sb-label{color:#5BA4F5;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding-bottom:5px;border-bottom:1px solid rgba(91,164,245,.2);}
+.sb-divider{border:none;border-top:1px solid rgba(255,255,255,.1);margin:2px 0;}
+.sb-section{display:flex;flex-direction:column;gap:7px;}
+/* ─── FORM GROUP ─── */
+.fg{display:flex;flex-direction:column;gap:3px;}
+.fg label{color:var(--label-color);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;}
+.fg input,.fg select,.fg textarea{
+  background:var(--input-bg);border:1px solid var(--border);border-radius:8px;
+  color:var(--text1);font-family:'DM Sans',sans-serif;font-size:12px;padding:7px 10px;
+  outline:none;transition:border-color .2s,background .2s;width:100%;
+}
+.fg input::placeholder,.fg textarea::placeholder{color:var(--text3);}
+.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:var(--border-focus);background:var(--input-focus);}
+.fg select{-webkit-appearance:none;appearance:none;background-image:var(--arrow-svg);background-repeat:no-repeat;background-position:right 10px center;background-color:var(--input-bg);}
+.fg select option{background:var(--opt-bg);color:var(--text1);}
+/* ─── BUTTONS ─── */
+.btn-pri{background:linear-gradient(135deg,#27AE60,#2E7BCE);border:none;border-radius:10px;color:#fff;cursor:pointer;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;padding:10px 16px;letter-spacing:.04em;transition:all .2s;box-shadow:0 4px 12px rgba(39,174,96,.3);display:flex;align-items:center;justify-content:center;gap:6px;}
+.btn-pri:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(39,174,96,.4);}
+.btn-save{background:linear-gradient(135deg,#0D5C2E,#1A8C4E);border:none;border-radius:10px;color:#fff;cursor:pointer;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;padding:9px;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.btn-save:hover{transform:translateY(-1px);}
+.btn-out{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);border-radius:10px;color:rgba(255,255,255,.75);cursor:pointer;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;padding:8px;transition:all .2s;text-align:center;display:block;width:100%;}
+.btn-out:hover{background:rgba(255,255,255,.12);color:#fff;}
+.btn-sm{font-size:11px;padding:5px 10px;border-radius:7px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600;transition:all .15s;}
+.btn-blue{background:rgba(46,123,206,.25);color:#5BA4F5;border:1px solid rgba(91,164,245,.3);}
+.btn-blue:hover{background:rgba(46,123,206,.4);}
+.btn-red{background:rgba(231,76,60,.2);color:#E74C3C;border:1px solid rgba(231,76,60,.3);}
+.btn-red:hover{background:rgba(231,76,60,.35);}
+.btn-grn{background:rgba(39,174,96,.2);color:#27AE60;border:1px solid rgba(39,174,96,.3);}
+.btn-grn:hover{background:rgba(39,174,96,.35);}
+/* ─── THEME TOGGLE ─── */
+.theme-toggle{display:flex;align-items:center;justify-content:space-between;background:var(--card2-bg);border:1px solid var(--border);border-radius:10px;padding:9px 13px;cursor:pointer;color:var(--text2);font-size:12px;font-weight:600;transition:all .2s;width:100%;text-align:left;}
+.theme-toggle:hover{background:var(--input-focus);color:var(--text1);}
+/* ─── TABS ─── */
+.tab-nav{display:flex;gap:5px;margin-bottom:20px;background:var(--tabnav-bg);backdrop-filter:blur(8px);border-radius:14px;padding:5px;border:1px solid var(--border);}
+.tab-btn{flex:1;padding:10px 12px;background:transparent;border:none;border-radius:10px;color:var(--text3);cursor:pointer;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:.04em;transition:all .25s;}
+.tab-btn:hover{color:var(--text1);background:var(--card2-bg);}
+.tab-btn.active{background:var(--tab-active);color:#fff;box-shadow:0 4px 14px rgba(39,174,96,.4);}
+.tab-pane{display:none;flex-direction:column;gap:16px;}
+.tab-pane.active{display:flex;}
+.badge{background:linear-gradient(135deg,#27AE60,#2E7BCE);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:5px;}
+/* ─── CARDS ─── */
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:var(--shadow);transition:background .3s,border .3s;}
+.card-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--text1);margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+/* ─── TOOLBAR ─── */
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+.search-inp{flex:1;min-width:180px;background:var(--input-bg);border:1px solid var(--border);border-radius:10px;color:var(--text1);font-family:'DM Sans',sans-serif;font-size:13px;padding:9px 14px;outline:none;transition:border-color .2s;}
+.search-inp::placeholder{color:var(--text3);}
+.search-inp:focus{border-color:var(--border-focus);}
+/* ─── STATS ─── */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:4px;}
+.stat-card{background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:14px 16px;text-align:center;transition:background .3s;}
+.stat-val{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:var(--sky);}
+.stat-lbl{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;}
+/* ─── TABLE ─── */
+.tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--border);}
+table.tbl{width:100%;border-collapse:collapse;font-size:12px;}
+table.tbl th{background:var(--card2-bg);color:var(--text3);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);}
+table.tbl td{padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text2);vertical-align:middle;}
+table.tbl tbody tr:last-child td{border-bottom:none;}
+table.tbl tbody tr:hover{background:var(--card2-bg);}
+.imei-cell{font-family:monospace;font-size:11px;color:var(--sky);}
+.plate-chip{font-weight:700;color:var(--text1);background:var(--card2-bg);padding:3px 9px;border-radius:6px;font-size:12px;border:1px solid var(--border);}
+.empty-state{text-align:center;padding:48px 20px;color:var(--text3);}
+.empty-icon{font-size:40px;margin-bottom:10px;}
+/* ─── INSTALL FORM ─── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.form-grid .full{grid-column:1/-1;}
+.fi{display:flex;flex-direction:column;gap:4px;}
+.fi label{font-size:11px;font-weight:600;color:var(--label-color);text-transform:uppercase;letter-spacing:.06em;}
+.fi label .req{color:var(--danger);margin-left:2px;}
+.fi label .opt{color:var(--text3);font-size:9px;font-weight:400;text-transform:none;margin-left:4px;}
+.fi input,.fi select,.fi textarea{background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text1);font-family:'DM Sans',sans-serif;font-size:13px;padding:9px 12px;outline:none;transition:border-color .2s,background .2s;width:100%;}
+.fi input::placeholder,.fi textarea::placeholder{color:var(--text3);}
+.fi input:focus,.fi select:focus,.fi textarea:focus{border-color:var(--border-focus);background:var(--input-focus);}
+.fi select{-webkit-appearance:none;appearance:none;background-image:var(--arrow-svg);background-repeat:no-repeat;background-position:right 12px center;background-color:var(--input-bg);}
+.fi select option{background:var(--opt-bg);color:var(--text1);}
+.veh-row{display:flex;gap:8px;align-items:flex-end;}
+.veh-row select{flex:1;}
+.btn-veh-mgr{flex-shrink:0;background:var(--card2-bg);border:1px solid var(--border);border-radius:8px;color:var(--text2);font-size:12px;padding:9px 12px;cursor:pointer;white-space:nowrap;transition:all .2s;}
+.btn-veh-mgr:hover{border-color:var(--sky);color:var(--text1);}
+.form-actions{display:flex;gap:10px;margin-top:8px;}
+.form-actions .btn-pri{flex:1;}
+/* ─── SERVICE BADGES ─── */
+.svc-badge{font-size:10px;padding:2px 8px;border-radius:6px;font-weight:600;}
+.svc-przeglad{background:rgba(39,174,96,.2);color:#27AE60;}
+.svc-naprawa{background:rgba(231,76,60,.2);color:#E74C3C;}
+.svc-wymiana{background:rgba(243,156,18,.2);color:#F39C12;}
+.svc-aktualizacja{background:rgba(46,123,206,.2);color:#5BA4F5;}
+.svc-inne{background:rgba(127,140,141,.2);color:#95A5A6;}
+/* ─── MODAL ─── */
+.modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;}
+.modal-ov.open{display:flex;}
+.modal{background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:20px;box-shadow:var(--shadow-lg);width:90%;max-width:680px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;transition:background .3s;}
+.modal-sm{max-width:460px;}
+.modal-hd{background:var(--modal-head);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.modal-title{color:#fff;font-family:'Syne',sans-serif;font-size:15px;font-weight:700;}
+.modal-x{background:rgba(255,255,255,.15);border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:18px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+.modal-x:hover{background:rgba(255,255,255,.25);}
+.modal-bd{padding:20px;overflow-y:auto;flex:1;}
+.modal-ft{padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;flex-shrink:0;}
+/* ─── IMPORT ─── */
+.imp-tabs{display:flex;gap:4px;background:var(--card2-bg);border-radius:10px;padding:4px;margin-bottom:14px;}
+.imp-tab{flex:1;padding:8px;border:none;border-radius:8px;background:transparent;color:var(--text3);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;}
+.imp-tab.active{background:var(--blue);color:#fff;}
+.imp-pane{display:none;}
+.imp-pane.active{display:block;}
+.drop-zone{border:2px dashed var(--border);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:all .2s;color:var(--text3);}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--sky);background:var(--card2-bg);color:var(--text1);}
+.imp-textarea{width:100%;min-height:110px;background:var(--input-bg);border:1px solid var(--border);border-radius:10px;color:var(--text1);font-family:monospace;font-size:12px;padding:10px;outline:none;resize:vertical;}
+.imp-textarea:focus{border-color:var(--border-focus);}
+.imp-map{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;}
+.imp-map-row{display:flex;align-items:center;gap:8px;font-size:12px;}
+.imp-map-row span{color:var(--text2);min-width:130px;}
+.imp-map-row select{flex:1;background:var(--input-bg);border:1px solid var(--border);border-radius:7px;color:var(--text1);font-size:11px;padding:5px 8px;outline:none;}
+.imp-prev-wrap{overflow:auto;max-height:180px;border:1px solid var(--border);border-radius:10px;margin-top:10px;}
+table.imp-prev{width:100%;border-collapse:collapse;font-size:11px;}
+table.imp-prev th{background:var(--card2-bg);color:var(--text3);padding:7px 10px;text-align:left;border-bottom:1px solid var(--border);}
+table.imp-prev td{padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text2);}
+.imp-stats{font-size:12px;color:var(--text3);margin-top:8px;}
+.imp-stats strong{color:var(--accent);}
+/* ─── VEHICLES MODAL ─── */
+.veh-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:240px;overflow-y:auto;}
+.veh-item{display:flex;align-items:center;justify-content:space-between;background:var(--card2-bg);border:1px solid var(--border);border-radius:10px;padding:10px 14px;}
+.veh-plate{font-weight:700;font-size:13px;color:var(--text1);}
+.veh-info{font-size:11px;color:var(--text3);}
+.veh-add-form{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:flex-end;}
+/* ─── TOAST ─── */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--accent);color:#fff;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:var(--shadow-lg);z-index:9999;opacity:0;transform:translateY(20px);transition:all .3s;pointer-events:none;}
+.toast.show{opacity:1;transform:translateY(0);}
+.toast.err{background:var(--danger);}
+.toast.wrn{background:var(--warn);}
+/* ─── RESPONSIVE ─── */
+@media(max-width:900px){
+  .app-shell{grid-template-columns:1fr;}
+  .sidebar{height:auto;position:relative;}
+  .form-grid,.imp-map,.veh-add-form{grid-template-columns:1fr;}
+  .form-grid .full{grid-column:1;}
+  .stats-row{grid-template-columns:repeat(2,1fr);}
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+<!-- ═══ SIDEBAR ═══ -->
+<aside class="sidebar">
+  <img id="sb-logo" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0ODAgMTYwIiB3aWR0aD0iNDgwIiBoZWlnaHQ9IjE2MCI+CiAgPGRlZnM+CgogICAgPCEtLSBNYXJrZXIgZ3JhZGllbnQgLSBlbGVjdHJpYyBibHVlIHRvIGRlZXAgYmx1ZSAtLT4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ibWFya2VyRmlsbCIgeDE9IjAlIiB5MT0iMCUiIHgyPSIzMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzM4Q0ZGRiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjU1JSIgc3RvcC1jb2xvcj0iIzBBOEZGRiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMwMDUwQ0MiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CgogICAgPCEtLSBNYXJrZXIgaW5uZXIgaGlnaGxpZ2h0IC0tPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJpbm5lckdsb3ciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjRkZGRkZGIiBzdG9wLW9wYWNpdHk9IjAuMzUiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjRkZGRkZGIiBzdG9wLW9wYWNpdHk9IjAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CgogICAgPCEtLSBUZXh0IGdyYWRpZW50IEZsZWV0IC0tPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJmbGVldEdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI0ZGRkZGRiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNDOERDRjAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CgogICAgPCEtLSBUZXh0IGdyYWRpZW50IExpbmsgKGFjY2VudCkgLS0+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImxpbmtHcmFkIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjAlIiB5Mj0iMTAwJSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM1QkUwRkYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMEE4RkZGIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgoKICAgIDwhLS0gR2xvdyBmb3IgbWFya2VyIC0tPgogICAgPGZpbHRlciBpZD0ibWFya2VyR2xvdyIgeD0iLTUwJSIgeT0iLTMwJSIgd2lkdGg9IjIwMCUiIGhlaWdodD0iMjAwJSI+CiAgICAgIDxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249IjUiIHJlc3VsdD0iYmx1ciIvPgogICAgICA8ZmVNZXJnZT4KICAgICAgICA8ZmVNZXJnZU5vZGUgaW49ImJsdXIiLz4KICAgICAgICA8ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz4KICAgICAgPC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CgogICAgPCEtLSBTb2Z0IHRleHQgc2hhZG93IC0tPgogICAgPGZpbHRlciBpZD0idGV4dFNoYWRvdyIgeD0iLTEwJSIgeT0iLTEwJSIgd2lkdGg9IjEzMCUiIGhlaWdodD0iMTMwJSI+CiAgICAgIDxmZURyb3BTaGFkb3cgZHg9IjAiIGR5PSIyIiBzdGREZXZpYXRpb249IjgiIGZsb29kLWNvbG9yPSIjMEE4RkZGIiBmbG9vZC1vcGFjaXR5PSIwLjI1Ii8+CiAgICA8L2ZpbHRlcj4KCiAgICA8IS0tIEdsb3cgcmluZ3MgZmlsdGVyIC0tPgogICAgPGZpbHRlciBpZD0icmluZ0dsb3ciIHg9Ii00MCUiIHk9Ii00MCUiIHdpZHRoPSIxODAlIiBoZWlnaHQ9IjE4MCUiPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIyLjUiIHJlc3VsdD0iYmx1ciIvPgogICAgICA8ZmVNZXJnZT4KICAgICAgICA8ZmVNZXJnZU5vZGUgaW49ImJsdXIiLz4KICAgICAgICA8ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz4KICAgICAgPC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CgogICAgPCEtLSBTaGFkb3cgZHJvcCB1bmRlciBtYXJrZXIgdGlwIC0tPgogICAgPHJhZGlhbEdyYWRpZW50IGlkPSJzaGFkb3dHcmFkIiBjeD0iNTAlIiBjeT0iNTAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzBBOEZGRiIgc3RvcC1vcGFjaXR5PSIwLjMiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMEE4RkZGIiBzdG9wLW9wYWNpdHk9IjAiLz4KICAgIDwvcmFkaWFsR3JhZGllbnQ+CgogIDwvZGVmcz4KCiAgPCEtLSA9PT09PT09PT09PT09PT09PT09PT0gTUFQIE1BUktFUiA9PT09PT09PT09PT09PT09PT09PT0gLS0+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNTQsIDc2KSI+CgogICAgPCEtLSBTb2Z0IGdsb3cgYXVyYSBiZWhpbmQgbWFya2VyIC0tPgogICAgPGVsbGlwc2UgY3g9IjAiIGN5PSIwIiByeD0iMzAiIHJ5PSIzMiIgZmlsbD0iIzBBOEZGRiIgb3BhY2l0eT0iMC4wOCIvPgoKICAgIDwhLS0gR3JvdW5kIHNoYWRvdyBlbGxpcHNlIC0tPgogICAgPGVsbGlwc2UgY3g9IjAiIGN5PSI2MCIgcng9IjE0IiByeT0iNC41IiBmaWxsPSJ1cmwoI3NoYWRvd0dyYWQpIi8+CgogICAgPCEtLSBNYXJrZXIgdGVhcmRyb3AgYm9keSAtLT4KICAgIDxwYXRoIGQ9Ik0wLC01NgogICAgICAgICAgICAgQzI2LC01NiA0NCwtMzYgNDQsLTE0CiAgICAgICAgICAgICBDNDQsMTIgMjAsNDIgMCw2MgogICAgICAgICAgICAgQy0yMCw0MiAtNDQsMTIgLTQ0LC0xNAogICAgICAgICAgICAgQy00NCwtMzYgLTI2LC01NiAwLC01NiBaIgogICAgICAgICAgZmlsbD0idXJsKCNtYXJrZXJGaWxsKSIKICAgICAgICAgIGZpbHRlcj0idXJsKCNtYXJrZXJHbG93KSIvPgoKICAgIDwhLS0gSGlnaGxpZ2h0IHNoaW5lIG9uIG1hcmtlciAtLT4KICAgIDxwYXRoIGQ9Ik0wLC01NgogICAgICAgICAgICAgQzI2LC01NiA0NCwtMzYgNDQsLTE0CiAgICAgICAgICAgICBDNDQsMTIgMjAsNDIgMCw2MgogICAgICAgICAgICAgQy0yMCw0MiAtNDQsMTIgLTQ0LC0xNAogICAgICAgICAgICAgQy00NCwtMzYgLTI2LC01NiAwLC01NiBaIgogICAgICAgICAgZmlsbD0idXJsKCNpbm5lckdsb3cpIi8+CgogICAgPCEtLSBXaGl0ZSBjaXJjbGUgcmluZyAtLT4KICAgIDxjaXJjbGUgY3g9IjAiIGN5PSItMTQiIHI9IjE4IiBmaWxsPSJub25lIiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMi41IiBvcGFjaXR5PSIwLjkiLz4KCiAgICA8IS0tIElubmVyIGZpbGxlZCBjaXJjbGUgLS0+CiAgICA8Y2lyY2xlIGN4PSIwIiBjeT0iLTE0IiByPSI4IiBmaWxsPSIjRkZGRkZGIi8+CgogICAgPCEtLSBDZW50ZXIgZG90IC0tPgogICAgPGNpcmNsZSBjeD0iMCIgY3k9Ii0xNCIgcj0iMy41IiBmaWxsPSIjMEE4RkZGIi8+CgogICAgPCEtLSBDcm9zc2hhaXIgbGluZXMgLS0+CiAgICA8bGluZSB4MT0iMCIgeTE9Ii0zNiIgeDI9IjAiIHkyPSItMjYiIHN0cm9rZT0iI0ZGRkZGRiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIG9wYWNpdHk9IjAuODUiLz4KICAgIDxsaW5lIHgxPSIwIiB5MT0iLTIiICB4Mj0iMCIgeTI9IjgiICBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIwLjg1Ii8+CiAgICA8bGluZSB4MT0iLTIyIiB5MT0iLTE0IiB4Mj0iLTEyIiB5Mj0iLTE0IiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIwLjg1Ii8+CiAgICA8bGluZSB4MT0iMTIiICB5MT0iLTE0IiB4Mj0iMjIiICB5Mj0iLTE0IiBzdHJva2U9IiNGRkZGRkYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIwLjg1Ii8+CgogIDwvZz4KCiAgPCEtLSA9PT09PT09PT09PT09PT09PT09PT0gU0lHTkFMIFJJTkdTIChsZWZ0IG9mIG1hcmtlcikgPT09PT09PT09PT09PT09PT09PT09IC0tPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDU0LCAzMCkiIGZpbHRlcj0idXJsKCNyaW5nR2xvdykiIG9wYWNpdHk9IjAuNiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj4KICAgIDxwYXRoIGQ9Ik0tMTQsLTQgQTE4LDE4IDAgMCwxIDE0LC00IiBzdHJva2U9IiMzOENGRkYiIHN0cm9rZS13aWR0aD0iMS44Ii8+CiAgICA8cGF0aCBkPSJNLTIyLC0xMCBBMjgsMjggMCAwLDEgMjIsLTEwIiBzdHJva2U9IiMzOENGRkYiIHN0cm9rZS13aWR0aD0iMS40IiBvcGFjaXR5PSIwLjciLz4KICAgIDxwYXRoIGQ9Ik0tMzAsLTE3IEEzOCwzOCAwIDAsMSAzMCwtMTciIHN0cm9rZT0iIzM4Q0ZGRiIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjQiLz4KICA8L2c+CgogIDwhLS0gPT09PT09PT09PT09PT09PT09PT09IEZMRUVUTElOSyBXT1JETUFSSyA9PT09PT09PT09PT09PT09PT09PT0gLS0+CiAgPHRleHQKICAgIHg9IjExNiIgeT0iNzgiCiAgICBmb250LWZhbWlseT0iJ1NlZ29lIFVJJywgJ0hlbHZldGljYSBOZXVlJywgQXJpYWwsIHNhbnMtc2VyaWYiCiAgICBmb250LXNpemU9IjY0IgogICAgZm9udC13ZWlnaHQ9IjgwMCIKICAgIGxldHRlci1zcGFjaW5nPSItMyIKICAgIGZpbHRlcj0idXJsKCN0ZXh0U2hhZG93KSI+CiAgICA8dHNwYW4gZmlsbD0idXJsKCNmbGVldEdyYWQpIj5GbGVldDwvdHNwYW4+PHRzcGFuIGZpbGw9InVybCgjbGlua0dyYWQpIj5MaW5rPC90c3Bhbj4KICA8L3RleHQ+CgogIDwhLS0gQWNjZW50IGJhciB1bmRlciB3b3JkbWFyayAtLT4KICA8cmVjdCB4PSIxMTYiIHk9Ijg3IiB3aWR0aD0iMzA4IiBoZWlnaHQ9IjIuNSIgcng9IjEuMjUiPgogICAgPGFuaW1hdGUgYXR0cmlidXRlTmFtZT0id2lkdGgiIHZhbHVlcz0iMDszMDgiIGR1cj0iMS4ycyIgZmlsbD0iZnJlZXplIi8+CiAgPC9yZWN0PgogIDwhLS0gU3RhdGljIGZhbGxiYWNrIChubyBhbmltYXRpb24gc3VwcG9ydCkgLS0+CiAgPHJlY3QgeD0iMTE2IiB5PSI4NyIgd2lkdGg9IjMwOCIgaGVpZ2h0PSIyLjUiIHJ4PSIxLjI1IiBmaWxsPSJ1cmwoI2xpbmtHcmFkKSIgb3BhY2l0eT0iMC41NSIvPgoKICA8IS0tID09PT09PT09PT09PT09PT09PT09PSBTWVNURU0gR1BTIFRBR0xJTkUgPT09PT09PT09PT09PT09PT09PT09IC0tPgogIDx0ZXh0CiAgICB4PSIyNDAiIHk9IjEyOCIKICAgIHRleHQtYW5jaG9yPSJtaWRkbGUiCiAgICBmb250LWZhbWlseT0iJ1NlZ29lIFVJJywgJ0hlbHZldGljYSBOZXVlJywgQXJpYWwsIHNhbnMtc2VyaWYiCiAgICBmb250LXNpemU9IjE5IgogICAgZm9udC13ZWlnaHQ9IjYwMCIKICAgIGxldHRlci1zcGFjaW5nPSI5IgogICAgZmlsbD0iIzZCQkZERSIKICAgIG9wYWNpdHk9IjAuOSI+CiAgICBTWVNURU0gR1BTCiAgPC90ZXh0PgoKPC9zdmc+Cg==" alt="FleetLink" class="sidebar-logo-img">
+
+  <div class="sb-section">
+    <div class="sb-label">Dane firmy</div>
+    <div class="fg"><label>Nazwa firmy</label><input type="text" id="co-firma" value="FleetLink – System GPS"></div>
+    <div class="fg"><label>NIP</label><input type="text" id="co-nip" value="656-215-56-62"></div>
+    <div class="fg"><label>Adres</label><input type="text" id="co-adres" value="ul. Mieszka I 10A, 28-300 Jędrzejów"></div>
+    <div class="fg"><label>Telefon</label><input type="tel" id="co-tel" value="+48 794 628 178"></div>
+    <div class="fg"><label>E-mail</label><input type="email" id="co-email" value="biuro@fleetlink.pl"></div>
+  </div>
+
+  <hr class="sb-divider">
+
+  <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">
+    <span id="theme-label">Tryb jasny</span>
+    <span id="theme-icon" style="font-size:16px">☀️</span>
+  </button>
+
+  <hr class="sb-divider">
+  <div class="sb-label">Projekt</div>
+  <button class="btn-save" onclick="saveProject()">💾 Zapisz projekt</button>
+  <label class="btn-out" style="cursor:pointer;margin-top:2px">
+    📂 Wczytaj projekt
+    <input type="file" id="load-input" accept=".fleetlink,.json" style="display:none" onchange="loadProject(this)">
+  </label>
+  <button class="btn-out" onclick="confirmClear()" style="margin-top:2px">🗑️ Wyczyść dane</button>
+</aside>
+
+<!-- ═══ MAIN ═══ -->
+<main class="main">
+
+  <div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('devices')" id="tab-devices">📱 Urządzenia<span class="badge" id="badge-cnt">0</span></button>
+    <button class="tab-btn" onclick="switchTab('install')" id="tab-install">🔧 Instalacja</button>
+    <button class="tab-btn" onclick="switchTab('service')" id="tab-service">🛠️ Serwis</button>
+  </div>
+
+  <!-- ══ DEVICES TAB ══ -->
+  <div class="tab-pane active" id="pane-devices">
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-val" id="st-total">0</div><div class="stat-lbl">Urządzeń</div></div>
+      <div class="stat-card"><div class="stat-val" id="st-plates">0</div><div class="stat-lbl">Pojazdów</div></div>
+      <div class="stat-card"><div class="stat-val" id="st-svcs">0</div><div class="stat-lbl">Serwisów</div></div>
+      <div class="stat-card"><div class="stat-val" id="st-today">0</div><div class="stat-lbl">Dzisiaj</div></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <input type="text" class="search-inp" id="dev-search" placeholder="🔍 Szukaj po nr rej., IMEI, modelu..." oninput="renderDevices()">
+        <button class="btn-pri" onclick="openImportModal()" style="flex:none;padding:9px 15px;font-size:12px">📥 Importuj</button>
+        <button class="btn-sm btn-grn" onclick="exportCSV()" style="padding:9px 13px">⬇ CSV</button>
+        <button class="btn-sm btn-blue" onclick="exportExcel()" style="padding:9px 13px">⬇ Excel</button>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr>
+            <th>Nr rej.</th><th>Pojazd</th><th>Urządzenie GPS</th>
+            <th>IMEI</th><th>SIM</th><th>Data inst.</th><th>Serwisy</th><th>Akcje</th>
+          </tr></thead>
+          <tbody id="dev-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="dev-empty"><div class="empty-icon">📦</div>
+        <div>Brak urządzeń. Dodaj pierwsze urządzenie w zakładce <strong>Instalacja</strong>.</div></div>
+    </div>
+  </div>
+
+  <!-- ══ INSTALL TAB ══ -->
+  <div class="tab-pane" id="pane-install">
+    <div class="card">
+      <div class="card-title"><span>🔧</span><span id="inst-title">Nowa instalacja</span></div>
+      <form id="inst-form" onsubmit="submitInstall(event)">
+        <div class="form-grid">
+
+          <div class="fi full">
+            <label>Pojazd <span class="req">*</span></label>
+            <div class="veh-row">
+              <select class="fi" style="background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text1);font-size:13px;padding:9px 38px 9px 12px;outline:none;width:100%;-webkit-appearance:none;appearance:none;background-image:var(--arrow-svg);background-repeat:no-repeat;background-position:right 12px center;" id="inst-veh-sel" onchange="onVehiclePick()">
+                <option value="">— wybierz pojazd lub wpisz dane ręcznie —</option>
+              </select>
+              <button type="button" class="btn-veh-mgr" onclick="openVehiclesModal()">🚗 Zarządzaj</button>
+            </div>
+          </div>
+
+          <div class="fi">
+            <label>Numer rejestracyjny <span class="req">*</span></label>
+            <input type="text" id="inst-plate" placeholder="np. KJE12345" required>
+          </div>
+
+          <div class="fi">
+            <label>Marka / Model pojazdu <span class="opt">(opcjonalnie)</span></label>
+            <input type="text" id="inst-veh-model" placeholder="np. Volkswagen Transporter">
+          </div>
+
+          <div class="fi">
+            <label>Model urządzenia GPS <span class="opt">(opcjonalnie)</span></label>
+            <select id="inst-dev-model" onchange="onDevModelChange()">
+              <option value="">— wybierz lub wpisz własny —</option>
+              <option>Teltonika FMB120</option>
+              <option>Teltonika FMB920</option>
+              <option>Teltonika FMB130</option>
+              <option>Teltonika FMC130</option>
+              <option>Teltonika FMM130</option>
+              <option>Teltonika FM3001</option>
+              <option>Queclink GV300</option>
+              <option>Queclink GV500</option>
+              <option value="__custom__">— wpisz własny —</option>
+            </select>
+          </div>
+
+          <div class="fi" id="custom-model-wrap" style="display:none">
+            <label>Własny model urządzenia</label>
+            <input type="text" id="inst-dev-custom" placeholder="wpisz model urządzenia GPS">
+          </div>
+
+          <div class="fi">
+            <label>IMEI <span class="req">*</span></label>
+            <input type="text" id="inst-imei" placeholder="15-cyfrowy numer IMEI" required maxlength="20">
+          </div>
+
+          <div class="fi">
+            <label>Numer seryjny <span class="opt">(opcjonalnie)</span></label>
+            <input type="text" id="inst-serial" placeholder="S/N urządzenia">
+          </div>
+
+          <div class="fi">
+            <label>Karta SIM <span class="opt">(opcjonalnie)</span></label>
+            <input type="text" id="inst-sim" placeholder="numer karty SIM">
+          </div>
+
+          <div class="fi">
+            <label>Data instalacji <span class="req">*</span></label>
+            <input type="date" id="inst-date" required>
+          </div>
+
+          <div class="fi">
+            <label>Liczba urządzeń</label>
+            <input type="number" id="inst-count" value="1" min="1" max="999">
+          </div>
+
+          <div class="fi full">
+            <label>Notatki <span class="opt">(opcjonalnie)</span></label>
+            <textarea id="inst-notes" rows="2" placeholder="dodatkowe informacje o instalacji..."></textarea>
+          </div>
+
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-pri" id="inst-submit-btn">✅ Zapisz instalację</button>
+          <button type="button" class="btn-out" onclick="cancelEdit()" id="inst-cancel-btn" style="display:none;flex:none">✕ Anuluj</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ══ SERVICE TAB ══ -->
+  <div class="tab-pane" id="pane-service">
+    <div class="card">
+      <div class="card-title"><span>🛠️</span><span>Dodaj wpis serwisowy</span></div>
+      <form id="svc-form" onsubmit="submitService(event)">
+        <div class="form-grid">
+          <div class="fi full">
+            <label>Urządzenie / Pojazd <span class="req">*</span></label>
+            <select id="svc-dev-sel" required>
+              <option value="">— wybierz urządzenie —</option>
+            </select>
+          </div>
+          <div class="fi">
+            <label>Typ serwisu <span class="req">*</span></label>
+            <select id="svc-type" required>
+              <option value="">— wybierz typ —</option>
+              <option value="przeglad">Przegląd</option>
+              <option value="naprawa">Naprawa</option>
+              <option value="wymiana">Wymiana urządzenia</option>
+              <option value="aktualizacja">Aktualizacja firmware</option>
+              <option value="inne">Inne</option>
+            </select>
+          </div>
+          <div class="fi">
+            <label>Data serwisu <span class="req">*</span></label>
+            <input type="date" id="svc-date" required>
+          </div>
+          <div class="fi">
+            <label>Technik <span class="opt">(opcjonalnie)</span></label>
+            <input type="text" id="svc-tech" placeholder="imię i nazwisko">
+          </div>
+          <div class="fi">
+            <label>Koszt (PLN) <span class="opt">(opcjonalnie)</span></label>
+            <input type="number" id="svc-cost" placeholder="0.00" step="0.01" min="0">
+          </div>
+          <div class="fi full">
+            <label>Opis / Uwagi <span class="opt">(opcjonalnie)</span></label>
+            <textarea id="svc-desc" rows="2" placeholder="opis wykonanych prac..."></textarea>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-pri">🛠️ Zapisz wpis serwisowy</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span>📋</span><span>Historia serwisów</span></div>
+      <div class="toolbar">
+        <input type="text" class="search-inp" id="svc-search" placeholder="🔍 Szukaj w historii..." oninput="renderSvcHistory()">
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Pojazd / Nr rej.</th><th>Typ</th><th>Data</th><th>Technik</th><th>Koszt</th><th>Opis</th><th>Akcje</th></tr></thead>
+          <tbody id="svc-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="svc-empty"><div class="empty-icon">🔧</div><div>Brak wpisów serwisowych.</div></div>
+    </div>
+  </div>
+
+</main>
+</div><!-- /app-shell -->
+
+<!-- ═══ VEHICLES MODAL ═══ -->
+<div class="modal-ov" id="veh-modal">
+  <div class="modal modal-sm">
+    <div class="modal-hd">
+      <span class="modal-title">🚗 Zarządzaj pojazdami</span>
+      <button class="modal-x" onclick="closeModal('veh-modal')">✕</button>
+    </div>
+    <div class="modal-bd">
+      <div class="veh-list" id="veh-list"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:12px 0">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Dodaj pojazd</div>
+      <div class="veh-add-form">
+        <div class="fi"><label>Nr rej. <span class="req">*</span></label><input type="text" id="v-plate" placeholder="KJE12345" style="font-size:12px;padding:7px 10px"></div>
+        <div class="fi"><label>Marka</label><input type="text" id="v-brand" placeholder="Volkswagen" style="font-size:12px;padding:7px 10px"></div>
+        <div class="fi"><label>Model</label><input type="text" id="v-model" placeholder="Transporter" style="font-size:12px;padding:7px 10px"></div>
+        <div class="fi"><label>&nbsp;</label><button type="button" class="btn-pri" onclick="addVehicle()" style="padding:7px 12px;font-size:12px">+ Dodaj</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ IMPORT MODAL ═══ -->
+<div class="modal-ov" id="imp-modal">
+  <div class="modal">
+    <div class="modal-hd">
+      <span class="modal-title">📥 Importuj urządzenia</span>
+      <button class="modal-x" onclick="closeModal('imp-modal')">✕</button>
+    </div>
+    <div class="modal-bd">
+      <div class="imp-tabs">
+        <button class="imp-tab active" onclick="switchImpTab('paste')" id="itab-paste">📋 Wklej CSV</button>
+        <button class="imp-tab" onclick="switchImpTab('file')" id="itab-file">📁 Plik Excel / CSV</button>
+      </div>
+
+      <div class="imp-pane active" id="ipane-paste">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Wklej dane (CSV lub skopiowane z Excela). Pierwsza linia = nagłówki kolumn.</div>
+        <textarea class="imp-textarea" id="imp-paste" placeholder="Nr_rej&#9;IMEI&#9;Model&#9;Serial&#9;SIM&#9;Data
+KJE12345&#9;123456789012345&#9;FMB120&#9;&#9;&#9;2025-01-15" oninput="parsePaste()"></textarea>
+      </div>
+
+      <div class="imp-pane" id="ipane-file">
+        <div class="drop-zone" id="drop-zone" onclick="document.getElementById('imp-file-inp').click()"
+             ondragover="dropOver(event)" ondragleave="dropLeave(event)" ondrop="dropFile(event)">
+          <div style="font-size:32px;margin-bottom:8px">📁</div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Kliknij lub przeciągnij plik tutaj</div>
+          <div style="font-size:11px">Obsługiwane: .xlsx, .xls, .csv</div>
+          <div style="font-size:11px;margin-top:6px;color:var(--sky)" id="drop-file-name"></div>
+        </div>
+        <input type="file" id="imp-file-inp" accept=".xlsx,.xls,.csv" style="display:none" onchange="fileChosen(this)">
+      </div>
+
+      <div id="imp-map-wrap" style="display:none;margin-top:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Mapowanie kolumn</div>
+        <div class="imp-map" id="imp-map-grid"></div>
+        <div class="imp-stats" id="imp-stats"></div>
+        <div class="imp-prev-wrap" id="imp-prev-wrap" style="display:none">
+          <table class="imp-prev"><thead id="imp-prev-hd"></thead><tbody id="imp-prev-bd"></tbody></table>
+        </div>
+      </div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn-out" onclick="closeModal('imp-modal')" style="flex:none;padding:9px 18px">Anuluj</button>
+      <button class="btn-pri" onclick="doImport()" id="imp-go-btn" style="padding:10px 22px" disabled>📥 Importuj</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── STATE ───
+let devices = [];
+let vehicles = [];
+let svcRecords = [];
+let editId = null;
+let impRows = [];
+let impHeaders = [];
+
+const IMP_FIELDS = ['plate','imei','deviceModel','serial','sim','installDate','vehicleModel','notes'];
+const IMP_LABELS = {plate:'Nr rejestracyjny',imei:'IMEI',deviceModel:'Model urządzenia',serial:'Nr seryjny',sim:'SIM',installDate:'Data instalacji',vehicleModel:'Marka/Model pojazdu',notes:'Notatki'};
+const SVC_TYPE_LABELS = {przeglad:'Przegląd',naprawa:'Naprawa',wymiana:'Wymiana',aktualizacja:'Aktualizacja',inne:'Inne'};
+
+// ─── INIT ───
+document.addEventListener('DOMContentLoaded', () => {
+  const theme = localStorage.getItem('fl-theme') || 'dark';
+  applyTheme(theme, false);
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('inst-date').value = today;
+  document.getElementById('svc-date').value = today;
+  renderAll();
+});
+
+// ─── THEME ───
+function applyTheme(t, save=true) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-label').textContent = t==='dark' ? 'Tryb jasny' : 'Tryb ciemny';
+  document.getElementById('theme-icon').textContent = t==='dark' ? '☀️' : '🌙';
+  if(save) localStorage.setItem('fl-theme', t);
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  applyTheme(cur==='dark' ? 'light' : 'dark');
+}
+
+// ─── TABS ───
+function switchTab(name) {
+  ['devices','install','service'].forEach(n => {
+    document.getElementById('pane-'+n).classList.toggle('active', n===name);
+    document.getElementById('tab-'+n).classList.toggle('active', n===name);
+  });
+  if(name==='service') { renderSvcDevSel(); renderSvcHistory(); }
+}
+
+// ─── RENDER ALL ───
+function renderAll() { renderDevices(); renderVehSelect(); updateStats(); }
+
+// ─── DEVICES ───
+function renderDevices() {
+  const q = (document.getElementById('dev-search').value||''  ).toLowerCase();
+  const rows = devices.filter(d =>
+    !q || [d.plate,d.imei,d.deviceModel,d.deviceModelCustom,d.vehicleModel].join(' ').toLowerCase().includes(q)
+  );
+  document.getElementById('dev-empty').style.display = rows.length ? 'none' : 'block';
+  document.getElementById('dev-tbody').innerHTML = rows.map(d => {
+    const sc = svcRecords.filter(s=>s.deviceId===d.id).length;
+    const mdl = d.deviceModelCustom || d.deviceModel || '—';
+    return `<tr>
+      <td><span class="plate-chip">${esc(d.plate||'—')}</span></td>
+      <td>${esc(d.vehicleModel||'—')}</td>
+      <td style="color:var(--text2)">${esc(mdl)}</td>
+      <td class="imei-cell">${esc(d.imei||'—')}</td>
+      <td style="color:var(--text3);font-size:11px">${esc(d.sim||'—')}</td>
+      <td style="color:var(--text3);font-size:11px">${esc(d.installDate||'—')}</td>
+      <td><span class="badge" style="background:${sc?'rgba(46,123,206,.3)'  :'rgba(127,140,141,.2)'};color:${sc?'#5BA4F5':'#95A5A6'}">${sc}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn-sm btn-blue" onclick="editDev('${d.id}')">✏️</button>
+        <button class="btn-sm btn-red" onclick="deleteDev('${d.id}')" style="margin-left:4px">🗑️</button>
+      </td></tr>`;
+  }).join('');
+}
+
+function updateStats() {
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('st-total').textContent = devices.length;
+  document.getElementById('st-plates').textContent = new Set(devices.map(d=>d.plate).filter(Boolean)).size;
+  document.getElementById('st-svcs').textContent = svcRecords.length;
+  document.getElementById('st-today').textContent = devices.filter(d=>d.installDate===today).length;
+  document.getElementById('badge-cnt').textContent = devices.length;
+}
+
+function editDev(id) {
+  const d = devices.find(x=>x.id===id); if(!d) return;
+  editId = id;
+  document.getElementById('inst-plate').value = d.plate||''  ;
+  document.getElementById('inst-veh-model').value = d.vehicleModel||''  ;
+  document.getElementById('inst-imei').value = d.imei||''  ;
+  document.getElementById('inst-serial').value = d.serial||''  ;
+  document.getElementById('inst-sim').value = d.sim||''  ;
+  document.getElementById('inst-date').value = d.installDate||''  ;
+  document.getElementById('inst-count').value = d.count||1;
+  document.getElementById('inst-notes').value = d.notes||''  ;
+  if(d.deviceModelCustom) {
+    document.getElementById('inst-dev-model').value = '__custom__';
+    document.getElementById('custom-model-wrap').style.display=''  ;
+    document.getElementById('inst-dev-custom').value = d.deviceModelCustom;
+  } else {
+    document.getElementById('inst-dev-model').value = d.deviceModel||''  ;
+    document.getElementById('custom-model-wrap').style.display='none'  ;
+  }
+  document.getElementById('inst-title').textContent = 'Edytuj instalację'  ;
+  document.getElementById('inst-submit-btn').textContent = '✅ Zapisz zmiany'  ;
+  document.getElementById('inst-cancel-btn').style.display=''  ;
+  switchTab('install'); window.scrollTo(0,0);
+}
+
+function cancelEdit() {
+  editId = null;
+  document.getElementById('inst-form').reset();
+  document.getElementById('inst-title').textContent = 'Nowa instalacja'  ;
+  document.getElementById('inst-submit-btn').textContent = '✅ Zapisz instalację'  ;
+  document.getElementById('inst-cancel-btn').style.display='none'  ;
+  document.getElementById('custom-model-wrap').style.display='none'  ;
+  document.getElementById('inst-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('inst-count').value = 1;
+}
+
+function deleteDev(id) {
+  if(!confirm('Usunąć to urządzenie?')) return;
+  devices = devices.filter(d=>d.id!==id);
+  svcRecords = svcRecords.filter(s=>s.deviceId!==id);
+  renderAll(); toast('Urządzenie usunięte'  );
+}
+
+// ─── INSTALL FORM ───
+function onVehiclePick() {
+  const vid = document.getElementById('inst-veh-sel').value; if(!vid) return;
+  const v = vehicles.find(x=>x.id===vid); if(!v) return;
+  document.getElementById('inst-plate').value = v.plate;
+  document.getElementById('inst-veh-model').value = [v.brand,v.model].filter(Boolean).join(' '  );
+}
+function onDevModelChange() {
+  const v = document.getElementById('inst-dev-model').value;
+  document.getElementById('custom-model-wrap').style.display = v==='__custom__' ? ''  :'none'  ;
+}
+function submitInstall(e) {
+  e.preventDefault();
+  const plate = document.getElementById('inst-plate').value.trim();
+  const imei  = document.getElementById('inst-imei').value.trim();
+  const date  = document.getElementById('inst-date').value;
+  if(!plate){ toast('Podaj numer rejestracyjny','err'); return; }
+  if(!imei) { toast('Podaj numer IMEI','err'); return; }
+  if(!date) { toast('Podaj datę instalacji','err'); return; }
+  const mSel = document.getElementById('inst-dev-model').value;
+  const rec = {
+    plate, imei,
+    vehicleModel: document.getElementById('inst-veh-model').value.trim(),
+    deviceModel: mSel==='__custom__' ? ''  : mSel,
+    deviceModelCustom: mSel==='__custom__' ? document.getElementById('inst-dev-custom').value.trim() : ''  ,
+    serial: document.getElementById('inst-serial').value.trim(),
+    sim:    document.getElementById('inst-sim').value.trim(),
+    installDate: date,
+    count: parseInt(document.getElementById('inst-count').value)||1,
+    notes: document.getElementById('inst-notes').value.trim(),
+  };
+  if(editId) {
+    const i = devices.findIndex(d=>d.id===editId);
+    if(i>=0) devices[i]={...devices[i],...rec};
+    editId=null; toast('Instalacja zaktualizowana'  );
+  } else {
+    devices.push({id:uid(),...rec}); toast('Instalacja zapisana'  );
+  }
+  cancelEdit(); renderAll(); switchTab('devices');
+}
+
+// ─── VEHICLES ───
+function renderVehSelect() {
+  const sel=document.getElementById('inst-veh-sel');
+  const prev=sel.value;
+  sel.innerHTML='<option value="">— wybierz pojazd lub wpisz dane ręcznie —</option>'
+    +vehicles.map(v=>`<option value="${v.id}">${esc(v.plate)}${v.brand?' – '+esc(v.brand):''}${v.model?' '+esc(v.model):''}</option>`).join('');
+  sel.value=prev;
+}
+function renderVehList() {
+  document.getElementById('veh-list').innerHTML = vehicles.length
+    ? vehicles.map(v=>`<div class="veh-item">
+        <div><div class="veh-plate">${esc(v.plate)}</div>
+        <div class="veh-info">${esc([v.brand,v.model].filter(Boolean).join(' '  )||'—')}</div></div>
+        <button class="btn-sm btn-red" onclick="removeVeh('${v.id}')">🗑️</button></div>`).join('')
+    : '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">Brak pojazdów</div>';
+}
+function openVehiclesModal() { renderVehList(); openModal('veh-modal'); }
+function addVehicle() {
+  const plate = document.getElementById('v-plate').value.trim().toUpperCase();
+  if(!plate){ toast('Podaj numer rejestracyjny','err'); return; }
+  vehicles.push({id:uid(),plate,brand:document.getElementById('v-brand').value.trim(),model:document.getElementById('v-model').value.trim()});
+  ['v-plate','v-brand','v-model'].forEach(id=>document.getElementById(id).value=''  );
+  renderVehList(); renderVehSelect(); toast('Pojazd dodany'  );
+}
+function removeVeh(id) {
+  vehicles=vehicles.filter(v=>v.id!==id); renderVehList(); renderVehSelect(); toast('Pojazd usunięty'  );
+}
+
+// ─── SERVICE ───
+function renderSvcDevSel() {
+  const sel=document.getElementById('svc-dev-sel'); const prev=sel.value;
+  sel.innerHTML='<option value="">— wybierz urządzenie —</option>'
+    +devices.map(d=>`<option value="${d.id}">${esc(d.plate||'?')} – IMEI: ${esc(d.imei||'?')}${d.vehicleModel?' ('  +esc(d.vehicleModel)+')':''}</option>`).join('');
+  sel.value=prev;
+}
+function submitService(e) {
+  e.preventDefault();
+  const deviceId=document.getElementById('svc-dev-sel').value;
+  const type=document.getElementById('svc-type').value;
+  const date=document.getElementById('svc-date').value;
+  if(!deviceId){ toast('Wybierz urządzenie','err'); return; }
+  if(!type){ toast('Wybierz typ serwisu','err'); return; }
+  if(!date){ toast('Podaj datę serwisu','err'); return; }
+  svcRecords.push({id:uid(),deviceId,type,date,
+    tech:document.getElementById('svc-tech').value.trim(),
+    cost:document.getElementById('svc-cost').value,
+    desc:document.getElementById('svc-desc').value.trim()});
+  document.getElementById('svc-form').reset();
+  document.getElementById('svc-date').value=new Date().toISOString().slice(0,10);
+  renderSvcHistory(); renderDevices(); updateStats(); toast('Wpis serwisowy zapisany'  );
+}
+function renderSvcHistory() {
+  const q=(document.getElementById('svc-search').value||''  ).toLowerCase();
+  const rows=svcRecords.filter(s=>{
+    const d=devices.find(x=>x.id===s.deviceId);
+    return !q||[d&&d.plate,d&&d.imei,s.type,s.tech,s.desc].join(' '  ).toLowerCase().includes(q);
+  });
+  document.getElementById('svc-empty').style.display=rows.length?'none':'block'  ;
+  document.getElementById('svc-tbody').innerHTML=rows.map(s=>{
+    const d=devices.find(x=>x.id===s.deviceId);
+    return `<tr>
+      <td><span class="plate-chip">${esc(d?d.plate:'(usunięte)')}</span></td>
+      <td><span class="svc-badge svc-${s.type}">${SVC_TYPE_LABELS[s.type]||s.type}</span></td>
+      <td style="color:var(--text3);font-size:11px">${esc(s.date)}</td>
+      <td style="font-size:11px">${esc(s.tech||'—')}</td>
+      <td style="font-size:11px">${s.cost?s.cost+' zł':'—'}</td>
+      <td style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc||'—')}</td>
+      <td><button class="btn-sm btn-red" onclick="deleteSvc('${s.id}')">🗑️</button></td></tr>`;
+  }).join('');
+}
+function deleteSvc(id){
+  svcRecords=svcRecords.filter(s=>s.id!==id);
+  renderSvcHistory(); updateStats(); toast('Wpis usunięty'  );
+}
+
+// ─── IMPORT ───
+function openImportModal() {
+  impRows=[]; impHeaders=[];
+  document.getElementById('imp-paste').value=''  ;
+  document.getElementById('drop-file-name').textContent=''  ;
+  document.getElementById('imp-map-wrap').style.display='none'  ;
+  document.getElementById('imp-go-btn').disabled=true;
+  switchImpTab('paste'); openModal('imp-modal');
+}
+function switchImpTab(name) {
+  ['paste','file'].forEach(t=>{
+    document.getElementById('itab-'+t).classList.toggle('active',t===name);
+    document.getElementById('ipane-'+t).classList.toggle('active',t===name);
+  });
+}
+function parsePaste() {
+  const raw=document.getElementById('imp-paste').value.trim(); if(!raw){document.getElementById('imp-map-wrap').style.display='none'  ;return;}
+  const lines=raw.split(/\r?\n/).filter(l=>l.trim()); if(lines.length<2) return;
+  const sep=lines[0].includes('\t') ? '\t' : ',';
+  impHeaders=lines[0].split(sep).map(h=>h.trim());
+  impRows=lines.slice(1).map(l=>l.split(sep).map(c=>c.trim()));
+  showMapping();
+}
+function dropOver(e){e.preventDefault();document.getElementById('drop-zone').classList.add('drag-over');}
+function dropLeave(){document.getElementById('drop-zone').classList.remove('drag-over');}
+function dropFile(e){e.preventDefault();dropLeave();const f=e.dataTransfer.files[0];if(f)handleFile(f);}
+function fileChosen(inp){if(inp.files[0])handleFile(inp.files[0]);}
+function handleFile(file) {
+  document.getElementById('drop-file-name').textContent='📄 '+file.name;
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(ext==='csv') {
+    const r=new FileReader(); r.onload=e=>{
+      const lines=e.target.result.split(/\r?\n/).filter(l=>l.trim()); if(lines.length<2)return;
+      const sep=lines[0].includes('\t')?'\t':',';
+      impHeaders=lines[0].split(sep).map(h=>h.trim());
+      impRows=lines.slice(1).map(l=>l.split(sep).map(c=>c.trim()));
+      showMapping();
+    }; r.readAsText(file,'UTF-8');
+  } else if(ext==='xlsx'||ext==='xls') {
+    if(typeof XLSX==='undefined'){ toast('Biblioteka XLSX niedostępna','err'); return; }
+    const r=new FileReader(); r.onload=e=>{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      if(rows.length<2)return;
+      impHeaders=rows[0].map(h=>String(h).trim());
+      impRows=rows.slice(1).map(r=>r.map(c=>String(c).trim()));
+      showMapping();
+    }; r.readAsArrayBuffer(file);
+  } else { toast('Nieobsługiwany format pliku','err'); }
+}
+function showMapping() {
+  document.getElementById('imp-map-wrap').style.display=''  ;
+  document.getElementById('imp-map-grid').innerHTML=IMP_FIELDS.map(f=>`
+    <div class="imp-map-row"><span>${IMP_LABELS[f]}</span>
+      <select id="im-${f}" onchange="updatePreview()">
+        <option value="">— ignoruj —</option>
+        ${impHeaders.map((h,i)=>`<option value="${i}"${guessCol(f,h)?' selected':''  }>${esc(h)}</option>`).join('')  }
+      </select></div>`).join('');
+  updatePreview();
+}
+function guessCol(field,h) {
+  const hl=h.toLowerCase();
+  const hints={plate:['nr rej','rejestr','tablica','plate'],imei:['imei'],deviceModel:['model urz','device','gps model'],serial:['serial','s/n','seryjny'],sim:['sim'],installDate:['data','install','date'],vehicleModel:['marka','pojazd','vehicle'],notes:['uwagi','notatki','notes']};
+  return (hints[field]||[]).some(k=>hl.includes(k));
+}
+function updatePreview() {
+  const valid=impRows.filter(r=>r.some(c=>c));
+  document.getElementById('imp-stats').innerHTML=`Znaleziono <strong>${valid.length}</strong> wierszy danych`;
+  document.getElementById('imp-go-btn').disabled=valid.length===0;
+  const wrap=document.getElementById('imp-prev-wrap');
+  if(!valid.length){wrap.style.display='none'  ;return;}
+  wrap.style.display=''  ;
+  const mf=IMP_FIELDS.filter(f=>{const s=document.getElementById('im-'+f);return s&&s.value!==''  ;});
+  document.getElementById('imp-prev-hd').innerHTML='<tr>'+mf.map(f=>`<th>${IMP_LABELS[f]}</th>`).join('')  +'</tr>'  ;
+  document.getElementById('imp-prev-bd').innerHTML=valid.slice(0,5).map(row=>'<tr>'+mf.map(f=>{const i=parseInt(document.getElementById('im-'+f).value);return `<td>${esc(row[i]||''  )}</td>`;}).join('')  +'</tr>'  ).join('');
+}
+function doImport() {
+  let added=0;
+  impRows.filter(r=>r.some(c=>c)).forEach(row=>{
+    const d={id:uid()};
+    IMP_FIELDS.forEach(f=>{const s=document.getElementById('im-'+f);if(s&&s.value!==''  )d[f]=row[parseInt(s.value)]||''  ;});
+    if(d.plate||d.imei){devices.push(d);added++;}
+  });
+  closeModal('imp-modal'); renderAll(); toast(`Zaimportowano ${added} urządzeń`  );
+}
+
+// ─── EXPORT ───
+function exportCSV() {
+  if(!devices.length){toast('Brak urządzeń','wrn');return;}
+  const hdrs=['Nr rejestracyjny','IMEI','Model urządzenia','Nr seryjny','SIM','Data instalacji','Marka/Model pojazdu','Notatki'];
+  const rows=devices.map(d=>[d.plate,d.imei,d.deviceModelCustom||d.deviceModel,d.serial,d.sim,d.installDate,d.vehicleModel,d.notes].map(c=>'"'+String(c||''  ).replace(/"/g,'""')+'"'));
+  const csv=[hdrs.map(h=>'"'+h+'"'),...rows].map(r=>r.join(','  )).join('\n'  );
+  dl(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}),'FleetLink_Urzadzenia.csv');
+  toast('Plik CSV gotowy'  );
+}
+function exportExcel() {
+  if(!devices.length){toast('Brak urządzeń','wrn');return;}
+  if(typeof XLSX==='undefined'){ toast('Biblioteka XLSX niedostępna – użyj eksportu CSV','err'); return; }
+  const data=devices.map(d=>({'Nr rejestracyjny':d.plate||''  ,'IMEI':d.imei||''  ,'Model urządzenia':d.deviceModelCustom||d.deviceModel||''  ,'Nr seryjny':d.serial||''  ,'SIM':d.sim||''  ,'Data instalacji':d.installDate||''  ,'Marka/Model pojazdu':d.vehicleModel||''  ,'Notatki':d.notes||''  }));
+  const ws=XLSX.utils.json_to_sheet(data);
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Urządzenia');
+  XLSX.writeFile(wb,'FleetLink_Urzadzenia.xlsx'); toast('Plik Excel gotowy'  );
+}
+
+// ─── SAVE / LOAD ───
+function saveProject() {
+  const data={version:2,devices,vehicles,svcRecords,company:{
+    firma:document.getElementById('co-firma').value,
+    nip:document.getElementById('co-nip').value,
+    adres:document.getElementById('co-adres').value,
+    tel:document.getElementById('co-tel').value,
+    email:document.getElementById('co-email').value}};
+  dl(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),'FleetLink_Magazyn.fleetlink');
+  toast('Projekt zapisany'  );
+}
+function loadProject(inp) {
+  const file=inp.files[0]; if(!file) return;
+  const r=new FileReader(); r.onload=e=>{
+    try {
+      const data=JSON.parse(e.target.result);
+      devices=data.devices||[]; vehicles=data.vehicles||[]; svcRecords=data.svcRecords||[];
+      if(data.company){
+        ['firma','nip','adres','tel','email'].forEach(k=>{const el=document.getElementById('co-'+k);if(el)el.value=data.company[k]||''  ;});
+      }
+      renderAll(); toast('Projekt wczytany'  );
+    } catch(err){ toast('Błąd wczytywania pliku','err'); }
+  }; r.readAsText(file); inp.value=''  ;
+}
+function confirmClear() {
+  if(!confirm('Wyczyścić wszystkie dane?')) return;
+  devices=[]; vehicles=[]; svcRecords=[]; renderAll(); toast('Dane wyczyszczone'  );
+}
+
+// ─── MODALS ───
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.addEventListener('click',e=>{if(e.target.classList.contains('modal-ov'))e.target.classList.remove('open');});
+
+// ─── TOAST ───
+let _tt;
+function toast(msg,type=''  ){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className='toast show'+(type?' '+type:'');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),3200);
+}
+
+// ─── UTILS ───
+function uid(){return Math.random().toString(36).slice(2)+Date.now().toString(36);}
+function esc(s){return String(s||''  ).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();}
+</script>
+</body>
+</html>
