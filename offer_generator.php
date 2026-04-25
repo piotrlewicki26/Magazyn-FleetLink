@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Generator Ofert GPS
+ * FleetLink System GPS - Generator Ofert GPS
  * Serwuje pełny generator ofert (strona tytułowa, oferta, umowa, urządzenia)
  * po weryfikacji logowania użytkownika.
  */

@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Logout
+ * FleetLink System GPS - Logout
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';

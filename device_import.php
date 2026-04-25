@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Device Import (CSV / Excel .xlsx)
+ * FleetLink System GPS - Device Import (CSV / Excel .xlsx)
  * Multi-step: 1) Upload  2) Map columns  3) Preview & import
  */
 define('IN_APP', true);

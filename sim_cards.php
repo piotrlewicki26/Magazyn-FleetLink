@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - SIM Card Management
+ * FleetLink System GPS - SIM Card Management
  * Manages SIM cards — both standalone entries and those linked to devices.
  */
 define('IN_APP', true);

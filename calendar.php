@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Calendar View
+ * FleetLink System GPS - Calendar View
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';

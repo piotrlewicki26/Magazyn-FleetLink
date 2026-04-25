@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Manufacturer Management
+ * FleetLink System GPS - Manufacturer Management
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';

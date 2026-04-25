@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Inventory Management (Stan magazynowy)
+ * FleetLink System GPS - Inventory Management (Stan magazynowy)
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';

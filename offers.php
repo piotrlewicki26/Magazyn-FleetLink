@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Offer Management
+ * FleetLink System GPS - Offer Management
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';

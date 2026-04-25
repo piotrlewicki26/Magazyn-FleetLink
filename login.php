@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Login Page
+ * FleetLink System GPS - Login Page
  */
 define('IN_APP', true);
 

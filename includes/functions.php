@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Helper Functions
+ * FleetLink System GPS - Helper Functions
  */
 
 function h($str) {

@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Installation Management (Montaż/Demontaż)
+ * FleetLink System GPS - Installation Management (Montaż/Demontaż)
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';

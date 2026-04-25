@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Authentication & Session Management
+ * FleetLink System GPS - Authentication & Session Management
  */
 
 if (session_status() === PHP_SESSION_NONE) {

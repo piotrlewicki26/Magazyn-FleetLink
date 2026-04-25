@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Setup Wizard
+ * FleetLink System GPS - Setup Wizard
  * First-run configuration for MySQL and admin user
  */
 

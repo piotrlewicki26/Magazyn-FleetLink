@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Database Connection
+ * FleetLink System GPS - Database Connection
  */
 
 if (!defined('DB_HOST')) {

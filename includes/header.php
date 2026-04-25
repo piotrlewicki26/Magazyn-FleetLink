@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - HTML Header & Navigation
+ * FleetLink System GPS - HTML Header & Navigation
  * $pageTitle, $activePage should be set before including this file
  */
 if (!defined('IN_APP')) {
@@ -8,7 +8,7 @@ if (!defined('IN_APP')) {
     exit;
 }
 $currentUser = getCurrentUser();
-$pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
+$pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink System GPS';
 
 // ── Nav modal data (used by quick-action modals in navbar) ──────────
 $_navDb = getDb();

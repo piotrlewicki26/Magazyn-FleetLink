@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Protocols Management (PP=Przekazanie, PU=Uruchomienie, PS=Serwisowy)
+ * FleetLink System GPS - Protocols Management (PP=Przekazanie, PU=Uruchomienie, PS=Serwisowy)
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';

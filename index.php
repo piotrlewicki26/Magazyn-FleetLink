@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink Magazyn - Entry Point
+ * FleetLink System GPS - Entry Point
  */
 $configFile = __DIR__ . '/includes/config.php';
 if (!file_exists($configFile)) {
