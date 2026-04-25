@@ -210,7 +210,7 @@
     </div>
 
     <div class="pp-footer">
-        Wygenerowano przez <?= h($settings['company_name'] ?? 'FleetLink Magazyn') ?> &mdash; <?= date('d.m.Y H:i') ?>
+        Wygenerowano przez FleetLink System GPS &mdash; <?= h($settings['company_name'] ?? '') ?> &mdash; <?= date('d.m.Y H:i') ?> &mdash; <a href="https://www.fleetlink.pl" style="color:inherit;text-decoration:none">www.fleetlink.pl</a>
     </div>
 </div>
 </body>

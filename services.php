@@ -101,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'DESCRIPTION'  => $description ?: '—',
                     'SENDER_NAME'  => $currentUser['name'],
                 ]);
-                sendAppEmail($currentUser['email'], $currentUser['name'], 'Nowy serwis — FleetLink Magazyn', $body);
+                sendAppEmail($currentUser['email'], $currentUser['name'], 'Nowy serwis — FleetLink System GPS', $body);
             } catch (Exception $emailEx) { /* non-fatal */ }
         }
         redirect(getBaseUrl() . 'services.php?action=view&id=' . $newServiceId);
@@ -862,7 +862,7 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
     </div>
 
     <div class="svc-print-footer">
-        Dokument wygenerowany przez <?= $svcCompanyName ? h($svcCompanyName) : 'FleetLink Magazyn' ?> &mdash; <?= date('d.m.Y H:i') ?>
+        Dokument wygenerowany przez <?= $svcCompanyName ? h($svcCompanyName) : 'FleetLink System GPS' ?> &mdash; <?= date('d.m.Y H:i') ?> &mdash; <a href="https://www.fleetlink.pl" style="color:inherit;text-decoration:none">www.fleetlink.pl</a>
     </div>
 </div>
 <?php endif; ?>

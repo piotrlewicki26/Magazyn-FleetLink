@@ -9,10 +9,13 @@ if (!defined('IN_APP')) {
     <div class="container-fluid">
         <div class="row align-items-center">
             <div class="col text-muted small">
-                &copy; <?= date('Y') ?> FleetLink Magazyn v<?= defined('APP_VERSION') ? APP_VERSION : '1.0.0' ?>
+                &copy; <?= date('Y') ?> FleetLink System GPS v<?= defined('APP_VERSION') ? APP_VERSION : '1.0.0' ?>
                 &mdash; System zarządzania urządzeniami GPS
             </div>
             <div class="col-auto text-muted small">
+                <a href="https://www.fleetlink.pl" target="_blank" rel="noopener" class="text-muted text-decoration-none me-3">
+                    <i class="fas fa-globe me-1"></i>www.fleetlink.pl
+                </a>
                 <?php if (isAdmin()): ?>
                 <a href="<?= getBaseUrl() ?>settings.php" class="text-muted text-decoration-none">
                     <i class="fas fa-cog me-1"></i>Ustawienia

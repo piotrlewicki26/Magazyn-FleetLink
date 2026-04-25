@@ -158,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instalacja - FleetLink Magazyn</title>
+    <title>Instalacja - FleetLink System GPS</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <style>
@@ -176,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="card setup-card">
         <div class="setup-header">
             <i class="fas fa-satellite-dish fa-3x mb-3"></i>
-            <h2 class="mb-0">FleetLink Magazyn</h2>
+            <h2 class="mb-0">FleetLink System GPS</h2>
             <p class="mb-0 opacity-75">Kreator instalacji</p>
             <div class="step-indicator">
                 <?php for ($i = 1; $i <= 4; $i++): ?>
@@ -307,7 +307,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="text-center py-4">
                 <i class="fas fa-check-circle fa-5x text-success mb-3"></i>
                 <h3 class="text-success">Instalacja zakończona!</h3>
-                <p class="text-muted">FleetLink Magazyn został pomyślnie zainstalowany i skonfigurowany.</p>
+                <p class="text-muted">FleetLink System GPS został pomyślnie zainstalowany i skonfigurowany.</p>
                 <div class="alert alert-warning text-start">
                     <i class="fas fa-shield-alt me-2"></i>
                     <strong>Ważne z powodów bezpieczeństwa:</strong><br>
@@ -320,7 +320,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
         </div>
         <div class="card-footer text-center text-muted small py-3">
-            FleetLink Magazyn v1.0.0 &mdash; System zarządzania urządzeniami GPS
+            FleetLink System GPS v1.0.0 &mdash; System zarządzania urządzeniami GPS
         </div>
     </div>
 </div>

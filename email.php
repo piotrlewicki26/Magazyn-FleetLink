@@ -170,7 +170,7 @@ include __DIR__ . '/includes/header.php';
 <script>
 const templates = {
     general: { subject: '', message: 'Szanowni Państwo,\n\n\n\nZ poważaniem,' },
-    offer: { subject: 'Oferta handlowa — FleetLink Magazyn', message: 'Szanowni Państwo,\n\nW załączeniu przesyłamy naszą ofertę dotyczącą urządzeń GPS do lokalizacji pojazdów.\n\nProsimy o zapoznanie się z przedstawioną propozycją i ewentualny kontakt w przypadku pytań.\n\nZ poważaniem,' },
+    offer: { subject: 'Oferta handlowa — FleetLink System GPS', message: 'Szanowni Państwo,\n\nW załączeniu przesyłamy naszą ofertę dotyczącą urządzeń GPS do lokalizacji pojazdów.\n\nProsimy o zapoznanie się z przedstawioną propozycją i ewentualny kontakt w przypadku pytań.\n\nZ poważaniem,' },
     service_reminder: { subject: 'Przypomnienie o serwisie urządzenia GPS', message: 'Szanowni Państwo,\n\nInformujemy, że nadchodzi termin serwisu urządzenia GPS zamontowanego w Państwa pojeździe.\n\nProsimy o kontakt w celu ustalenia terminu.\n\nZ poważaniem,' }
 };
 function applyTemplate(name) {

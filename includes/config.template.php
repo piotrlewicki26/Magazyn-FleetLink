@@ -10,12 +10,12 @@ define('DB_USER', '{{DB_USER}}');
 define('DB_PASS', '{{DB_PASS}}');
 define('DB_CHARSET', 'utf8mb4');
 
-define('APP_NAME', 'FleetLink Magazyn');
+define('APP_NAME', 'FleetLink System GPS');
 define('APP_VERSION', '1.0.0');
 define('APP_TIMEZONE', 'Europe/Warsaw');
 
 define('MAIL_FROM', '{{MAIL_FROM}}');
-define('MAIL_FROM_NAME', 'FleetLink Magazyn');
+define('MAIL_FROM_NAME', 'FleetLink System GPS');
 define('MAIL_HOST', '{{MAIL_HOST}}');
 define('MAIL_PORT', {{MAIL_PORT}});
 define('MAIL_USER', '{{MAIL_USER}}');

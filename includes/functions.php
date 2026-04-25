@@ -312,62 +312,88 @@ function logEmail($to, $subject, $status) {
 }
 
 function getEmailTemplateDefaults() {
+    $footer = '<hr style="border:1px solid #eee;margin-top:20px"><table style="width:100%"><tr>'
+        . '<td style="font-size:11px;color:#999">{{APP_NAME}} &mdash; System GPS</td>'
+        . '<td style="font-size:11px;color:#999;text-align:right"><a href="https://www.fleetlink.pl" style="color:#999;text-decoration:none">www.fleetlink.pl</a></td>'
+        . '</tr></table>';
     return [
-        'general' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-<h2 style="color:#0d6efd">{{APP_NAME}}</h2>
+        'general' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#0d6efd;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}}</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
 <p>{{MESSAGE}}</p>
-<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
-<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn</p>
-</body></html>',
-        'offer' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-<h2 style="color:#0d6efd">{{APP_NAME}}</h2>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'offer' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#0d6efd;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}}</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
 <p>Szanowni Państwo,</p>
 <p>W załączeniu przesyłamy ofertę nr <strong>{{OFFER_NUMBER}}</strong> z dnia {{DATE}}.</p>
 <p>{{MESSAGE}}</p>
 <p>W razie pytań prosimy o kontakt.</p>
-<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
-<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn - System zarządzania urządzeniami GPS</p>
-</body></html>',
-        'service_reminder' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-<h2 style="color:#0d6efd">{{APP_NAME}} - Przypomnienie o serwisie</h2>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'service_reminder' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#0d6efd;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}} &mdash; Przypomnienie o serwisie</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
 <p>Szanowni Państwo,</p>
 <p>Informujemy, że dla pojazdu <strong>{{VEHICLE}}</strong> zaplanowany jest serwis urządzenia GPS.</p>
-<p><strong>Data:</strong> {{DATE}}<br><strong>Opis:</strong> {{DESCRIPTION}}</p>
+<table style="border-collapse:collapse;width:100%;margin:12px 0">
+  <tr><td style="padding:6px 10px;color:#555;width:40%"><strong>Data serwisu</strong></td><td style="padding:6px 10px">{{DATE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Opis</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
+</table>
 <p>Prosimy o kontakt w celu potwierdzenia terminu.</p>
-<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
-<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn</p>
-</body></html>',
-        'installation_created' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-<h2 style="color:#0d6efd">{{APP_NAME}} — Nowy montaż</h2>
-<p>Hej {{SENDER_NAME}},</p>
-<p>Pomyślnie zarejestrowano <strong>{{COUNT}}</strong> montaż/e w systemie FleetLink Magazyn.</p>
-<table style="border-collapse:collapse;width:100%;margin-top:8px">
-  <tr><td style="padding:4px 8px;color:#555;width:40%"><strong>Data montażu</strong></td><td style="padding:4px 8px">{{DATE}}</td></tr>
-  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Technik</strong></td><td style="padding:4px 8px">{{TECHNICIAN}}</td></tr>
-  <tr><td style="padding:4px 8px;color:#555"><strong>Pojazd(y)</strong></td><td style="padding:4px 8px">{{VEHICLES}}</td></tr>
-  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Adres</strong></td><td style="padding:4px 8px">{{ADDRESS}}</td></tr>
-  <tr><td style="padding:4px 8px;color:#555"><strong>Uwagi</strong></td><td style="padding:4px 8px">{{NOTES}}</td></tr>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'installation_created' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#0d6efd;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}} &mdash; Nowy montaż</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
+<p>Witaj <strong>{{SENDER_NAME}}</strong>,</p>
+<p>Pomyślnie zarejestrowano <strong>{{COUNT}}</strong> montaż/e w systemie.</p>
+<table style="border-collapse:collapse;width:100%;margin:12px 0">
+  <tr><td style="padding:6px 10px;color:#555;width:40%"><strong>Data montażu</strong></td><td style="padding:6px 10px">{{DATE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Technik</strong></td><td style="padding:6px 10px">{{TECHNICIAN}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Pojazd(y)</strong></td><td style="padding:6px 10px">{{VEHICLES}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Adres montażu</strong></td><td style="padding:6px 10px">{{ADDRESS}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Uwagi</strong></td><td style="padding:6px 10px">{{NOTES}}</td></tr>
 </table>
-<p style="margin-top:12px">Szczegóły montażu dostępne są w systemie.</p>
-<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
-<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn - System zarządzania urządzeniami GPS</p>
-</body></html>',
-        'service_created' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-<h2 style="color:#0d6efd">{{APP_NAME}} — Nowy serwis</h2>
-<p>Hej {{SENDER_NAME}},</p>
-<p>Pomyślnie zarejestrowano nowy serwis w systemie FleetLink Magazyn.</p>
-<table style="border-collapse:collapse;width:100%;margin-top:8px">
-  <tr><td style="padding:4px 8px;color:#555;width:40%"><strong>Typ serwisu</strong></td><td style="padding:4px 8px">{{SERVICE_TYPE}}</td></tr>
-  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Urządzenie</strong></td><td style="padding:4px 8px">{{DEVICE}}</td></tr>
-  <tr><td style="padding:4px 8px;color:#555"><strong>Data zaplanowana</strong></td><td style="padding:4px 8px">{{DATE}}</td></tr>
-  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Technik</strong></td><td style="padding:4px 8px">{{TECHNICIAN}}</td></tr>
-  <tr><td style="padding:4px 8px;color:#555"><strong>Status</strong></td><td style="padding:4px 8px">{{STATUS}}</td></tr>
-  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Opis</strong></td><td style="padding:4px 8px">{{DESCRIPTION}}</td></tr>
+<p>Szczegóły dostępne są w panelu systemu.</p>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'service_created' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#0d6efd;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}} &mdash; Nowy serwis</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
+<p>Witaj <strong>{{SENDER_NAME}}</strong>,</p>
+<p>Pomyślnie zarejestrowano nowy serwis w systemie.</p>
+<table style="border-collapse:collapse;width:100%;margin:12px 0">
+  <tr><td style="padding:6px 10px;color:#555;width:40%"><strong>Typ serwisu</strong></td><td style="padding:6px 10px">{{SERVICE_TYPE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Urządzenie</strong></td><td style="padding:6px 10px">{{DEVICE}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Data zaplanowana</strong></td><td style="padding:6px 10px">{{DATE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Technik</strong></td><td style="padding:6px 10px">{{TECHNICIAN}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Status</strong></td><td style="padding:6px 10px">{{STATUS}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Opis</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
 </table>
-<p style="margin-top:12px">Szczegóły serwisu dostępne są w systemie.</p>
-<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
-<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn - System zarządzania urządzeniami GPS</p>
-</body></html>',
+<p>Szczegóły dostępne są w panelu systemu.</p>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
     ];
 }
 
@@ -392,7 +418,7 @@ function getEmailTemplate($name, $vars = []) {
 
     $templates = array_merge($defaults, $dbTpls);
     $tpl = $templates[$name] ?? $templates['general'];
-    $defaultVars = ['APP_NAME' => defined('APP_NAME') ? APP_NAME : 'FleetLink Magazyn'];
+    $defaultVars = ['APP_NAME' => defined('APP_NAME') ? APP_NAME : 'FleetLink System GPS'];
     $vars = array_merge($defaultVars, $vars);
     foreach ($vars as $key => $val) {
         $tpl = str_replace('{{' . $key . '}}', h($val), $tpl);

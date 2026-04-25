@@ -185,7 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'NOTES'      => $notes ?: '—',
                         'SENDER_NAME' => $curUser['name'],
                     ]);
-                    sendAppEmail($curUser['email'], $curUser['name'], 'Nowy montaż — FleetLink Magazyn', $body);
+                    sendAppEmail($curUser['email'], $curUser['name'], 'Nowy montaż — FleetLink System GPS', $body);
                 } catch (Exception $emailEx) { /* non-fatal */ }
             }
         } catch (Exception $e) {
@@ -1638,7 +1638,7 @@ $installAddr = $firstRow['installation_address'] ?? '';
     </div>
 
     <div class="print-footer">
-        Dokument wygenerowany przez <?= $companyName ? h($companyName) : 'FleetLink Magazyn' ?> &mdash; <?= date('d.m.Y H:i') ?>
+        Dokument wygenerowany przez <?= $companyName ? h($companyName) : 'FleetLink System GPS' ?> &mdash; <?= date('d.m.Y H:i') ?> &mdash; <a href="https://www.fleetlink.pl" style="color:inherit;text-decoration:none">www.fleetlink.pl</a>
     </div>
 </div>
 <?php endif; ?>
