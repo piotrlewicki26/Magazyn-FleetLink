@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             require_once __DIR__ . '/includes/functions.php';
             $body = getEmailTemplate('general', [
                 'MESSAGE'     => '<strong>To jest wiadomość testowa z FleetLink Magazyn.</strong><br>Jeśli ją widzisz, konfiguracja e-mail działa poprawnie.',
-                'SENDER_NAME' => 'FleetLink Magazyn',
+                'SENDER_NAME' => getCurrentUser()['name'] ?? 'FleetLink Magazyn',
                 'DATE'        => date('d.m.Y H:i'),
             ]);
             if (sendAppEmail($testTo, '', 'Testowa wiadomość — FleetLink Magazyn', $body)) {
@@ -36,6 +36,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flashError('Nie udało się wysłać wiadomości testowej. Sprawdź ustawienia SMTP poniżej.');
             }
         }
+        redirect(getBaseUrl() . 'settings.php');
+    }
+
+    // Email templates save action (separate form)
+    if ($postAction === 'save_templates') {
+        $tplStmt = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
+        foreach (['email_tpl_general', 'email_tpl_offer', 'email_tpl_service_reminder'] as $tplKey) {
+            $val = $_POST[$tplKey] ?? '';
+            $tplStmt->execute([$tplKey, $val, $val]);
+        }
+        flashSuccess('Szablony e-mail zostały zapisane.');
         redirect(getBaseUrl() . 'settings.php');
     }
 
@@ -70,6 +81,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'schema_fmc150_pass'            => sanitize($_POST['schema_fmc150_pass'] ?? ''),
         'schema_lvcan200_pass'          => sanitize($_POST['schema_lvcan200_pass'] ?? ''),
         'schema_lvcan200dtc_pass'       => sanitize($_POST['schema_lvcan200dtc_pass'] ?? ''),
+        // Email templates (raw HTML - do not sanitize to preserve tags)
+        'email_tpl_general'          => $_POST['email_tpl_general'] ?? '',
+        'email_tpl_offer'            => $_POST['email_tpl_offer'] ?? '',
+        'email_tpl_service_reminder' => $_POST['email_tpl_service_reminder'] ?? '',
     ];
     // Only save password if provided (to avoid wiping it when left blank)
     if (!empty($_POST['smtp_pass'])) {
@@ -233,6 +248,83 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+
+<!-- Email Templates Card -->
+<?php
+$tplDefaults = getEmailTemplateDefaults();
+$emailTplFields = [
+    [
+        'key'   => 'email_tpl_general',
+        'label' => 'Szablon ogólny (protokoły, wiadomości ogólne)',
+        'desc'  => 'Zmienne: {{APP_NAME}}, {{MESSAGE}}, {{SENDER_NAME}}, {{DATE}}',
+    ],
+    [
+        'key'   => 'email_tpl_offer',
+        'label' => 'Szablon oferty',
+        'desc'  => 'Zmienne: {{APP_NAME}}, {{OFFER_NUMBER}}, {{DATE}}, {{MESSAGE}}, {{SENDER_NAME}}',
+    ],
+    [
+        'key'   => 'email_tpl_service_reminder',
+        'label' => 'Szablon przypomnienia o serwisie',
+        'desc'  => 'Zmienne: {{APP_NAME}}, {{VEHICLE}}, {{DATE}}, {{DESCRIPTION}}, {{SENDER_NAME}}',
+    ],
+];
+// Map setting key → defaults key
+$tplKeyMap = [
+    'email_tpl_general'          => 'general',
+    'email_tpl_offer'            => 'offer',
+    'email_tpl_service_reminder' => 'service_reminder',
+];
+?>
+<div class="card mt-3" style="max-width:800px">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="fas fa-envelope-open-text me-2 text-primary"></i>Szablony wiadomości e-mail</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleEmailTemplates(this)">
+            <i class="fas fa-chevron-down me-1"></i>Rozwiń
+        </button>
+    </div>
+    <div id="emailTemplatesBody" style="display:none">
+        <div class="card-body">
+            <p class="text-muted small mb-3">Edytuj treść HTML każdego szablonu e-mail. Zostaw puste, aby używać domyślnego szablonu systemowego. Zmienna <code>{{SENDER_NAME}}</code> zostaje zastąpiona imieniem i nazwiskiem zalogowanego użytkownika.</p>
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="save_templates">
+                <?php foreach ($emailTplFields as $tf): ?>
+                <?php $defKey = $tplKeyMap[$tf['key']]; ?>
+                <div class="mb-4">
+                    <label class="form-label fw-semibold"><?= h($tf['label']) ?></label>
+                    <textarea name="<?= h($tf['key']) ?>" class="form-control font-monospace" rows="10"
+                              style="font-size:.8rem"><?= h($settings[$tf['key']] ?? '') ?></textarea>
+                    <div class="d-flex justify-content-between mt-1">
+                        <small class="text-muted"><?= h($tf['desc']) ?></small>
+                        <button type="button" class="btn btn-sm btn-link p-0 text-secondary"
+                                onclick="resetEmailTemplate(this, <?= htmlspecialchars(json_encode($tplDefaults[$defKey]), ENT_QUOTES) ?>)">
+                            <i class="fas fa-undo me-1"></i>Przywróć domyślny
+                        </button>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+                <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-2"></i>Zapisz szablony</button>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function toggleEmailTemplates(btn) {
+    var body = document.getElementById('emailTemplatesBody');
+    var visible = body.style.display !== 'none';
+    body.style.display = visible ? 'none' : 'block';
+    btn.innerHTML = visible
+        ? '<i class="fas fa-chevron-down me-1"></i>Rozwiń'
+        : '<i class="fas fa-chevron-up me-1"></i>Zwiń';
+}
+function resetEmailTemplate(btn, defaultHtml) {
+    var ta = btn.closest('.mb-4').querySelector('textarea');
+    if (ta && confirm('Przywrócić domyślny szablon? Obecna treść zostanie zastąpiona.')) {
+        ta.value = defaultHtml;
+    }
+}
+</script>
 
 <!-- Version info -->
 <div class="card mt-3" style="max-width:800px">

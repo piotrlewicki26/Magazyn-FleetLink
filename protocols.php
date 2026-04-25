@@ -325,7 +325,9 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-clipboard-check me-2 text-primary"></i><?= h($pageTitle) ?></h1>
     <?php if ($action === 'list'): ?>
-    <a href="protocols.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowy protokół</a>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newProtocolModal">
+        <i class="fas fa-plus me-2"></i>Nowy protokół
+    </button>
     <?php else: ?>
     <a href="protocols.php<?= $filterContext ? '?filter=' . h($filterContext) : '' ?>" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -398,6 +400,142 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<!-- New Protocol Modal -->
+<div class="modal fade" id="newProtocolModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus me-2 text-primary"></i>Nowy protokół</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" id="modalProtocolForm">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="add">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Typ protokołu</label>
+                            <select name="type" id="mpProtocolType" class="form-select" required>
+                                <option value="PP" selected>PP — Protokół Przekazania</option>
+                                <option value="PU">PU — Protokół Uruchomienia</option>
+                                <option value="PS">PS — Protokół Serwisowy</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data</label>
+                            <input type="date" name="date" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Powiązany montaż</label>
+                            <select name="batch_ref" class="form-select">
+                                <option value="">— brak —</option>
+                                <?php if (!empty($activeInstallationBatches)): ?>
+                                <optgroup label="🗂️ Montaże grupowe">
+                                <?php foreach ($activeInstallationBatches as $bg): ?>
+                                <option value="batch:<?= (int)$bg['batch_id'] ?>">Grupa <?= (int)$bg['device_count'] ?> urządz. — <?= h($bg['registrations']) ?></option>
+                                <?php endforeach; ?>
+                                </optgroup>
+                                <?php endif; ?>
+                                <optgroup label="📌 Montaże pojedyncze">
+                                <?php foreach ($activeInstallationsSingle as $inst): ?>
+                                <option value="inst:<?= (int)$inst['id'] ?>"><?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?></option>
+                                <?php endforeach; ?>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Powiązany serwis</label>
+                            <select name="service_id" class="form-select">
+                                <option value="">— brak —</option>
+                                <?php foreach ($recentServices as $svc): ?>
+                                <option value="<?= $svc['id'] ?>"><?= h($svc['serial_number'] . ' — ' . ucfirst($svc['type']) . ' ' . formatDate($svc['planned_date'])) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik</label>
+                            <select name="technician_id" class="form-select">
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= getCurrentUser()['id'] == $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+
+                        <!-- PS-specific section -->
+                        <div id="mpPsSectionWrapper" class="col-12" style="display:none">
+                            <hr class="my-1">
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <label class="form-label fw-semibold text-warning-emphasis"><i class="fas fa-tools me-1"></i>Serwis dotyczy urządzenia</label>
+                                    <select name="service_device_id" id="mpServiceDeviceSelect" class="form-select">
+                                        <option value="">— wybierz urządzenie —</option>
+                                        <?php foreach ($allDevices as $dev): ?>
+                                        <option value="<?= $dev['id'] ?>"><?= h($dev['manufacturer_name'] . ' ' . $dev['model_name'] . ' — ' . $dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold text-warning-emphasis"><i class="fas fa-wrench me-1"></i>Typ czynności serwisowej</label>
+                                    <select name="service_type" id="mpServiceTypeSelect" class="form-select">
+                                        <option value="">— wybierz —</option>
+                                        <?php foreach ($psServiceTypeLabels as $val => $lbl): ?>
+                                        <option value="<?= $val ?>"><?= h($lbl) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div id="mpReplacementWrapper" class="col-12" style="display:none">
+                                    <label class="form-label fw-semibold text-danger"><i class="fas fa-exchange-alt me-1"></i>Urządzenie zastępcze (wymiana na)</label>
+                                    <select name="replacement_device_id" class="form-select">
+                                        <option value="">— wybierz urządzenie zastępcze —</option>
+                                        <?php foreach ($allDevices as $dev): ?>
+                                        <option value="<?= $dev['id'] ?>"><?= h($dev['manufacturer_name'] . ' ' . $dev['model_name'] . ' — ' . $dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            </div>
+                            <hr class="my-1">
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label">Uwagi / Zakres prac</label>
+                            <textarea name="notes" class="form-control" rows="3"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Podpis klienta (imię i nazwisko)</label>
+                            <input type="text" name="client_signature" class="form-control" placeholder="np. Jan Kowalski">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                <button type="submit" form="modalProtocolForm" class="btn btn-primary btn-sm"><i class="fas fa-save me-2"></i>Utwórz protokół</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    var mpTypeSelect  = document.getElementById('mpProtocolType');
+    var mpPsSection   = document.getElementById('mpPsSectionWrapper');
+    var mpSvcType     = document.getElementById('mpServiceTypeSelect');
+    var mpRepWrapper  = document.getElementById('mpReplacementWrapper');
+
+    function applyMpTypeVisibility(val) {
+        if (mpPsSection) mpPsSection.style.display = (val === 'PS') ? '' : 'none';
+    }
+    if (mpTypeSelect) {
+        mpTypeSelect.addEventListener('change', function() { applyMpTypeVisibility(this.value); });
+        applyMpTypeVisibility(mpTypeSelect.value);
+    }
+    if (mpSvcType) {
+        mpSvcType.addEventListener('change', function() {
+            if (mpRepWrapper) mpRepWrapper.style.display = (this.value === 'wymiana') ? '' : 'none';
+        });
+    }
+})();
+</script>
 
 <!-- Protocol Preview Modal -->
 <div class="modal fade" id="protocolPreviewModal" tabindex="-1">

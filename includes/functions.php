@@ -311,8 +311,14 @@ function logEmail($to, $subject, $status) {
     }
 }
 
-function getEmailTemplate($name, $vars = []) {
-    $templates = [
+function getEmailTemplateDefaults() {
+    return [
+        'general' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+<h2 style="color:#0d6efd">{{APP_NAME}}</h2>
+<p>{{MESSAGE}}</p>
+<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn</p>
+</body></html>',
         'offer' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
 <h2 style="color:#0d6efd">{{APP_NAME}}</h2>
 <p>Szanowni Państwo,</p>
@@ -331,13 +337,29 @@ function getEmailTemplate($name, $vars = []) {
 <br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
 <hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn</p>
 </body></html>',
-        'general' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-<h2 style="color:#0d6efd">{{APP_NAME}}</h2>
-<p>{{MESSAGE}}</p>
-<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
-<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn</p>
-</body></html>',
     ];
+}
+
+function getEmailTemplate($name, $vars = []) {
+    static $dbTpls = null;
+
+    $defaults = getEmailTemplateDefaults();
+
+    if ($dbTpls === null) {
+        $dbTpls = [];
+        try {
+            $db = getDb();
+            $rows = $db->query("SELECT `key`, `value` FROM settings WHERE `key` LIKE 'email_tpl_%'")->fetchAll();
+            foreach ($rows as $r) {
+                $tplKey = substr($r['key'], strlen('email_tpl_'));
+                if ($r['value'] !== '') {
+                    $dbTpls[$tplKey] = $r['value'];
+                }
+            }
+        } catch (Exception $e) {}
+    }
+
+    $templates = array_merge($defaults, $dbTpls);
     $tpl = $templates[$name] ?? $templates['general'];
     $defaultVars = ['APP_NAME' => defined('APP_NAME') ? APP_NAME : 'FleetLink Magazyn'];
     $vars = array_merge($defaultVars, $vars);
