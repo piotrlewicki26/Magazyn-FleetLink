@@ -331,64 +331,49 @@ try {
 </datalist>
 <?php endif; ?>
 
-<!-- Modal: Dodaj kartę SIM (nav) -->
+<!-- Modal: Dodaj kartę SIM (nav) — bulk, jak przy urządzeniach -->
 <div class="modal fade" id="navSimAddModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <form method="POST" action="<?= getBaseUrl() ?>sim_cards.php" id="navSimAddForm">
                 <?= csrfField() ?>
-                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="action" value="bulk_add_sims">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-sim-card me-2 text-primary"></i>Dodaj kartę SIM</h5>
+                    <h5 class="modal-title"><i class="fas fa-sim-card me-2 text-primary"></i>Dodaj karty SIM</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="row g-3">
-                        <div class="col-12">
-                            <label class="form-label required-star">Numer telefonu karty SIM</label>
-                            <input type="text" name="phone_number" class="form-control" required
-                                   placeholder="+48 123 456 789" maxlength="30">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Operator</label>
+                    <div class="row g-3 mb-3 pb-3 border-bottom">
+                        <div class="col-md-4">
+                            <label class="form-label">Operator <span class="text-muted">(wspólny)</span></label>
                             <input type="text" name="operator" class="form-control"
                                    placeholder="np. Play, Orange, T-Mobile" maxlength="50">
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">ICCID / nr karty</label>
-                            <input type="text" name="iccid" class="form-control"
-                                   placeholder="20-cyfrowy numer ICCID" maxlength="25">
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Przypisz do urządzenia <span class="text-muted">(opcjonalnie)</span></label>
-                            <select name="device_id" class="form-select" id="navSimDeviceSelect">
-                                <option value="">— brak przypisania —</option>
-                                <?php
-                                $navSimGrp = '';
-                                foreach ($navSimDevices as $dev):
-                                    $g = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
-                                    if ($g !== $navSimGrp) {
-                                        if ($navSimGrp) echo '</optgroup>';
-                                        echo '<optgroup label="' . h($g) . '">';
-                                        $navSimGrp = $g;
-                                    }
-                                ?>
-                                <option value="<?= $dev['id'] ?>">
-                                    <?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?>
-                                    <?= $dev['sim_number'] ? ' — SIM: ' . h($dev['sim_number']) : '' ?>
-                                </option>
-                                <?php endforeach; if ($navSimGrp) echo '</optgroup>'; ?>
-                            </select>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Uwagi</label>
-                            <textarea name="notes" class="form-control" rows="2" placeholder="Opcjonalne uwagi"></textarea>
-                        </div>
                     </div>
+                    <div class="mb-2 d-flex align-items-center justify-content-between">
+                        <span class="fw-semibold text-muted small">Karty SIM do dodania</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="navSimBulkAddRow()"><i class="fas fa-plus me-1"></i>Dodaj wiersz</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:30px">#</th>
+                                    <th>Nr telefonu SIM <span class="text-danger">*</span></th>
+                                    <th>ICCID / nr karty</th>
+                                    <th>Przypisz do urządzenia</th>
+                                    <th>Uwagi</th>
+                                    <th style="width:42px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="navSimBulkBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-muted small" id="navSimBulkCount">0 kart do dodania</div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
-                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Dodaj kartę SIM</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Zapisz karty SIM</button>
                 </div>
             </form>
         </div>
@@ -961,6 +946,89 @@ function navUpdateDevCount() {
     else if (rows <= 4) el.textContent = rows + ' urządzenia do dodania';
     else el.textContent = rows + ' urządzeń do dodania';
 }
+
+// ── Nav: Bulk SIM modal rows ──────────────────────────────────────────
+var navSimBulkRowCount = 0;
+var navSimDevicesJson = <?= json_encode(array_values(array_map(function($d) {
+    return [
+        'id'    => (string)$d['id'],
+        'label' => $d['serial_number']
+                   . ($d['imei']       ? ' [' . $d['imei'] . ']' : '')
+                   . ($d['sim_number'] ? ' — SIM: ' . $d['sim_number'] : '')
+                   . ' (' . $d['manufacturer_name'] . ' ' . $d['model_name'] . ')',
+    ];
+}, $navSimDevices))) ?>;
+
+function navSimBulkBuildDeviceSelect() {
+    var opts = '<option value="">— brak —</option>';
+    navSimDevicesJson.forEach(function(d) {
+        opts += '<option value="' + d.id + '">' + d.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') + '</option>';
+    });
+    return '<select name="device_ids_sim[]" class="form-select form-select-sm nav-sim-dev-sel">' + opts + '</select>';
+}
+function navSimBulkAddRow() {
+    navSimBulkRowCount++;
+    var n = navSimBulkRowCount;
+    var tbody = document.getElementById('navSimBulkBody');
+    if (!tbody) return;
+    var tr = document.createElement('tr');
+    tr.id = 'nav-sim-row-' + n;
+    tr.innerHTML =
+        '<td class="text-muted text-center align-middle">' + n + '</td>' +
+        '<td><input type="text" name="phone_numbers[]" class="form-control form-control-sm" placeholder="+48 123 456 789" maxlength="30" required></td>' +
+        '<td><input type="text" name="iccids[]" class="form-control form-control-sm" placeholder="20-cyfrowy ICCID" maxlength="25"></td>' +
+        '<td>' + navSimBulkBuildDeviceSelect() + '</td>' +
+        '<td><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
+        '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="navSimBulkRemoveRow(' + n + ')" title="Usuń"><i class="fas fa-times"></i></button></td>';
+    tbody.appendChild(tr);
+    var sel = tr.querySelector('.nav-sim-dev-sel');
+    if (sel && typeof TomSelect !== 'undefined') {
+        new TomSelect(sel, { maxOptions: null });
+    }
+    tr.querySelector('input[name="phone_numbers[]"]').focus();
+    navSimBulkUpdateCount();
+}
+function navSimBulkRemoveRow(n) {
+    var row = document.getElementById('nav-sim-row-' + n);
+    if (row) {
+        var sel = row.querySelector('.nav-sim-dev-sel');
+        if (sel && sel.tomselect) sel.tomselect.destroy();
+        row.remove();
+        navSimBulkUpdateCount();
+    }
+}
+function navSimBulkUpdateCount() {
+    var rows = document.querySelectorAll('#navSimBulkBody tr').length;
+    var el = document.getElementById('navSimBulkCount');
+    if (!el) return;
+    if (rows === 0) el.textContent = '0 kart do dodania';
+    else if (rows === 1) el.textContent = '1 karta do dodania';
+    else if (rows <= 4) el.textContent = rows + ' karty do dodania';
+    else el.textContent = rows + ' kart do dodania';
+}
+// Init first row when modal opens
+document.addEventListener('DOMContentLoaded', function () {
+    var navSimModal = document.getElementById('navSimAddModal');
+    if (navSimModal) {
+        navSimModal.addEventListener('show.bs.modal', function () {
+            if (document.getElementById('navSimBulkBody').rows.length === 0) {
+                navSimBulkAddRow();
+            }
+        });
+        // Reset on hide so next open is fresh
+        navSimModal.addEventListener('hidden.bs.modal', function () {
+            var tbody = document.getElementById('navSimBulkBody');
+            if (tbody) {
+                Array.from(tbody.querySelectorAll('.nav-sim-dev-sel')).forEach(function(sel) {
+                    if (sel.tomselect) sel.tomselect.destroy();
+                });
+                tbody.innerHTML = '';
+            }
+            navSimBulkRowCount = 0;
+            navSimBulkUpdateCount();
+        });
+    }
+});
 
 // ── Nav: Install modal multi-device rows ──────────────────────────────
 var navInstRowCounter = 1;

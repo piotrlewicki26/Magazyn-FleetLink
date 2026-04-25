@@ -58,6 +58,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'sim_cards.php');
     }
 
+    if ($postAction === 'bulk_add_sims') {
+        if (!isAdmin()) { flashError('Dodawanie kart SIM jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'sim_cards.php'); }
+
+        $sharedOperator = sanitize($_POST['operator'] ?? '');
+
+        $phoneNumbers = $_POST['phone_numbers'] ?? [];
+        $iccids       = $_POST['iccids'] ?? [];
+        $deviceIds    = $_POST['device_ids_sim'] ?? [];
+        $notesList    = $_POST['notes_list'] ?? [];
+
+        $added  = 0;
+        $errors = [];
+        foreach ($phoneNumbers as $i => $rawPhone) {
+            $phone = sanitize($rawPhone);
+            if (empty($phone)) continue;
+            $rowIccid    = sanitize($iccids[$i]    ?? '');
+            $rowDeviceId = (int)($deviceIds[$i]    ?? 0) ?: null;
+            $rowNotes    = sanitize($notesList[$i] ?? '');
+            try {
+                $db->prepare("INSERT INTO sim_cards (phone_number, device_id, operator, iccid, notes) VALUES (?,?,?,?,?)")
+                   ->execute([$phone, $rowDeviceId, $sharedOperator ?: null, $rowIccid ?: null, $rowNotes ?: null]);
+                if ($rowDeviceId) {
+                    $db->prepare("UPDATE devices SET sim_number=? WHERE id=?")->execute([$phone, $rowDeviceId]);
+                }
+                $added++;
+            } catch (PDOException $e) {
+                $errors[] = $phone;
+            }
+        }
+
+        if ($added > 0) {
+            $n = $added;
+            if ($n === 1) $label = '1 karta SIM';
+            elseif ($n <= 4) $label = $n . ' karty SIM';
+            else $label = $n . ' kart SIM';
+            $msg = 'Dodano ' . $label . '.';
+            if (!empty($errors)) $msg .= ' Błąd dla: ' . implode(', ', $errors) . ' (duplikat numeru?).';
+            flashSuccess($msg);
+        } else {
+            flashError('Nie dodano żadnej karty SIM. Sprawdź czy numery nie są duplikatami.');
+        }
+        redirect(getBaseUrl() . 'sim_cards.php');
+    }
+
     if ($postAction === 'edit') {
         if (empty($simNumber)) {
             flashError('Numer telefonu SIM jest wymagany.');
@@ -368,68 +412,123 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php else: ?>
 
-<div class="card" style="max-width:620px">
-    <div class="card-header"><i class="fas fa-plus me-2"></i>Dodaj kartę SIM</div>
+<div class="card">
+    <div class="card-header"><i class="fas fa-plus me-2"></i>Dodaj karty SIM</div>
     <div class="card-body">
-        <form method="POST">
+        <form method="POST" id="bulkSimAddForm">
             <?= csrfField() ?>
-            <input type="hidden" name="action" value="add">
-            <div class="row g-3">
-                <div class="col-12">
-                    <label class="form-label required-star">Numer telefonu karty SIM</label>
-                    <input type="text" name="phone_number" class="form-control" required
-                           placeholder="+48 123 456 789" maxlength="30" autofocus>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Operator</label>
+            <input type="hidden" name="action" value="bulk_add_sims">
+            <div class="row g-3 mb-3 pb-3 border-bottom">
+                <div class="col-md-4">
+                    <label class="form-label">Operator <span class="text-muted">(wspólny dla wszystkich)</span></label>
                     <input type="text" name="operator" class="form-control"
                            placeholder="np. Play, Orange, T-Mobile" maxlength="50">
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label">ICCID / nr karty</label>
-                    <input type="text" name="iccid" class="form-control"
-                           placeholder="20-cyfrowy numer ICCID" maxlength="25">
-                </div>
-                <div class="col-12">
-                    <label class="form-label">Przypisz do urządzenia <span class="text-muted">(opcjonalnie)</span></label>
-                    <select name="device_id" class="form-select" id="simDeviceSelect">
-                        <option value="">— brak przypisania —</option>
-                        <?php
-                        $grp = '';
-                        foreach ($allDevices as $dev):
-                            $g = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
-                            if ($g !== $grp) {
-                                if ($grp) echo '</optgroup>';
-                                echo '<optgroup label="' . h($g) . '">';
-                                $grp = $g;
-                            }
-                        ?>
-                        <option value="<?= $dev['id'] ?>">
-                            <?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?>
-                            <?= $dev['sim_number'] ? ' — SIM: ' . h($dev['sim_number']) : '' ?>
-                        </option>
-                        <?php endforeach; if ($grp) echo '</optgroup>'; ?>
-                    </select>
-                    <div class="form-text">Urządzenia ze statusem wycofany/sprzedany nie są wyświetlane.</div>
-                </div>
-                <div class="col-12">
-                    <label class="form-label">Uwagi</label>
-                    <textarea name="notes" class="form-control" rows="2" placeholder="Opcjonalne uwagi"></textarea>
-                </div>
-                <div class="col-12">
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Dodaj kartę SIM</button>
-                    <a href="sim_cards.php" class="btn btn-outline-secondary ms-2">Anuluj</a>
-                </div>
+            </div>
+            <div class="mb-2 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold text-muted small">Karty SIM do dodania</span>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="simBulkAddRow()"><i class="fas fa-plus me-1"></i>Dodaj wiersz</button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:30px">#</th>
+                            <th>Nr telefonu SIM <span class="text-danger">*</span></th>
+                            <th>ICCID / nr karty</th>
+                            <th>Przypisz do urządzenia</th>
+                            <th>Uwagi</th>
+                            <th style="width:42px"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="simBulkBody"></tbody>
+                </table>
+            </div>
+            <div class="mt-2 text-muted small" id="simBulkCount">0 kart do dodania</div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Zapisz karty SIM</button>
+                <a href="sim_cards.php" class="btn btn-outline-secondary ms-2">Anuluj</a>
             </div>
         </form>
     </div>
 </div>
+
+<!-- Datalist z urządzeniami dla autocomplete wierszy -->
+<datalist id="simBulkDeviceList">
+    <?php foreach ($allDevices as $dev): ?>
+    <option value="<?= $dev['id'] ?>" data-label="<?= h($dev['serial_number'] . ($dev['imei'] ? ' [' . $dev['imei'] . ']' : '') . ($dev['sim_number'] ? ' — SIM: ' . $dev['sim_number'] : '')) ?>">
+        <?= h($dev['serial_number'] . ($dev['imei'] ? ' [' . $dev['imei'] . ']' : '')) ?>
+    </option>
+    <?php endforeach; ?>
+</datalist>
+
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    var sel = document.getElementById('simDeviceSelect');
+var simBulkDevices = <?= json_encode(array_values(array_map(function($d) {
+    return [
+        'id'    => (string)$d['id'],
+        'label' => $d['serial_number']
+                   . ($d['imei']       ? ' [' . $d['imei'] . ']' : '')
+                   . ($d['sim_number'] ? ' — SIM: ' . $d['sim_number'] : '')
+                   . ' (' . $d['manufacturer_name'] . ' ' . $d['model_name'] . ')',
+    ];
+}, $allDevices))) ?>;
+
+var simBulkRowCount = 0;
+
+function simBulkBuildDeviceSelect(name) {
+    var opts = '<option value="">— brak —</option>';
+    simBulkDevices.forEach(function(d) {
+        opts += '<option value="' + d.id + '">' + d.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') + '</option>';
+    });
+    return '<select name="' + name + '" class="form-select form-select-sm">' + opts + '</select>';
+}
+
+function simBulkAddRow() {
+    simBulkRowCount++;
+    var n = simBulkRowCount;
+    var tbody = document.getElementById('simBulkBody');
+    var tr = document.createElement('tr');
+    tr.id = 'sim-bulk-row-' + n;
+    tr.innerHTML =
+        '<td class="text-muted text-center align-middle">' + n + '</td>' +
+        '<td><input type="text" name="phone_numbers[]" class="form-control form-control-sm" placeholder="+48 123 456 789" maxlength="30" required></td>' +
+        '<td><input type="text" name="iccids[]" class="form-control form-control-sm" placeholder="20-cyfrowy ICCID" maxlength="25"></td>' +
+        '<td>' + simBulkBuildDeviceSelect('device_ids_sim[]') + '</td>' +
+        '<td><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
+        '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="simBulkRemoveRow(' + n + ')" title="Usuń"><i class="fas fa-times"></i></button></td>';
+    tbody.appendChild(tr);
+    // Init TomSelect on the new device select
+    var sel = tr.querySelector('select');
     if (sel && typeof TomSelect !== 'undefined') {
         new TomSelect(sel, { maxOptions: null });
     }
+    tr.querySelector('input[name="phone_numbers[]"]').focus();
+    simBulkUpdateCount();
+}
+
+function simBulkRemoveRow(n) {
+    var row = document.getElementById('sim-bulk-row-' + n);
+    if (row) {
+        var sel = row.querySelector('select');
+        if (sel && sel.tomselect) sel.tomselect.destroy();
+        row.remove();
+        simBulkUpdateCount();
+    }
+}
+
+function simBulkUpdateCount() {
+    var rows = document.querySelectorAll('#simBulkBody tr').length;
+    var el = document.getElementById('simBulkCount');
+    if (!el) return;
+    if (rows === 0) el.textContent = '0 kart do dodania';
+    else if (rows === 1) el.textContent = '1 karta do dodania';
+    else if (rows <= 4) el.textContent = rows + ' karty do dodania';
+    else el.textContent = rows + ' kart do dodania';
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    // Start with one empty row
+    simBulkAddRow();
 });
 </script>
 <?php endif; // end simCardsTableExists check for add form ?>
