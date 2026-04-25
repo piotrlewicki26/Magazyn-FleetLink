@@ -14,6 +14,17 @@ requireLogin();
 $db = getDb();
 $stats = getDashboardStats();
 
+// Dane do modali szybkich akcji
+$dashModels = $db->query("SELECT m.id, m.name, mf.name as manufacturer_name FROM models m JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE m.active=1 ORDER BY mf.name, m.name")->fetchAll();
+$dashSimOptions = [];
+try { $dashSimOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN); } catch (Exception $e) {}
+$dashClients  = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
+$dashVehicles = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
+$dashAvailableDevices = $db->query("SELECT d.id, d.serial_number, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status IN ('nowy','sprawny') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
+$dashActiveInstallations = $db->query("SELECT i.id, v.registration, d.serial_number FROM installations i JOIN vehicles v ON v.id=i.vehicle_id JOIN devices d ON d.id=i.device_id WHERE i.status='aktywna' ORDER BY v.registration")->fetchAll();
+$dashUsers = [];
+try { $dashUsers = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll(); } catch (Exception $e) {}
+
 // Recent installations – grouped by batch_id so multi-device batches appear as one row
 // Fetch more rows than needed so PHP grouping can collapse batches into 5 display items
 $dashInstallationsFetchLimit = 30;
@@ -255,29 +266,31 @@ include __DIR__ . '/includes/header.php';
             <div class="card-header"><i class="fas fa-bolt me-2 text-primary"></i>Szybkie akcje</div>
             <div class="card-body">
                 <div class="row g-2">
+                    <?php if (isAdmin()): ?>
                     <div class="col-6 col-md-2">
-                        <a href="devices.php?action=add" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center">
+                        <button type="button" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenAddDevice()">
                             <i class="fas fa-plus-circle fa-2x mb-2"></i>
                             <span>Dodaj urządzenie</span>
-                        </a>
+                        </button>
                     </div>
+                    <?php endif; ?>
                     <div class="col-6 col-md-2">
-                        <a href="installations.php?action=add" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center">
+                        <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenInstall()">
                             <i class="fas fa-car fa-2x mb-2"></i>
                             <span>Nowy montaż</span>
-                        </a>
+                        </button>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="services.php?action=add" class="btn btn-outline-warning quick-action-btn w-100 d-flex flex-column align-items-center">
+                        <button type="button" class="btn btn-outline-warning quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenService()">
                             <i class="fas fa-wrench fa-2x mb-2"></i>
                             <span>Nowy serwis</span>
-                        </a>
+                        </button>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="clients.php?action=add" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center">
+                        <button type="button" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenClient()">
                             <i class="fas fa-user-plus fa-2x mb-2"></i>
                             <span>Nowy klient</span>
-                        </a>
+                        </button>
                     </div>
                     <div class="col-6 col-md-2">
                         <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
@@ -327,5 +340,423 @@ include __DIR__ . '/includes/header.php';
     </div>
 
 </div>
+
+<?php // ===================== MODALE SZYBKICH AKCJI ===================== ?>
+
+<?php if (isAdmin()): ?>
+<!-- Modal: Dodaj urządzenie (z możliwością dodania kilku naraz) -->
+<div class="modal fade" id="dashAddDevicesModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <form method="POST" action="devices.php" id="dashAddDevicesForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="bulk_add_devices">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plus me-2 text-primary"></i>Dodaj urządzenie / urządzenia</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3 pb-3 border-bottom">
+                        <div class="col-md-4">
+                            <label class="form-label required-star">Model urządzenia (wspólny)</label>
+                            <select name="model_id" id="dashAddModel" class="form-select" required>
+                                <option value="">— wybierz model —</option>
+                                <?php
+                                $dashCurMf = '';
+                                foreach ($dashModels as $m):
+                                    if ($m['manufacturer_name'] !== $dashCurMf) {
+                                        if ($dashCurMf) echo '</optgroup>';
+                                        echo '<optgroup label="' . h($m['manufacturer_name']) . '">';
+                                        $dashCurMf = $m['manufacturer_name'];
+                                    }
+                                ?>
+                                <option value="<?= $m['id'] ?>"><?= h($m['name']) ?></option>
+                                <?php endforeach; if ($dashCurMf) echo '</optgroup>'; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Status (wspólny)</label>
+                            <select name="status" class="form-select">
+                                <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'] as $s): ?>
+                                <option value="<?= $s ?>" <?= $s === 'nowy' ? 'selected' : '' ?>><?= h(ucfirst(str_replace('_',' ',$s))) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Data zakupu (wspólna)</label>
+                            <input type="date" name="purchase_date" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Cena zakupu (wspólna)</label>
+                            <div class="input-group">
+                                <input type="number" name="purchase_price" class="form-control" min="0" step="0.01" value="0">
+                                <span class="input-group-text">zł</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-2 d-flex align-items-center justify-content-between">
+                        <span class="fw-semibold text-muted small">Urządzenia do dodania</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="dashDeviceAddRow()"><i class="fas fa-plus me-1"></i>Dodaj wiersz</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:30px">#</th>
+                                    <th>Nr seryjny <span class="text-danger">*</span></th>
+                                    <th>IMEI</th>
+                                    <th>Nr telefonu SIM</th>
+                                    <th>Uwagi</th>
+                                    <th style="width:42px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashDevicesBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-muted small" id="dashDevicesCount">0 urządzeń do dodania</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Zapisz urządzenia</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<datalist id="dashSimListAdd">
+    <?php foreach ($dashSimOptions as $sc): ?>
+    <option value="<?= h($sc) ?>">
+    <?php endforeach; ?>
+</datalist>
+<?php endif; ?>
+
+<!-- Modal: Nowy montaż -->
+<div class="modal fade" id="dashInstallModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="devices.php" id="dashInstallForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="device_install">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-car me-2 text-success"></i>Nowy montaż</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Urządzenie GPS</label>
+                            <select name="device_id" id="dashInstallDevice" class="form-select" required>
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php foreach ($dashAvailableDevices as $dd): ?>
+                                <option value="<?= $dd['id'] ?>" data-sim="<?= h($dd['sim_number'] ?? '') ?>">
+                                    <?= h($dd['serial_number'] . ' — ' . $dd['manufacturer_name'] . ' ' . $dd['model_name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data montażu</label>
+                            <input type="date" name="installation_date" id="dashInstallDate" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Nr telefonu SIM</label>
+                            <input type="text" name="sim_number" id="dashInstallSim" class="form-control"
+                                   list="dashSimListInstall" placeholder="np. +48 600 000 000" autocomplete="off">
+                            <datalist id="dashSimListInstall">
+                                <?php foreach ($dashSimOptions as $sc): ?>
+                                <option value="<?= h($sc) ?>">
+                                <?php endforeach; ?>
+                            </datalist>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Klient</label>
+                            <select name="client_id" id="dashInstallClient" class="form-select">
+                                <option value="">— brak / wybierz klienta —</option>
+                                <?php foreach ($dashClients as $cl): ?>
+                                <option value="<?= $cl['id'] ?>">
+                                    <?= h($cl['company_name'] ? $cl['company_name'] . ' — ' . $cl['contact_name'] : $cl['contact_name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Pojazd</label>
+                            <select name="vehicle_id" id="dashInstallVehicle" class="form-select mb-2">
+                                <option value="">— wybierz z listy —</option>
+                                <?php foreach ($dashVehicles as $veh): ?>
+                                <option value="<?= $veh['id'] ?>" data-client="<?= (int)$veh['client_id'] ?>">
+                                    <?= h($veh['registration'] . ($veh['make'] ? ' ' . $veh['make'] : '') . ($veh['model_name'] ? ' ' . $veh['model_name'] : '')) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="text-muted small">lub wpisz nowy numer rejestracyjny:</span>
+                                <input type="text" name="vehicle_registration_new" id="dashInstallVehicleReg"
+                                       class="form-control form-control-sm" style="max-width:160px" placeholder="np. WA12345">
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Nowy serwis -->
+<div class="modal fade" id="dashServiceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="services.php" id="dashServiceForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-wrench me-2 text-warning"></i>Nowy serwis</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Urządzenie GPS</label>
+                            <input type="text" id="dashSvcDevSearch" class="form-control form-control-sm mb-1"
+                                   placeholder="Szukaj urządzenia (nr seryjny, model…)" autocomplete="off">
+                            <select name="device_id" id="dashSvcDevSelect" class="form-select" required size="4" style="height:auto">
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php foreach ($dashAvailableDevices as $dd): ?>
+                                <option value="<?= $dd['id'] ?>"
+                                        data-search="<?= h(strtolower($dd['serial_number'] . ' ' . $dd['model_name'] . ' ' . $dd['manufacturer_name'])) ?>">
+                                    <?= h($dd['serial_number']) ?> — <?= h($dd['manufacturer_name'] . ' ' . $dd['model_name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Powiązany montaż (aktywny)</label>
+                            <select name="installation_id" class="form-select">
+                                <option value="">— brak —</option>
+                                <?php foreach ($dashActiveInstallations as $ainst): ?>
+                                <option value="<?= $ainst['id'] ?>">
+                                    <?= h($ainst['registration'] . ' — ' . $ainst['serial_number']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Typ serwisu</label>
+                            <select name="type" class="form-select">
+                                <option value="przeglad" selected>Przegląd</option>
+                                <option value="naprawa">Naprawa</option>
+                                <option value="wymiana">Wymiana</option>
+                                <option value="aktualizacja">Aktualizacja firmware</option>
+                                <option value="inne">Inne</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Status</label>
+                            <select name="status" class="form-select">
+                                <option value="zaplanowany" selected>Zaplanowany</option>
+                                <option value="w_trakcie">W trakcie</option>
+                                <option value="zakończony">Zakończony</option>
+                                <option value="anulowany">Anulowany</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data zaplanowana</label>
+                            <input type="date" name="planned_date" id="dashSvcPlannedDate" class="form-control" required>
+                        </div>
+                        <?php if (!empty($dashUsers)): ?>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik</label>
+                            <select name="technician_id" class="form-select">
+                                <option value="">— aktualny użytkownik —</option>
+                                <?php foreach ($dashUsers as $u): ?>
+                                <option value="<?= $u['id'] ?>"><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php endif; ?>
+                        <div class="col-12">
+                            <label class="form-label">Opis / Problem</label>
+                            <textarea name="description" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-warning btn-sm text-white"><i class="fas fa-save me-1"></i>Zarejestruj serwis</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Nowy klient -->
+<div class="modal fade" id="dashClientModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="clients.php" id="dashClientForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="active" value="1">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-user-plus me-2 text-secondary"></i>Nowy klient</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Nazwa firmy</label>
+                            <input type="text" name="company_name" class="form-control" placeholder="Opcjonalne">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Imię i nazwisko kontaktu</label>
+                            <input type="text" name="contact_name" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">E-mail</label>
+                            <input type="email" name="email" class="form-control">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Telefon</label>
+                            <input type="tel" name="phone" class="form-control">
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label">Adres</label>
+                            <input type="text" name="address" class="form-control">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Kod pocztowy</label>
+                            <input type="text" name="postal_code" class="form-control" placeholder="00-000">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Miasto</label>
+                            <input type="text" name="city" class="form-control">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">NIP</label>
+                            <input type="text" name="nip" class="form-control" placeholder="000-000-00-00">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-save me-1"></i>Dodaj klienta</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== MODAL: Dodaj urządzenia =====
+var dashDevRowCount = 0;
+function dashOpenAddDevice() {
+    dashDevRowCount = 0;
+    document.getElementById('dashDevicesBody').innerHTML = '';
+    document.getElementById('dashAddModel').value = '';
+    document.getElementById('dashDevicesCount').textContent = '0 urządzeń do dodania';
+    dashDeviceAddRow();
+    new bootstrap.Modal(document.getElementById('dashAddDevicesModal')).show();
+}
+function dashDeviceAddRow() {
+    dashDevRowCount++;
+    var n = dashDevRowCount;
+    var tbody = document.getElementById('dashDevicesBody');
+    var tr = document.createElement('tr');
+    tr.id = 'dash-dev-row-' + n;
+    tr.innerHTML =
+        '<td class="text-muted text-center align-middle">' + n + '</td>' +
+        '<td><input type="text" name="serial_numbers[]" class="form-control form-control-sm" placeholder="np. SN123456" required></td>' +
+        '<td><input type="text" name="imeis[]" class="form-control form-control-sm" placeholder="15 cyfr" maxlength="20"></td>' +
+        '<td><input type="text" name="sim_numbers[]" class="form-control form-control-sm" placeholder="np. +48 600 000 000" list="dashSimListAdd"></td>' +
+        '<td><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
+        '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="dashDeviceRemoveRow(' + n + ')" title="Usuń"><i class="fas fa-times"></i></button></td>';
+    tbody.appendChild(tr);
+    tr.querySelector('input[name="serial_numbers[]"]').focus();
+    dashUpdateDevCount();
+}
+function dashDeviceRemoveRow(n) {
+    var row = document.getElementById('dash-dev-row-' + n);
+    if (row) { row.remove(); dashUpdateDevCount(); }
+}
+function dashUpdateDevCount() {
+    var rows = document.querySelectorAll('#dashDevicesBody tr').length;
+    var el = document.getElementById('dashDevicesCount');
+    if (!el) return;
+    if (rows === 0) el.textContent = '0 urządzeń do dodania';
+    else if (rows === 1) el.textContent = '1 urządzenie do dodania';
+    else if (rows <= 4) el.textContent = rows + ' urządzenia do dodania';
+    else el.textContent = rows + ' urządzeń do dodania';
+}
+
+// ===== MODAL: Nowy montaż =====
+function dashOpenInstall() {
+    document.getElementById('dashInstallDevice').value = '';
+    document.getElementById('dashInstallSim').value = '';
+    document.getElementById('dashInstallDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('dashInstallClient').value = '';
+    document.getElementById('dashInstallVehicle').value = '';
+    document.getElementById('dashInstallVehicleReg').value = '';
+    dashFilterInstallVehicles();
+    new bootstrap.Modal(document.getElementById('dashInstallModal')).show();
+}
+function dashFilterInstallVehicles() {
+    var clientId = document.getElementById('dashInstallClient').value;
+    document.querySelectorAll('#dashInstallVehicle option').forEach(function(opt) {
+        if (!opt.value) { opt.style.display = ''; return; }
+        opt.style.display = (!clientId || !opt.dataset.client || parseInt(opt.dataset.client) === parseInt(clientId)) ? '' : 'none';
+    });
+    document.getElementById('dashInstallVehicle').value = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    var devSel = document.getElementById('dashInstallDevice');
+    if (devSel) {
+        devSel.addEventListener('change', function() {
+            var opt = devSel.options[devSel.selectedIndex];
+            if (opt) document.getElementById('dashInstallSim').value = opt.dataset.sim || '';
+        });
+    }
+    var cliSel = document.getElementById('dashInstallClient');
+    if (cliSel) cliSel.addEventListener('change', dashFilterInstallVehicles);
+
+    // ===== Wyszukiwanie w selekcji urządzenia dla serwisu =====
+    var svcSearch = document.getElementById('dashSvcDevSearch');
+    if (svcSearch) {
+        svcSearch.addEventListener('input', function() {
+            var q = svcSearch.value.toLowerCase().trim();
+            document.querySelectorAll('#dashSvcDevSelect option').forEach(function(opt) {
+                if (!opt.value) { opt.style.display = ''; return; }
+                opt.style.display = (!q || (opt.dataset.search || '').includes(q)) ? '' : 'none';
+            });
+        });
+    }
+});
+
+// ===== MODAL: Nowy serwis =====
+function dashOpenService() {
+    document.getElementById('dashSvcDevSearch').value = '';
+    document.getElementById('dashSvcDevSelect').value = '';
+    document.querySelectorAll('#dashSvcDevSelect option').forEach(function(opt) { opt.style.display = ''; });
+    document.getElementById('dashSvcPlannedDate').value = new Date().toISOString().slice(0, 10);
+    new bootstrap.Modal(document.getElementById('dashServiceModal')).show();
+}
+
+// ===== MODAL: Nowy klient =====
+function dashOpenClient() {
+    document.getElementById('dashClientForm').reset();
+    new bootstrap.Modal(document.getElementById('dashClientModal')).show();
+}
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
