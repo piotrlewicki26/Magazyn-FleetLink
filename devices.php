@@ -221,6 +221,101 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flashSuccess('Zaktualizowano ' . $label . '.');
         redirect(getBaseUrl() . 'devices.php');
 
+    } elseif ($postAction === 'quick_add_client_device') {
+        header('Content-Type: application/json');
+        $qContactName = sanitize($_POST['contact_name'] ?? '');
+        $qCompanyName = sanitize($_POST['company_name'] ?? '');
+        $qPhone       = sanitize($_POST['phone'] ?? '');
+        $qEmail       = sanitize($_POST['email'] ?? '');
+        if (empty($qContactName)) { echo json_encode(['error' => 'Imię i nazwisko kontaktu jest wymagane.']); exit; }
+        $db->prepare("INSERT INTO clients (contact_name, company_name, phone, email) VALUES (?,?,?,?)")
+           ->execute([$qContactName, $qCompanyName, $qPhone, $qEmail]);
+        $newClientId = $db->lastInsertId();
+        echo json_encode(['id' => $newClientId, 'label' => ($qCompanyName ? $qCompanyName . ' — ' : '') . $qContactName]);
+        exit;
+
+    } elseif ($postAction === 'device_install') {
+        $instDeviceId   = (int)($_POST['device_id'] ?? 0);
+        $instClientId   = (int)($_POST['client_id'] ?? 0) ?: null;
+        $instVehicleId  = (int)($_POST['vehicle_id'] ?? 0) ?: null;
+        $instVehicleReg = strtoupper(trim(sanitize($_POST['vehicle_registration_new'] ?? '')));
+        $instDate       = sanitize($_POST['installation_date'] ?? '');
+        $instSimNumber  = sanitize($_POST['sim_number'] ?? '');
+        $instNotes      = sanitize($_POST['notes'] ?? '');
+        $currentUser    = getCurrentUser();
+
+        if (!$instDeviceId || !$instDate) {
+            flashError('Urządzenie i data montażu są wymagane.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        // Resolve or create vehicle
+        if (!$instVehicleId && $instVehicleReg) {
+            $vChk = $db->prepare("SELECT id FROM vehicles WHERE registration=? LIMIT 1");
+            $vChk->execute([$instVehicleReg]);
+            $vRow = $vChk->fetch();
+            if ($vRow) {
+                $instVehicleId = $vRow['id'];
+            } else {
+                $db->prepare("INSERT INTO vehicles (registration, client_id) VALUES (?,?)")
+                   ->execute([$instVehicleReg, $instClientId]);
+                $instVehicleId = (int)$db->lastInsertId();
+            }
+        }
+        if (!$instVehicleId) {
+            flashError('Wybierz pojazd lub wpisz numer rejestracyjny.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        // Check device availability
+        $devChk = $db->prepare("SELECT id, model_id, status FROM devices WHERE id=? LIMIT 1");
+        $devChk->execute([$instDeviceId]);
+        $devRow = $devChk->fetch();
+        if (!$devRow) { flashError('Urządzenie nie istnieje.'); redirect(getBaseUrl() . 'devices.php'); }
+
+        $db->beginTransaction();
+        try {
+            // Close any existing active installation for this device
+            $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE device_id=? AND status='aktywna'")
+               ->execute([$instDate, $instDeviceId]);
+
+            // Create new installation
+            $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes) VALUES (?,?,?,?,?,?,?)")
+               ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null]);
+
+            // Update device status and optionally SIM number
+            $prevStatus = $devRow['status'];
+            $simUpdate = $instSimNumber !== '' ? $instSimNumber : null;
+            if ($instSimNumber !== '') {
+                $db->prepare("UPDATE devices SET status='zamontowany', sim_number=? WHERE id=?")
+                   ->execute([$instSimNumber, $instDeviceId]);
+                // Sync sim_cards
+                try {
+                    $exSim = $db->prepare("SELECT id FROM sim_cards WHERE device_id=? LIMIT 1");
+                    $exSim->execute([$instDeviceId]);
+                    $exSimRow = $exSim->fetch();
+                    if ($exSimRow) {
+                        $db->prepare("UPDATE sim_cards SET phone_number=? WHERE id=?")->execute([$instSimNumber, $exSimRow['id']]);
+                    } else {
+                        $chkSim = $db->prepare("SELECT id FROM sim_cards WHERE phone_number=? LIMIT 1");
+                        $chkSim->execute([$instSimNumber]);
+                        if (!$chkSim->fetch()) {
+                            $db->prepare("INSERT INTO sim_cards (phone_number, device_id) VALUES (?,?)")->execute([$instSimNumber, $instDeviceId]);
+                        } else {
+                            $db->prepare("UPDATE sim_cards SET device_id=? WHERE phone_number=? AND device_id IS NULL")->execute([$instDeviceId, $instSimNumber]);
+                        }
+                    }
+                } catch (PDOException $e) {}
+            } else {
+                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$instDeviceId]);
+            }
+            adjustInventoryForStatusChange($db, $devRow['model_id'], $prevStatus, 'zamontowany');
+            $db->commit();
+            flashSuccess('Montaż został zarejestrowany.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd podczas rejestracji montażu: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'devices.php');
+
     } elseif ($postAction === 'bulk_delete') {
         if (!isAdmin()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'devices.php'); }
         $bulkDelIds = array_map('intval', $_POST['device_ids'] ?? []);
@@ -363,10 +458,14 @@ if ($action === 'list') {
 
 // SIM cards list for datalist (available / unassigned) — used in SIM-edit modal
 $simCardOptions = [];
+$clientsList    = [];
+$vehiclesList   = [];
 if ($action === 'list') {
     try {
         $simCardOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN);
     } catch (Exception $e) { $simCardOptions = []; }
+    $clientsList = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
+    $vehiclesList = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
 }
 
 $activePage = 'devices';
@@ -466,7 +565,7 @@ include __DIR__ . '/includes/header.php';
                     <?php if (isAdmin()): ?>
                     <th style="width:36px"><input type="checkbox" id="checkAll" form="bulkPurchaseForm" title="Zaznacz wszystkie"></th>
                     <?php endif; ?>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th><th>Data zakupu</th>
                     <?php if (isAdmin()): ?><th>Cena zakupu</th><?php endif; ?>
                     <th>Akcje</th>
                 </tr>
@@ -487,13 +586,10 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $d['sim_number'] ? h($d['sim_number']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?php $clientLabel = $d['company_name'] ?: ($d['contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
                     <td>
-                        <?php if ($d['installation_date']): ?>
-                            <?= formatDate($d['installation_date']) ?>
-                        <?php elseif ($d['purchase_date']): ?>
-                            <?= formatDate($d['purchase_date']) ?>
-                        <?php else: ?>
-                            <span class="text-muted">—</span>
-                        <?php endif; ?>
+                        <?= $d['installation_date'] ? formatDate($d['installation_date']) : '<span class="text-muted">—</span>' ?>
+                    </td>
+                    <td>
+                        <?= $d['purchase_date'] ? formatDate($d['purchase_date']) : '<span class="text-muted">—</span>' ?>
                     </td>
                     <?php if (isAdmin()): ?>
                     <td><?= $d['purchase_price'] > 0 ? formatMoney($d['purchase_price']) : '<span class="text-muted">—</span>' ?></td>
@@ -510,6 +606,10 @@ include __DIR__ . '/includes/header.php';
                                     data-confirm="Usuń urządzenie <?= h($d['serial_number']) ?>?"><i class="fas fa-trash"></i></button>
                         </form>
                         <?php endif; ?>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action" title="Montaż"
+                                onclick="openInstallModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
+                            <i class="fas fa-car"></i>
+                        </button>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień nr SIM"
                                 onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
                             <i class="fas fa-sim-card"></i>
@@ -518,7 +618,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($devices)): ?>
-                <tr><td colspan="<?= isAdmin() ? 11 : 9 ?>" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
+                <tr><td colspan="<?= isAdmin() ? 12 : 10 ?>" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -557,6 +657,169 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+<!-- Install modal -->
+<div class="modal fade" id="installModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" id="installForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="device_install">
+                <input type="hidden" name="device_id" id="installDeviceId" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-car me-2 text-success"></i>Montaż urządzenia <span id="installDeviceSerial" class="text-muted fs-6 ms-1"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data montażu</label>
+                            <input type="date" name="installation_date" id="installDate" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Nr telefonu SIM</label>
+                            <input type="text" name="sim_number" id="installSim" class="form-control"
+                                   list="installSimList" placeholder="np. +48 600 000 000" autocomplete="off">
+                            <datalist id="installSimList">
+                                <?php foreach ($simCardOptions as $sc): ?>
+                                <option value="<?= h($sc) ?>">
+                                <?php endforeach; ?>
+                            </datalist>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Klient</label>
+                            <div class="d-flex gap-2 align-items-start">
+                                <select name="client_id" id="installClientSelect" class="form-select">
+                                    <option value="">— brak / wybierz klienta —</option>
+                                    <?php foreach ($clientsList as $cl): ?>
+                                    <option value="<?= $cl['id'] ?>">
+                                        <?= h($cl['company_name'] ? $cl['company_name'] . ' — ' . $cl['contact_name'] : $cl['contact_name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" id="showAddClientBtn">
+                                    <i class="fas fa-user-plus me-1"></i>Dodaj klienta
+                                </button>
+                            </div>
+                            <!-- Inline add client -->
+                            <div id="addClientForm" class="card card-body mt-2 p-2 d-none bg-light">
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <input type="text" id="newClientContactName" class="form-control form-control-sm" placeholder="Imię i nazwisko *">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <input type="text" id="newClientCompanyName" class="form-control form-control-sm" placeholder="Firma">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <input type="text" id="newClientPhone" class="form-control form-control-sm" placeholder="Telefon">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <input type="email" id="newClientEmail" class="form-control form-control-sm" placeholder="E-mail">
+                                    </div>
+                                    <div class="col-12 d-flex gap-2">
+                                        <button type="button" class="btn btn-sm btn-success" id="saveNewClientBtn"><i class="fas fa-check me-1"></i>Zapisz klienta</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="cancelAddClientBtn">Anuluj</button>
+                                        <span id="addClientMsg" class="text-danger small align-self-center"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Pojazd</label>
+                            <select name="vehicle_id" id="installVehicleSelect" class="form-select mb-2">
+                                <option value="">— wybierz z listy —</option>
+                                <?php foreach ($vehiclesList as $veh): ?>
+                                <option value="<?= $veh['id'] ?>" data-client="<?= (int)$veh['client_id'] ?>">
+                                    <?= h($veh['registration'] . ($veh['make'] ? ' ' . $veh['make'] : '') . ($veh['model_name'] ? ' ' . $veh['model_name'] : '')) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="text-muted small">lub wpisz nowy numer rejestracyjny:</span>
+                                <input type="text" name="vehicle_registration_new" id="installVehicleReg" class="form-control form-control-sm" style="max-width:160px" placeholder="np. WA12345">
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openInstallModal(deviceId, serial, currentSim) {
+    document.getElementById('installDeviceId').value   = deviceId;
+    document.getElementById('installDeviceSerial').textContent = serial;
+    document.getElementById('installSim').value        = currentSim || '';
+    document.getElementById('installDate').value       = new Date().toISOString().slice(0, 10);
+    document.getElementById('installVehicleSelect').value = '';
+    document.getElementById('installVehicleReg').value = '';
+    document.getElementById('installClientSelect').value = '';
+    document.getElementById('addClientForm').classList.add('d-none');
+    filterInstallVehicles();
+    var modal = new bootstrap.Modal(document.getElementById('installModal'));
+    modal.show();
+}
+function filterInstallVehicles() {
+    var clientId = document.getElementById('installClientSelect').value;
+    document.querySelectorAll('#installVehicleSelect option').forEach(function(opt) {
+        if (!opt.value) { opt.style.display = ''; return; }
+        if (!clientId || opt.dataset.client == clientId || !opt.dataset.client || opt.dataset.client == '0') {
+            opt.style.display = '';
+        } else {
+            opt.style.display = 'none';
+        }
+    });
+    document.getElementById('installVehicleSelect').value = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    var installClientSel = document.getElementById('installClientSelect');
+    if (!installClientSel) return;
+    installClientSel.addEventListener('change', filterInstallVehicles);
+    document.getElementById('showAddClientBtn').addEventListener('click', function() {
+        document.getElementById('addClientForm').classList.toggle('d-none');
+    });
+    document.getElementById('cancelAddClientBtn').addEventListener('click', function() {
+        document.getElementById('addClientForm').classList.add('d-none');
+    });
+    document.getElementById('saveNewClientBtn').addEventListener('click', function() {
+        var contactName = document.getElementById('newClientContactName').value.trim();
+        if (!contactName) { document.getElementById('addClientMsg').textContent = 'Imię i nazwisko jest wymagane.'; return; }
+        document.getElementById('addClientMsg').textContent = '';
+        var fd = new FormData();
+        fd.append('csrf_token', document.querySelector('#installForm input[name=csrf_token]').value);
+        fd.append('action', 'quick_add_client_device');
+        fd.append('contact_name', contactName);
+        fd.append('company_name', document.getElementById('newClientCompanyName').value.trim());
+        fd.append('phone', document.getElementById('newClientPhone').value.trim());
+        fd.append('email', document.getElementById('newClientEmail').value.trim());
+        fetch('devices.php', { method: 'POST', body: fd })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) { document.getElementById('addClientMsg').textContent = data.error; return; }
+                var sel = document.getElementById('installClientSelect');
+                var opt = document.createElement('option');
+                opt.value = data.id;
+                opt.textContent = data.label;
+                opt.selected = true;
+                sel.appendChild(opt);
+                document.getElementById('addClientForm').classList.add('d-none');
+                document.getElementById('newClientContactName').value = '';
+                document.getElementById('newClientCompanyName').value = '';
+                document.getElementById('newClientPhone').value = '';
+                document.getElementById('newClientEmail').value = '';
+                filterInstallVehicles();
+            })
+            .catch(function() { document.getElementById('addClientMsg').textContent = 'Błąd połączenia.'; });
+    });
+});
+</script>
 <script>
 function openSimEdit(deviceId, currentSim) {
     document.getElementById('simEditDeviceId').value = deviceId;
@@ -646,6 +909,16 @@ function openSimEdit(deviceId, currentSim) {
                     <tr><th class="text-muted">IMEI</th><td><?= h($device['imei'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Nr telefonu SIM</th><td><?= h($device['sim_number'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Status</th><td><?= getStatusBadge($device['status'], 'device') ?></td></tr>
+                    <?php
+                        $activeInst = null;
+                        foreach ($deviceInstallations as $inst) {
+                            if ($inst['status'] === 'aktywna') { $activeInst = $inst; break; }
+                        }
+                    ?>
+                    <?php if ($activeInst): ?>
+                    <tr><th class="text-muted">Data montażu</th><td><?= formatDate($activeInst['installation_date']) ?></td></tr>
+                    <tr><th class="text-muted">Pojazd (montaż)</th><td><?= h($activeInst['registration'] . ($activeInst['make'] ? ' ' . $activeInst['make'] : '')) ?></td></tr>
+                    <?php endif; ?>
                     <tr><th class="text-muted">Data zakupu</th><td><?= formatDate($device['purchase_date']) ?></td></tr>
                     <tr><th class="text-muted">Cena zakupu</th><td><?= $device['purchase_price'] ? formatMoney($device['purchase_price']) : '—' ?></td></tr>
                     <?php if ($device['status'] === 'sprzedany'): ?>
