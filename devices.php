@@ -182,6 +182,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Nie można usunąć urządzenia — posiada powiązane rekordy.');
         }
         redirect(getBaseUrl() . 'devices.php');
+
+    } elseif ($postAction === 'bulk_purchase') {
+        if (!isAdmin()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'devices.php'); }
+        $bulkIds = array_map('intval', $_POST['device_ids'] ?? []);
+        $bulkIds = array_filter($bulkIds); // remove zeros
+        if (empty($bulkIds)) {
+            flashError('Nie wybrano żadnych urządzeń.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        $bulkPrice = trim(str_replace(',', '.', $_POST['bulk_purchase_price'] ?? ''));
+        $bulkDate  = sanitize($_POST['bulk_purchase_date'] ?? '');
+        $setParts   = [];
+        $setParams  = [];
+        if ($bulkPrice !== '') {
+            $setParts[]  = 'purchase_price=?';
+            $setParams[] = (float)$bulkPrice;
+        }
+        if ($bulkDate !== '') {
+            $setParts[]  = 'purchase_date=?';
+            $setParams[] = $bulkDate;
+        }
+        if (empty($setParts)) {
+            flashError('Podaj cenę zakupu lub datę zakupu do przypisania.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        $placeholders = implode(',', array_fill(0, count($bulkIds), '?'));
+        $db->prepare("UPDATE devices SET " . implode(',', $setParts) . " WHERE id IN ($placeholders)")
+           ->execute(array_merge($setParams, $bulkIds));
+        $n = count($bulkIds);
+        if ($n === 1) {
+            $label = '1 urządzenie';
+        } elseif ($n <= 4) {
+            $label = $n . ' urządzenia';
+        } else {
+            $label = $n . ' urządzeń';
+        }
+        flashSuccess('Zaktualizowano ' . $label . '.');
+        redirect(getBaseUrl() . 'devices.php');
     }
 }
 
@@ -259,6 +297,7 @@ if ($action === 'list') {
 
     $sql = "
         SELECT d.id, d.serial_number, d.imei, d.sim_number, d.status, d.purchase_date,
+               d.purchase_price,
                m.name as model_name, mf.name as manufacturer_name,
                v.registration as vehicle_registration,
                c.contact_name, c.company_name,
@@ -278,7 +317,7 @@ if ($action === 'list') {
     }
     if ($filterModel) { $sql .= " AND d.model_id=?"; $params[] = $filterModel; }
     if ($filterStatus) { $sql .= " AND d.status=?"; $params[] = $filterStatus; }
-    $sql .= " ORDER BY d.created_at DESC";
+    $sql .= " ORDER BY d.id DESC";
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -352,12 +391,20 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th><th>Akcje</th>
+                    <?php if (isAdmin()): ?>
+                    <th style="width:36px"><input type="checkbox" id="checkAll" form="bulkPurchaseForm" title="Zaznacz wszystkie"></th>
+                    <?php endif; ?>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th>
+                    <?php if (isAdmin()): ?><th>Cena zakupu</th><?php endif; ?>
+                    <th>Akcje</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($devices as $d): ?>
                 <tr>
+                    <?php if (isAdmin()): ?>
+                    <td><input type="checkbox" name="device_ids[]" value="<?= $d['id'] ?>" form="bulkPurchaseForm" class="device-checkbox"></td>
+                    <?php endif; ?>
                     <td class="fw-semibold">
                         <a href="devices.php?action=view&id=<?= $d['id'] ?>"><?= h($d['serial_number']) ?></a>
                     </td>
@@ -377,6 +424,9 @@ include __DIR__ . '/includes/header.php';
                             <span class="text-muted">—</span>
                         <?php endif; ?>
                     </td>
+                    <?php if (isAdmin()): ?>
+                    <td><?= $d['purchase_price'] > 0 ? formatMoney($d['purchase_price']) : '<span class="text-muted">—</span>' ?></td>
+                    <?php endif; ?>
                     <td>
                         <a href="devices.php?action=view&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Podgląd"><i class="fas fa-eye"></i></a>
                         <?php if (isAdmin()): ?>
@@ -397,7 +447,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($devices)): ?>
-                <tr><td colspan="9" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
+                <tr><td colspan="<?= isAdmin() ? 11 : 9 ?>" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -405,6 +455,71 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php // SIM-edit modal (all roles) ?>
+<?php if (isAdmin()): ?>
+<!-- Bulk purchase form (outside table to avoid nested-form issue) -->
+<form id="bulkPurchaseForm" method="POST" class="mt-3">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="bulk_purchase">
+    <div class="card border-warning">
+        <div class="card-header d-flex align-items-center gap-2 bg-warning bg-opacity-10">
+            <i class="fas fa-tags text-warning"></i>
+            <strong>Masowe przypisanie ceny i daty zakupu</strong>
+            <span class="text-muted small ms-1" id="selectedCount">(zaznacz urządzenia powyżej)</span>
+        </div>
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm mb-1">Cena zakupu (PLN)</label>
+                    <input type="number" name="bulk_purchase_price" class="form-control form-control-sm"
+                           min="0" step="0.01" placeholder="np. 299.00">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm mb-1">Data zakupu</label>
+                    <input type="date" name="bulk_purchase_date" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-warning" id="bulkSubmitBtn" disabled>
+                        <i class="fas fa-save me-1"></i>Zapisz dla zaznaczonych
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+<script>
+(function () {
+    var checkAll = document.getElementById('checkAll');
+    var countEl  = document.getElementById('selectedCount');
+    var submitBtn = document.getElementById('bulkSubmitBtn');
+
+    function updateCount(checkedCount) {
+        countEl.textContent = checkedCount > 0 ? '(' + checkedCount + ' urządzeń zaznaczonych)' : '(zaznacz urządzenia powyżej)';
+        submitBtn.disabled = checkedCount === 0;
+    }
+
+    if (checkAll) {
+        checkAll.addEventListener('change', function () {
+            document.querySelectorAll('.device-checkbox').forEach(function (cb) {
+                cb.checked = checkAll.checked;
+            });
+            updateCount(checkAll.checked ? document.querySelectorAll('.device-checkbox').length : 0);
+        });
+    }
+
+    document.querySelectorAll('.device-checkbox').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var all = document.querySelectorAll('.device-checkbox');
+            var checkedCount = 0;
+            all.forEach(function (c) { if (c.checked) checkedCount++; });
+            checkAll.checked = checkedCount === all.length;
+            checkAll.indeterminate = checkedCount > 0 && checkedCount < all.length;
+            updateCount(checkedCount);
+        });
+    });
+})();
+</script>
+<?php endif; ?>
+
 <!-- SIM-edit modal -->
 <div class="modal fade" id="simEditModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
