@@ -124,6 +124,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Stats Cards -->
+<?php if (!isTechnician()): ?>
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">
         <div class="card stat-card text-white" style="background: linear-gradient(135deg, #0d6efd, #0b5ed7)">
@@ -189,7 +190,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
-</div>
+<?php endif; ?>
 
 <div class="row g-3">
     <!-- Recent Installations -->
@@ -284,6 +285,12 @@ include __DIR__ . '/includes/header.php';
                             <span>Dodaj urządzenie</span>
                         </button>
                     </div>
+                    <div class="col-6 col-md-2">
+                        <a href="sim_cards.php?action=add" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center">
+                            <i class="fas fa-sim-card fa-2x mb-2"></i>
+                            <span>Dodaj kartę SIM</span>
+                        </a>
+                    </div>
                     <?php endif; ?>
                     <div class="col-6 col-md-2">
                         <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenInstall()">
@@ -297,24 +304,28 @@ include __DIR__ . '/includes/header.php';
                             <span>Nowy serwis</span>
                         </button>
                     </div>
+                    <?php if (!isTechnician()): ?>
                     <div class="col-6 col-md-2">
                         <button type="button" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenClient()">
                             <i class="fas fa-user-plus fa-2x mb-2"></i>
                             <span>Nowy klient</span>
                         </button>
                     </div>
+                    <?php endif; ?>
                     <div class="col-6 col-md-2">
                         <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
                             <i class="fas fa-calendar-alt fa-2x mb-2"></i>
                             <span>Kalendarz</span>
                         </a>
                     </div>
+                    <?php if (!isTechnician()): ?>
                     <div class="col-6 col-md-2">
                         <a href="statistics.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
                             <i class="fas fa-chart-bar fa-2x mb-2"></i>
                             <span>Statystyki</span>
                         </a>
                     </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
