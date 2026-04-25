@@ -126,7 +126,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Stats Cards -->
-<?php if (!isTechnician()): ?>
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">
         <div class="card stat-card text-white" style="background: linear-gradient(135deg, #0d6efd, #0b5ed7)">
@@ -149,7 +148,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
                     <div class="stat-number"><?= $stats['active_installations'] ?></div>
-                    <div class="small opacity-75">Aktywnych montaży</div>
+                    <div class="small opacity-75">Montaże</div>
                 </div>
                 <i class="fas fa-car stat-icon"></i>
             </div>
@@ -165,7 +164,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
                     <div class="stat-number"><?= $stats['pending_services'] ?></div>
-                    <div class="small opacity-75">Zaplanowanych serwisów</div>
+                    <div class="small opacity-75">Serwisy</div>
                 </div>
                 <i class="fas fa-wrench stat-icon"></i>
             </div>
@@ -181,7 +180,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
                     <div class="stat-number"><?= $stats['total_stock'] ?></div>
-                    <div class="small opacity-75">Szt. w magazynie</div>
+                    <div class="small opacity-75">Magazyn</div>
                 </div>
                 <i class="fas fa-warehouse stat-icon"></i>
             </div>
@@ -192,7 +191,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
-<?php endif; ?>
+</div>
 
 <div class="row g-3">
     <!-- Recent Installations -->
