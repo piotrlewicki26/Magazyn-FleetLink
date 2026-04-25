@@ -162,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
-        redirect(getBaseUrl() . 'protocols.php?action=view&id=' . $protoId);
+        redirect(getBaseUrl() . 'protocols.php' . ($protoId ? '?action=view&id=' . $protoId : ''));
     }
 }
 
@@ -343,22 +343,42 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover mb-0">
             <thead><tr><th>Nr protokołu</th><th>Typ</th><th>Data</th><th>Pojazd</th><th>Urządzenie</th><th>Technik</th><th>Akcje</th></tr></thead>
             <tbody>
-                <?php foreach ($protocols as $p): ?>
+                <?php
+                $typeLabel = ['PP' => 'Przekazania', 'PU' => 'Uruchomienia', 'PS' => 'Serwisowy'];
+                $typeColor = ['PP' => 'primary', 'PU' => 'success', 'PS' => 'warning'];
+                foreach ($protocols as $p): ?>
                 <tr>
-                    <td class="fw-bold"><a href="protocols.php?action=view&id=<?= $p['id'] ?>"><?= h($p['protocol_number']) ?></a></td>
-                    <td>
-                        <?php
-                        $typeLabel = ['PP' => 'Przekazania', 'PU' => 'Uruchomienia', 'PS' => 'Serwisowy'];
-                        $typeColor = ['PP' => 'primary', 'PU' => 'success', 'PS' => 'warning'];
-                        ?>
-                        <span class="badge bg-<?= $typeColor[$p['type']] ?? 'secondary' ?>"><?= $typeLabel[$p['type']] ?? h($p['type']) ?></span>
+                    <td class="fw-bold">
+                        <a href="#" onclick="showProtocolPreview(<?= htmlspecialchars(json_encode([
+                            'id'             => $p['id'],
+                            'protocol_number'=> $p['protocol_number'],
+                            'type'           => $p['type'],
+                            'date'           => $p['date'],
+                            'registration'   => $p['registration'] ?? '',
+                            'serial_number'  => $p['serial_number'] ?? '',
+                            'technician_name'=> $p['technician_name'] ?? '',
+                        ]), ENT_QUOTES) ?>); return false;"><?= h($p['protocol_number']) ?></a>
                     </td>
+                    <td><span class="badge bg-<?= $typeColor[$p['type']] ?? 'secondary' ?>"><?= $typeLabel[$p['type']] ?? h($p['type']) ?></span></td>
                     <td><?= formatDate($p['date']) ?></td>
                     <td><?= h($p['registration'] ?? '—') ?></td>
                     <td><?= h($p['serial_number'] ?? '—') ?></td>
                     <td><?= h($p['technician_name'] ?? '—') ?></td>
                     <td>
-                        <a href="protocols.php?action=view&id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showProtocolPreview(<?= htmlspecialchars(json_encode([
+                                    'id'             => $p['id'],
+                                    'protocol_number'=> $p['protocol_number'],
+                                    'type'           => $p['type'],
+                                    'date'           => $p['date'],
+                                    'registration'   => $p['registration'] ?? '',
+                                    'serial_number'  => $p['serial_number'] ?? '',
+                                    'technician_name'=> $p['technician_name'] ?? '',
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action"
+                                onclick="openProtocolSendModal(<?= $p['id'] ?>, <?= htmlspecialchars(json_encode($p['protocol_number']), ENT_QUOTES) ?>)"
+                                title="Wyślij e-mailem"><i class="fas fa-envelope"></i></button>
                         <a href="protocols.php?action=print&id=<?= $p['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary btn-action"><i class="fas fa-print"></i></a>
                         <a href="protocols.php?action=edit&id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
                         <?php if (isAdmin()): ?>
@@ -378,6 +398,96 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<!-- Protocol Preview Modal -->
+<div class="modal fade" id="protocolPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="protocolPreviewTitle"><i class="fas fa-clipboard-check me-2 text-primary"></i>Podgląd protokołu</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="protocolPreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <a id="protocolPreviewPrintBtn" href="#" target="_blank" class="btn btn-outline-dark btn-sm"><i class="fas fa-print me-1"></i>Drukuj</a>
+                <button type="button" id="protocolPreviewSendBtn" class="btn btn-success btn-sm"><i class="fas fa-envelope me-1"></i>Wyślij</button>
+                <a id="protocolPreviewViewBtn" href="#" class="btn btn-info btn-sm text-white"><i class="fas fa-eye me-1"></i>Otwórz pełny widok</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Protocol Send Email Modal (from list) -->
+<div class="modal fade" id="protocolListSendModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="send_email">
+                <input type="hidden" name="id" id="plsmProtoId" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-envelope me-2 text-success"></i>Wyślij protokół do klienta</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Protokół: <strong id="plsmProtoNumber"></strong></p>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Adres e-mail odbiorcy</label>
+                        <input type="email" name="email_to" class="form-control" required placeholder="adres@email.pl">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Imię i nazwisko odbiorcy</label>
+                        <input type="text" name="email_to_name" class="form-control" placeholder="Jan Kowalski">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Treść wiadomości</label>
+                        <textarea name="email_message" class="form-control" rows="5" required
+                                  placeholder="Treść wiadomości do klienta...">W załączeniu przesyłamy protokół do podpisania. Prosimy o odesłanie podpisanego dokumentu.</textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-paper-plane me-1"></i>Wyślij</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function showProtocolPreview(data) {
+    var typeMap = {'PP': '<span class="badge bg-primary">Przekazania</span>', 'PU': '<span class="badge bg-success">Uruchomienia</span>', 'PS': '<span class="badge bg-warning text-dark">Serwisowy</span>'};
+    var typeBadge = typeMap[data.type] || ('<span class="badge bg-secondary">' + data.type + '</span>');
+    var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
+
+    document.getElementById('protocolPreviewTitle').innerHTML = '<i class="fas fa-clipboard-check me-2 text-primary"></i>Protokół: ' + data.protocol_number;
+    document.getElementById('protocolPreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-0">' +
+        '<tr><th class="text-muted" style="width:40%">Nr protokołu</th><td class="fw-bold">' + data.protocol_number + '</td></tr>' +
+        '<tr><th class="text-muted">Typ</th><td>' + typeBadge + '</td></tr>' +
+        '<tr><th class="text-muted">Data</th><td>' + formatDate(data.date) + '</td></tr>' +
+        '<tr><th class="text-muted">Pojazd</th><td>' + (data.registration || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Urządzenie</th><td>' + (data.serial_number || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Technik</th><td>' + (data.technician_name || '—') + '</td></tr>' +
+        '</table>';
+
+    document.getElementById('protocolPreviewViewBtn').href  = 'protocols.php?action=view&id=' + data.id;
+    document.getElementById('protocolPreviewPrintBtn').href = 'protocols.php?action=print&id=' + data.id;
+    document.getElementById('protocolPreviewSendBtn').onclick = function() {
+        var previewModal = bootstrap.Modal.getInstance(document.getElementById('protocolPreviewModal'));
+        if (previewModal) previewModal.hide();
+        setTimeout(function() { openProtocolSendModal(data.id, data.protocol_number); }, 350);
+    };
+    var modal = new bootstrap.Modal(document.getElementById('protocolPreviewModal'));
+    modal.show();
+}
+function openProtocolSendModal(protoId, protoNumber) {
+    document.getElementById('plsmProtoId').value   = protoId;
+    document.getElementById('plsmProtoNumber').textContent = protoNumber;
+    var modal = new bootstrap.Modal(document.getElementById('protocolListSendModal'));
+    modal.show();
+}
+</script>
 
 <?php elseif ($action === 'view' && $protocol): ?>
 <div class="row g-3">

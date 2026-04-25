@@ -16,6 +16,29 @@ $db = getDb();
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) { flashError('Błąd bezpieczeństwa.'); redirect(getBaseUrl() . 'settings.php'); }
 
+    $postAction = sanitize($_POST['action'] ?? 'save');
+
+    // Test email action
+    if ($postAction === 'test_email') {
+        $testTo = sanitize($_POST['test_email_to'] ?? '');
+        if (!$testTo || !filter_var($testTo, FILTER_VALIDATE_EMAIL)) {
+            flashError('Podaj poprawny adres e-mail do testu.');
+        } else {
+            require_once __DIR__ . '/includes/functions.php';
+            $body = getEmailTemplate('general', [
+                'MESSAGE'     => '<strong>To jest wiadomość testowa z FleetLink Magazyn.</strong><br>Jeśli ją widzisz, konfiguracja e-mail działa poprawnie.',
+                'SENDER_NAME' => 'FleetLink Magazyn',
+                'DATE'        => date('d.m.Y H:i'),
+            ]);
+            if (sendAppEmail($testTo, '', 'Testowa wiadomość — FleetLink Magazyn', $body)) {
+                flashSuccess("Testowa wiadomość została wysłana na adres {$testTo}.");
+            } else {
+                flashError('Nie udało się wysłać wiadomości testowej. Sprawdź ustawienia SMTP poniżej.');
+            }
+        }
+        redirect(getBaseUrl() . 'settings.php');
+    }
+
     $settingsToSave = [
         'company_name'      => sanitize($_POST['company_name'] ?? ''),
         'company_address'   => sanitize($_POST['company_address'] ?? ''),
@@ -35,7 +58,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'smtp_from'         => sanitize($_POST['smtp_from'] ?? ''),
         'smtp_from_name'    => sanitize($_POST['smtp_from_name'] ?? ''),
         // Schema document passwords
-        'schema_allcan300_pass' => sanitize($_POST['schema_allcan300_pass'] ?? 'Pj0;Gm6$.g2rnd9'),
+        'schema_allcan300_pass'         => sanitize($_POST['schema_allcan300_pass'] ?? 'Pj0;Gm6$.g2rnd9'),
+        'schema_cancontrol_pass'        => sanitize($_POST['schema_cancontrol_pass'] ?? ''),
+        'schema_cancontrol6cimmo_pass'  => sanitize($_POST['schema_cancontrol6cimmo_pass'] ?? ''),
+        'schema_cancontrol6c_pass'      => sanitize($_POST['schema_cancontrol6c_pass'] ?? ''),
+        'schema_cancontroldtc_pass'     => sanitize($_POST['schema_cancontroldtc_pass'] ?? ''),
+        'schema_cancontrolimmo_pass'    => sanitize($_POST['schema_cancontrolimmo_pass'] ?? ''),
+        'schema_cancontrolimmop1_pass'  => sanitize($_POST['schema_cancontrolimmop1_pass'] ?? ''),
+        'schema_fmb140allcan_pass'      => sanitize($_POST['schema_fmb140allcan_pass'] ?? ''),
+        'schema_fmb140lvcan_pass'       => sanitize($_POST['schema_fmb140lvcan_pass'] ?? ''),
+        'schema_fmc150_pass'            => sanitize($_POST['schema_fmc150_pass'] ?? ''),
+        'schema_lvcan200_pass'          => sanitize($_POST['schema_lvcan200_pass'] ?? ''),
+        'schema_lvcan200dtc_pass'       => sanitize($_POST['schema_lvcan200dtc_pass'] ?? ''),
     ];
     // Only save password if provided (to avoid wiping it when left blank)
     if (!empty($_POST['smtp_pass'])) {
@@ -104,25 +138,6 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <h6 class="fw-bold text-muted mb-3"><i class="fas fa-file-invoice me-2"></i>Ustawienia ofert</h6>
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <label class="form-label">Standardowa stawka VAT (%)</label>
-                    <input type="number" name="vat_rate" class="form-control" value="<?= h($settings['vat_rate'] ?? '23') ?>" min="0" max="100">
-                </div>
-                <div class="col-12">
-                    <label class="form-label">Stopka oferty</label>
-                    <textarea name="offer_footer" class="form-control" rows="2"><?= h($settings['offer_footer'] ?? '') ?></textarea>
-                </div>
-            </div>
-
-            <h6 class="fw-bold text-muted mb-3"><i class="fas fa-file-signature me-2"></i>Szablon umowy</h6>
-            <div class="mb-4">
-                <label class="form-label">Domyślna treść umowy</label>
-                <textarea name="contract_template" class="form-control" rows="8"><?= h($settings['contract_template'] ?? '') ?></textarea>
-                <small class="text-muted">Ten szablon będzie automatycznie wklejany przy tworzeniu nowej umowy.</small>
-            </div>
-
             <hr>
             <h6 class="fw-bold text-muted mb-3"><i class="fas fa-envelope me-2"></i>Konfiguracja e-mail (SMTP)</h6>
             <div class="row g-3 mb-4">
@@ -168,16 +183,53 @@ include __DIR__ . '/includes/header.php';
 
             <hr>
             <h6 class="fw-bold text-muted mb-3"><i class="fas fa-sitemap me-2"></i>Schematy — hasła dostępu</h6>
+            <?php
+            $schemaFields = [
+                ['key' => 'schema_allcan300_pass',        'label' => 'ALL-CAN 300',          'default' => 'Pj0;Gm6$.g2rnd9'],
+                ['key' => 'schema_cancontrol_pass',       'label' => 'CAN-CONTROL',           'default' => "3dmU~I{_@;W'OVL"],
+                ['key' => 'schema_cancontrol6cimmo_pass', 'label' => 'CAN-CONTROL 6C IMMO',   'default' => "f_n8n}G'sK+j4fx"],
+                ['key' => 'schema_cancontrol6c_pass',     'label' => 'CAN-CONTROL 6C',        'default' => 'q1{nGYAfw3-!5y#'],
+                ['key' => 'schema_cancontroldtc_pass',    'label' => 'CAN-CONTROL DTC',       'default' => "Hm!oo7jW-#kgxu'"],
+                ['key' => 'schema_cancontrolimmo_pass',   'label' => 'CAN-CONTROL IMMO',      'default' => 'F6evA;eIYTji~f('],
+                ['key' => 'schema_cancontrolimmop1_pass', 'label' => 'CAN-CONTROL IMMO P1',   'default' => '#F+B9Q1OJS#uSI@'],
+                ['key' => 'schema_fmb140allcan_pass',     'label' => 'FMB 140 ALL-CAN',       'default' => 'EmNj+l%3g!aaSqQ'],
+                ['key' => 'schema_fmb140lvcan_pass',      'label' => 'FMB 140 LV-CAN',        'default' => 'IrL@nhJuyvdD=96'],
+                ['key' => 'schema_fmc150_pass',           'label' => 'FMC 150',               'default' => 'i-evHv6#hu5I(ei'],
+                ['key' => 'schema_lvcan200_pass',         'label' => 'LV-CAN200',             'default' => ',J8RPt%_EgEFzOY'],
+                ['key' => 'schema_lvcan200dtc_pass',      'label' => 'LV-CAN200 DTC',         'default' => "W.#2}~MaqY]]w'D"],
+            ];
+            ?>
             <div class="row g-3 mb-4">
+                <?php foreach ($schemaFields as $sf): ?>
                 <div class="col-md-6">
-                    <label class="form-label">ALL-CAN 300 — hasło do dokumentu</label>
-                    <input type="text" name="schema_allcan300_pass" class="form-control"
-                           value="<?= h($settings['schema_allcan300_pass'] ?? 'Pj0;Gm6$.g2rnd9') ?>">
-                    <small class="text-muted">Hasło wyświetlane obok linku "ALL-CAN 300" w menu Schematy.</small>
+                    <label class="form-label"><?= h($sf['label']) ?> — hasło</label>
+                    <input type="text" name="<?= h($sf['key']) ?>" class="form-control"
+                           value="<?= h($settings[$sf['key']] ?? $sf['default']) ?>">
                 </div>
+                <?php endforeach; ?>
             </div>
 
             <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Zapisz ustawienia</button>
+        </form>
+    </div>
+</div>
+
+<!-- Test Email Card -->
+<div class="card mt-3" style="max-width:800px">
+    <div class="card-header"><i class="fas fa-paper-plane me-2 text-success"></i>Testuj konfigurację e-mail</div>
+    <div class="card-body">
+        <form method="POST" class="row g-3 align-items-end">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="test_email">
+            <div class="col-md-8">
+                <label class="form-label">Adres e-mail do testu</label>
+                <input type="email" name="test_email_to" class="form-control" placeholder="adres@email.pl" required
+                       value="<?= h($settings['company_email'] ?? '') ?>">
+                <small class="text-muted">Zostanie wysłana prosta wiadomość testowa na podany adres.</small>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-success w-100"><i class="fas fa-paper-plane me-2"></i>Wyślij testową wiadomość</button>
+            </div>
         </form>
     </div>
 </div>

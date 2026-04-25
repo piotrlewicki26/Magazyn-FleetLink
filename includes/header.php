@@ -152,28 +152,31 @@ try {
                 </li>
                 <?php
                 // Load schema settings for Schematy dropdown
-                $allcan300Pass = 'Pj0;Gm6$.g2rnd9';
+                $allcan300Pass         = 'Pj0;Gm6$.g2rnd9';
+                $schemaDbPasses        = [];
                 try {
-                    $navSchemaStmt = getDb()->prepare("SELECT `value` FROM settings WHERE `key` = 'schema_allcan300_pass' LIMIT 1");
+                    $navSchemaStmt = getDb()->prepare("SELECT `key`, `value` FROM settings WHERE `key` LIKE 'schema_%_pass'");
                     $navSchemaStmt->execute();
-                    $navSchemaRow = $navSchemaStmt->fetchColumn();
-                    if ($navSchemaRow !== false && $navSchemaRow !== '') {
-                        $allcan300Pass = $navSchemaRow;
+                    foreach ($navSchemaStmt->fetchAll() as $sr) {
+                        $schemaDbPasses[$sr['key']] = $sr['value'];
+                    }
+                    if (!empty($schemaDbPasses['schema_allcan300_pass'])) {
+                        $allcan300Pass = $schemaDbPasses['schema_allcan300_pass'];
                     }
                 } catch (Exception $e) {}
                 $navSchemas = [
                     ['label' => 'ALL-CAN 300',        'url' => 'https://share.teltonika.lt/index.php/s/rFHo99iWX8BHMaZ/authenticate/showshare',    'pass' => $allcan300Pass],
-                    ['label' => 'CAN-CONTROL',        'url' => 'https://share.teltonika.lt/index.php/s/srTkkTW57jczcAT/authenticate/showshare',    'pass' => "3dmU~I{_@;W'OVL"],
-                    ['label' => 'CAN-CONTROL 6C IMMO','url' => 'https://share.teltonika.lt/index.php/s/k7CaQNcbjTRmSSL/authenticate/showshare',    'pass' => "f_n8n}G'sK+j4fx"],
-                    ['label' => 'CAN-CONTROL 6C',     'url' => 'https://share.teltonika.lt/index.php/s/Ad6P4Ea93Nptjnn/authenticate/showshare',    'pass' => 'q1{nGYAfw3-!5y#'],
-                    ['label' => 'CAN-CONTROL DTC',    'url' => 'https://share.teltonika.lt/index.php/s/Y2YYfPMi9e7kyTK/authenticate/showshare',    'pass' => "Hm!oo7jW-#kgxu'"],
-                    ['label' => 'CAN-CONTROL IMMO',   'url' => 'https://share.teltonika.lt/index.php/s/jEq22Dcqonq86p9/authenticate/showshare',    'pass' => 'F6evA;eIYTji~f('],
-                    ['label' => 'CAN-CONTROL IMMO P1','url' => 'https://share.teltonika.lt/index.php/s/73jkTnDko8PTJCe/authenticate/showshare',    'pass' => '#F+B9Q1OJS#uSI@'],
-                    ['label' => 'FMB 140 ALL-CAN',    'url' => 'https://share.teltonika.lt/index.php/s/xsxZPknB78S9763/authenticate/showshare',    'pass' => 'EmNj+l%3g!aaSqQ'],
-                    ['label' => 'FMB 140 LV-CAN',     'url' => 'https://share.teltonika.lt/index.php/s/mmrjRCGkicBjAtz/authenticate/showshare',    'pass' => 'IrL@nhJuyvdD=96'],
-                    ['label' => 'FMC 150',             'url' => 'https://share.teltonika.lt/index.php/s/w8Xi3txtHLB3B4H/authenticate/showshare',    'pass' => 'i-evHv6#hu5I(ei'],
-                    ['label' => 'LV-CAN200',           'url' => 'https://share.teltonika.lt/index.php/s/F9nGxssycArbkem/authenticate/showshare',    'pass' => ',J8RPt%_EgEFzOY'],
-                    ['label' => 'LV-CAN200 DTC',       'url' => 'https://share.teltonika.lt/index.php/s/JnEzJEeTDMQFqbX/authenticate/showshare',    'pass' => "W.#2}~MaqY]]w'D"],
+                    ['label' => 'CAN-CONTROL',        'url' => 'https://share.teltonika.lt/index.php/s/srTkkTW57jczcAT/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_cancontrol_pass'])        ? $schemaDbPasses['schema_cancontrol_pass']        : "3dmU~I{_@;W'OVL"],
+                    ['label' => 'CAN-CONTROL 6C IMMO','url' => 'https://share.teltonika.lt/index.php/s/k7CaQNcbjTRmSSL/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_cancontrol6cimmo_pass'])  ? $schemaDbPasses['schema_cancontrol6cimmo_pass']  : "f_n8n}G'sK+j4fx"],
+                    ['label' => 'CAN-CONTROL 6C',     'url' => 'https://share.teltonika.lt/index.php/s/Ad6P4Ea93Nptjnn/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_cancontrol6c_pass'])      ? $schemaDbPasses['schema_cancontrol6c_pass']      : 'q1{nGYAfw3-!5y#'],
+                    ['label' => 'CAN-CONTROL DTC',    'url' => 'https://share.teltonika.lt/index.php/s/Y2YYfPMi9e7kyTK/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_cancontroldtc_pass'])     ? $schemaDbPasses['schema_cancontroldtc_pass']     : "Hm!oo7jW-#kgxu'"],
+                    ['label' => 'CAN-CONTROL IMMO',   'url' => 'https://share.teltonika.lt/index.php/s/jEq22Dcqonq86p9/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_cancontrolimmo_pass'])    ? $schemaDbPasses['schema_cancontrolimmo_pass']    : 'F6evA;eIYTji~f('],
+                    ['label' => 'CAN-CONTROL IMMO P1','url' => 'https://share.teltonika.lt/index.php/s/73jkTnDko8PTJCe/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_cancontrolimmop1_pass'])  ? $schemaDbPasses['schema_cancontrolimmop1_pass']  : '#F+B9Q1OJS#uSI@'],
+                    ['label' => 'FMB 140 ALL-CAN',    'url' => 'https://share.teltonika.lt/index.php/s/xsxZPknB78S9763/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_fmb140allcan_pass'])      ? $schemaDbPasses['schema_fmb140allcan_pass']      : 'EmNj+l%3g!aaSqQ'],
+                    ['label' => 'FMB 140 LV-CAN',     'url' => 'https://share.teltonika.lt/index.php/s/mmrjRCGkicBjAtz/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_fmb140lvcan_pass'])       ? $schemaDbPasses['schema_fmb140lvcan_pass']       : 'IrL@nhJuyvdD=96'],
+                    ['label' => 'FMC 150',             'url' => 'https://share.teltonika.lt/index.php/s/w8Xi3txtHLB3B4H/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_fmc150_pass'])            ? $schemaDbPasses['schema_fmc150_pass']            : 'i-evHv6#hu5I(ei'],
+                    ['label' => 'LV-CAN200',           'url' => 'https://share.teltonika.lt/index.php/s/F9nGxssycArbkem/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_lvcan200_pass'])          ? $schemaDbPasses['schema_lvcan200_pass']          : ',J8RPt%_EgEFzOY'],
+                    ['label' => 'LV-CAN200 DTC',       'url' => 'https://share.teltonika.lt/index.php/s/JnEzJEeTDMQFqbX/authenticate/showshare',    'pass' => !empty($schemaDbPasses['schema_lvcan200dtc_pass'])       ? $schemaDbPasses['schema_lvcan200dtc_pass']       : "W.#2}~MaqY]]w'D"],
                 ];
                 ?>
                 <li class="nav-item dropdown">
