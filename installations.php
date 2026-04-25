@@ -171,6 +171,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Exception $e) { /* non-fatal: continue */ }
             }
             flashSuccess('Zarejestrowano ' . $n . ' montaż' . ($n === 1 ? '' : 'e') . ' pomyślnie.');
+            // Send notification email to the current user
+            if (!empty($curUser['email'])) {
+                try {
+                    $techName = $curUser['name'];
+                    $vehicleList = implode(', ', array_values(array_unique($vehicleRegistrations)));
+                    $body = getEmailTemplate('installation_created', [
+                        'COUNT'      => (string)$n,
+                        'DATE'       => date('d.m.Y', strtotime($installationDate)),
+                        'TECHNICIAN' => $techName,
+                        'VEHICLES'   => $vehicleList ?: '—',
+                        'ADDRESS'    => $installationAddress ?: '—',
+                        'NOTES'      => $notes ?: '—',
+                        'SENDER_NAME' => $curUser['name'],
+                    ]);
+                    sendAppEmail($curUser['email'], $curUser['name'], 'Nowy montaż — FleetLink Magazyn', $body);
+                } catch (Exception $emailEx) { /* non-fatal */ }
+            }
         } catch (Exception $e) {
             $db->rollBack();
             flashError('Błąd: ' . $e->getMessage());

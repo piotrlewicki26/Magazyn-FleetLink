@@ -73,6 +73,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         flashSuccess('Serwis zarejestrowany pomyślnie.');
+        // Send notification email to the current user
+        if (!empty($currentUser['email'])) {
+            try {
+                $svcTypeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+                $svcStatusLabels = ['zaplanowany'=>'Zaplanowany','w_trakcie'=>'W trakcie','zakończony'=>'Zakończony','anulowany'=>'Anulowany'];
+                $devLabel = '';
+                if ($deviceId) {
+                    $dRow = $db->prepare("SELECT d.serial_number, m.name as model_name, mf.name as manufacturer FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.id=?");
+                    $dRow->execute([$deviceId]);
+                    $dInfo = $dRow->fetch();
+                    if ($dInfo) $devLabel = $dInfo['manufacturer'] . ' ' . $dInfo['model_name'] . ' — ' . $dInfo['serial_number'];
+                }
+                $techName = $currentUser['name'];
+                if ($technicianId && $technicianId !== $currentUser['id']) {
+                    $tRow = $db->prepare("SELECT name FROM users WHERE id=?");
+                    $tRow->execute([$technicianId]);
+                    $tInfo = $tRow->fetch();
+                    if ($tInfo) $techName = $tInfo['name'];
+                }
+                $body = getEmailTemplate('service_created', [
+                    'SERVICE_TYPE' => $svcTypeLabels[$type] ?? $type,
+                    'DEVICE'       => $devLabel ?: '—',
+                    'DATE'         => $plannedDate ? date('d.m.Y', strtotime($plannedDate)) : '—',
+                    'TECHNICIAN'   => $techName,
+                    'STATUS'       => $svcStatusLabels[$status] ?? $status,
+                    'DESCRIPTION'  => $description ?: '—',
+                    'SENDER_NAME'  => $currentUser['name'],
+                ]);
+                sendAppEmail($currentUser['email'], $currentUser['name'], 'Nowy serwis — FleetLink Magazyn', $body);
+            } catch (Exception $emailEx) { /* non-fatal */ }
+        }
         redirect(getBaseUrl() . 'services.php?action=view&id=' . $newServiceId);
 
     } elseif ($postAction === 'edit') {

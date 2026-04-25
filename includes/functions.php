@@ -337,6 +337,37 @@ function getEmailTemplateDefaults() {
 <br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
 <hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn</p>
 </body></html>',
+        'installation_created' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+<h2 style="color:#0d6efd">{{APP_NAME}} — Nowy montaż</h2>
+<p>Hej {{SENDER_NAME}},</p>
+<p>Pomyślnie zarejestrowano <strong>{{COUNT}}</strong> montaż/e w systemie FleetLink Magazyn.</p>
+<table style="border-collapse:collapse;width:100%;margin-top:8px">
+  <tr><td style="padding:4px 8px;color:#555;width:40%"><strong>Data montażu</strong></td><td style="padding:4px 8px">{{DATE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Technik</strong></td><td style="padding:4px 8px">{{TECHNICIAN}}</td></tr>
+  <tr><td style="padding:4px 8px;color:#555"><strong>Pojazd(y)</strong></td><td style="padding:4px 8px">{{VEHICLES}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Adres</strong></td><td style="padding:4px 8px">{{ADDRESS}}</td></tr>
+  <tr><td style="padding:4px 8px;color:#555"><strong>Uwagi</strong></td><td style="padding:4px 8px">{{NOTES}}</td></tr>
+</table>
+<p style="margin-top:12px">Szczegóły montażu dostępne są w systemie.</p>
+<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn - System zarządzania urządzeniami GPS</p>
+</body></html>',
+        'service_created' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+<h2 style="color:#0d6efd">{{APP_NAME}} — Nowy serwis</h2>
+<p>Hej {{SENDER_NAME}},</p>
+<p>Pomyślnie zarejestrowano nowy serwis w systemie FleetLink Magazyn.</p>
+<table style="border-collapse:collapse;width:100%;margin-top:8px">
+  <tr><td style="padding:4px 8px;color:#555;width:40%"><strong>Typ serwisu</strong></td><td style="padding:4px 8px">{{SERVICE_TYPE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Urządzenie</strong></td><td style="padding:4px 8px">{{DEVICE}}</td></tr>
+  <tr><td style="padding:4px 8px;color:#555"><strong>Data zaplanowana</strong></td><td style="padding:4px 8px">{{DATE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Technik</strong></td><td style="padding:4px 8px">{{TECHNICIAN}}</td></tr>
+  <tr><td style="padding:4px 8px;color:#555"><strong>Status</strong></td><td style="padding:4px 8px">{{STATUS}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:4px 8px;color:#555"><strong>Opis</strong></td><td style="padding:4px 8px">{{DESCRIPTION}}</td></tr>
+</table>
+<p style="margin-top:12px">Szczegóły serwisu dostępne są w systemie.</p>
+<br><p>Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+<hr style="border:1px solid #eee"><p style="font-size:11px;color:#999">FleetLink Magazyn - System zarządzania urządzeniami GPS</p>
+</body></html>',
     ];
 }
 

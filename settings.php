@@ -42,7 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Email templates save action (separate form)
     if ($postAction === 'save_templates') {
         $tplStmt = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
-        foreach (['email_tpl_general', 'email_tpl_offer', 'email_tpl_service_reminder'] as $tplKey) {
+        $allTplKeys = ['email_tpl_general', 'email_tpl_offer', 'email_tpl_service_reminder', 'email_tpl_installation_created', 'email_tpl_service_created'];
+        foreach ($allTplKeys as $tplKey) {
             $val = $_POST[$tplKey] ?? '';
             $tplStmt->execute([$tplKey, $val, $val]);
         }
@@ -268,12 +269,24 @@ $emailTplFields = [
         'label' => 'Szablon przypomnienia o serwisie',
         'desc'  => 'Zmienne: {{APP_NAME}}, {{VEHICLE}}, {{DATE}}, {{DESCRIPTION}}, {{SENDER_NAME}}',
     ],
+    [
+        'key'   => 'email_tpl_installation_created',
+        'label' => 'Powiadomienie — nowy montaż',
+        'desc'  => 'Zmienne: {{APP_NAME}}, {{COUNT}}, {{DATE}}, {{TECHNICIAN}}, {{VEHICLES}}, {{ADDRESS}}, {{NOTES}}, {{SENDER_NAME}}',
+    ],
+    [
+        'key'   => 'email_tpl_service_created',
+        'label' => 'Powiadomienie — nowy serwis',
+        'desc'  => 'Zmienne: {{APP_NAME}}, {{SERVICE_TYPE}}, {{DEVICE}}, {{DATE}}, {{TECHNICIAN}}, {{STATUS}}, {{DESCRIPTION}}, {{SENDER_NAME}}',
+    ],
 ];
 // Map setting key → defaults key
 $tplKeyMap = [
-    'email_tpl_general'          => 'general',
-    'email_tpl_offer'            => 'offer',
-    'email_tpl_service_reminder' => 'service_reminder',
+    'email_tpl_general'               => 'general',
+    'email_tpl_offer'                 => 'offer',
+    'email_tpl_service_reminder'      => 'service_reminder',
+    'email_tpl_installation_created'  => 'installation_created',
+    'email_tpl_service_created'       => 'service_created',
 ];
 ?>
 <div class="card mt-3" style="max-width:800px">
