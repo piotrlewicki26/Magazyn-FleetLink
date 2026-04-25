@@ -16,11 +16,22 @@ $stats = getDashboardStats();
 
 // Dane do modali szybkich akcji
 $dashModels = $db->query("SELECT m.id, m.name, mf.name as manufacturer_name FROM models m JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE m.active=1 ORDER BY mf.name, m.name")->fetchAll();
+// Modele z liczbą dostępnych urządzeń (dla trybu Auto w montażu)
+$dashAvailableModels = $db->query("
+    SELECT m.id as model_id, m.name as model_name, mf.name as manufacturer_name,
+           COUNT(d.id) as available_count
+    FROM models m
+    JOIN manufacturers mf ON mf.id=m.manufacturer_id
+    JOIN devices d ON d.model_id=m.id AND d.status IN ('nowy','sprawny')
+    GROUP BY m.id
+    HAVING available_count > 0
+    ORDER BY mf.name, m.name
+")->fetchAll();
 $dashSimOptions = [];
 try { $dashSimOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN); } catch (Exception $e) {}
-$dashClients  = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
+$dashClients  = $db->query("SELECT id, contact_name, company_name, address, city, postal_code FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 $dashVehicles = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
-$dashAvailableDevices = $db->query("SELECT d.id, d.serial_number, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status IN ('nowy','sprawny') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
+$dashAvailableDevices = $db->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status IN ('nowy','sprawny') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
 $dashActiveInstallations = $db->query("SELECT i.id, v.registration, d.serial_number FROM installations i JOIN vehicles v ON v.id=i.vehicle_id JOIN devices d ON d.id=i.device_id WHERE i.status='aktywna' ORDER BY v.registration")->fetchAll();
 $dashUsers = [];
 try { $dashUsers = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll(); } catch (Exception $e) {}
@@ -430,74 +441,140 @@ include __DIR__ . '/includes/header.php';
 </datalist>
 <?php endif; ?>
 
-<!-- Modal: Nowy montaż -->
+<!-- Modal: Nowy montaż — pełny formularz z wieloma urządzeniami (Auto / Ręczny) -->
 <div class="modal fade" id="dashInstallModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
-            <form method="POST" action="devices.php" id="dashInstallForm">
+            <form method="POST" action="installations.php" id="dashInstallForm">
                 <?= csrfField() ?>
-                <input type="hidden" name="action" value="device_install">
+                <input type="hidden" name="action" value="add">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="fas fa-car me-2 text-success"></i>Nowy montaż</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label required-star">Urządzenie GPS</label>
-                            <select name="device_id" id="dashInstallDevice" class="form-select" required>
-                                <option value="">— wybierz urządzenie —</option>
-                                <?php foreach ($dashAvailableDevices as $dd): ?>
-                                <option value="<?= $dd['id'] ?>" data-sim="<?= h($dd['sim_number'] ?? '') ?>">
-                                    <?= h($dd['serial_number'] . ' — ' . $dd['manufacturer_name'] . ' ' . $dd['model_name']) ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
+                        <!-- Urządzenia GPS — multi-device rows -->
+                        <div class="col-12">
+                            <label class="form-label required-star">Urządzenia GPS do montażu</label>
+                            <?php if (empty($dashAvailableModels) && empty($dashAvailableDevices)): ?>
+                            <div class="alert alert-warning py-2 mb-2">
+                                <i class="fas fa-exclamation-triangle me-2"></i>Brak dostępnych urządzeń w magazynie.
+                                <a href="devices.php?action=add">Dodaj urządzenia</a> lub sprawdź stan magazynu.
+                            </div>
+                            <?php endif; ?>
+                            <div id="dashInstDevRowsContainer" class="d-flex flex-column gap-2 mb-2">
+                                <!-- Pierwszy wiersz (index 0) -->
+                                <div class="device-row border rounded p-2 bg-light" data-row-idx="0">
+                                    <div class="row g-2 align-items-center">
+                                        <div class="col-auto">
+                                            <span class="row-num badge bg-secondary">1</span>
+                                        </div>
+                                        <div class="col-auto">
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <input type="radio" class="btn-check" name="device_mode[0]" id="dim_auto_0" value="auto" checked>
+                                                <label class="btn btn-outline-secondary" for="dim_auto_0"><i class="fas fa-magic me-1"></i>Auto</label>
+                                                <input type="radio" class="btn-check" name="device_mode[0]" id="dim_manual_0" value="manual">
+                                                <label class="btn btn-outline-primary" for="dim_manual_0"><i class="fas fa-hand-pointer me-1"></i>Ręczny wybór</label>
+                                            </div>
+                                        </div>
+                                        <div class="col col-mode-auto">
+                                            <select name="model_id[0]" class="form-select form-select-sm">
+                                                <option value="">— wybierz model —</option>
+                                                <?php foreach ($dashAvailableModels as $m): ?>
+                                                <option value="<?= $m['model_id'] ?>"><?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)</option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                        <div class="col col-mode-manual" style="display:none">
+                                            <select name="device_id_manual[0]" class="form-select form-select-sm ts-device-dash">
+                                                <option value="">— wybierz urządzenie —</option>
+                                                <?php
+                                                $dimGroup = '';
+                                                foreach ($dashAvailableDevices as $dev):
+                                                    $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
+                                                    if ($grp !== $dimGroup) {
+                                                        if ($dimGroup) echo '</optgroup>';
+                                                        echo '<optgroup label="' . h($grp) . '">';
+                                                        $dimGroup = $grp;
+                                                    }
+                                                ?>
+                                                <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?><?= $dev['sim_number'] ? ' (' . h($dev['sim_number']) . ')' : '' ?></option>
+                                                <?php endforeach; if ($dimGroup) echo '</optgroup>'; ?>
+                                            </select>
+                                        </div>
+                                        <div class="col-auto">
+                                            <input type="text" name="vehicle_registration[0]" class="form-control form-control-sm"
+                                                   required placeholder="Nr rej. pojazdu"
+                                                   style="text-transform:uppercase;min-width:130px">
+                                        </div>
+                                        <div class="col-auto">
+                                            <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" style="display:none"
+                                                    title="Usuń urządzenie z montażu"><i class="fas fa-times"></i></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div><!-- #dashInstDevRowsContainer -->
+                            <button type="button" id="dashInstAddDevRowBtn" class="btn btn-sm btn-outline-success"
+                                    <?= (empty($dashAvailableModels) && empty($dashAvailableDevices)) ? 'disabled' : '' ?>>
+                                <i class="fas fa-plus me-1"></i>Dodaj kolejne urządzenie
+                            </button>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label required-star">Data montażu</label>
-                            <input type="date" name="installation_date" id="dashInstallDate" class="form-control" required>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Nr telefonu SIM</label>
-                            <input type="text" name="sim_number" id="dashInstallSim" class="form-control"
-                                   list="dashSimListInstall" placeholder="np. +48 600 000 000" autocomplete="off">
-                            <datalist id="dashSimListInstall">
-                                <?php foreach ($dashSimOptions as $sc): ?>
-                                <option value="<?= h($sc) ?>">
-                                <?php endforeach; ?>
-                            </datalist>
-                        </div>
+
+                        <!-- Klient + quick add -->
                         <div class="col-md-6">
                             <label class="form-label">Klient</label>
-                            <select name="client_id" id="dashInstallClient" class="form-select">
-                                <option value="">— brak / wybierz klienta —</option>
-                                <?php foreach ($dashClients as $cl): ?>
-                                <option value="<?= $cl['id'] ?>">
-                                    <?= h($cl['company_name'] ? $cl['company_name'] . ' — ' . $cl['contact_name'] : $cl['contact_name']) ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Pojazd</label>
-                            <select name="vehicle_id" id="dashInstallVehicle" class="form-select mb-2">
-                                <option value="">— wybierz z listy —</option>
-                                <?php foreach ($dashVehicles as $veh): ?>
-                                <option value="<?= $veh['id'] ?>" data-client="<?= (int)$veh['client_id'] ?>">
-                                    <?= h($veh['registration'] . ($veh['make'] ? ' ' . $veh['make'] : '') . ($veh['model_name'] ? ' ' . $veh['model_name'] : '')) ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="text-muted small">lub wpisz nowy numer rejestracyjny:</span>
-                                <input type="text" name="vehicle_registration_new" id="dashInstallVehicleReg"
-                                       class="form-control form-control-sm" style="max-width:160px" placeholder="np. WA12345">
+                            <div class="input-group">
+                                <select name="client_id" id="dashInstClientSelect" class="form-select">
+                                    <option value="">— brak przypisania —</option>
+                                    <?php foreach ($dashClients as $cl): ?>
+                                    <option value="<?= $cl['id'] ?>"><?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-outline-success" id="dashInstQuickClientBtn" title="Dodaj nowego klienta">
+                                    <i class="fas fa-user-plus"></i>
+                                </button>
                             </div>
                         </div>
+                        <!-- Adres instalacji -->
+                        <div class="col-md-6">
+                            <label class="form-label">Adres instalacji</label>
+                            <input type="text" name="installation_address" id="dashInstAddrField" class="form-control"
+                                   placeholder="Automatycznie z klienta lub wpisz ręcznie">
+                        </div>
+                        <!-- Technik -->
+                        <div class="col-md-6">
+                            <label class="form-label">Technik</label>
+                            <select name="technician_id" class="form-select">
+                                <option value="">— aktualny użytkownik —</option>
+                                <?php foreach ($dashUsers as $u): ?>
+                                <option value="<?= $u['id'] ?>"><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <!-- Data montażu -->
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data montażu</label>
+                            <input type="date" name="installation_date" id="dashInstDateField" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <!-- Status -->
+                        <div class="col-md-6">
+                            <label class="form-label">Status</label>
+                            <select name="status" class="form-select">
+                                <option value="aktywna" selected>Aktywna</option>
+                                <option value="zakonczona">Zakończona</option>
+                                <option value="anulowana">Anulowana</option>
+                            </select>
+                        </div>
+                        <!-- Miejsce montażu -->
+                        <div class="col-md-6">
+                            <label class="form-label">Miejsce montażu w pojeździe</label>
+                            <input type="text" name="location_in_vehicle" class="form-control" placeholder="np. pod deską rozdzielczą">
+                        </div>
+                        <!-- Uwagi -->
                         <div class="col-12">
                             <label class="form-label">Uwagi</label>
-                            <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
+                            <textarea name="notes" class="form-control" rows="2"></textarea>
                         </div>
                     </div>
                 </div>
@@ -510,7 +587,95 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<!-- Modal: Nowy serwis -->
+<!-- Quick-add klienta (wewnątrz modalu montażu) -->
+<div class="modal fade" id="dashInstQuickClientModal" tabindex="-1" style="z-index:1090">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="fas fa-user-plus me-2"></i>Szybko dodaj klienta</h6>
+                <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2 text-danger small d-none" id="dashInstQCErr"></div>
+                <div class="mb-2">
+                    <label class="form-label form-label-sm required-star">Imię i nazwisko kontaktu</label>
+                    <input type="text" id="dashInstQCName" class="form-control form-control-sm">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label form-label-sm">Nazwa firmy</label>
+                    <input type="text" id="dashInstQCCompany" class="form-control form-control-sm">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label form-label-sm">Telefon</label>
+                    <input type="text" id="dashInstQCPhone" class="form-control form-control-sm">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label form-label-sm">E-mail</label>
+                    <input type="email" id="dashInstQCEmail" class="form-control form-control-sm">
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success btn-sm" id="dashInstQCSaveBtn"><i class="fas fa-save me-1"></i>Dodaj</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Template dla nowych wierszy urządzeń w montażu (dashboard) -->
+<template id="dashInstDevRowTemplate">
+    <div class="device-row border rounded p-2 bg-light" data-row-idx="__IDX__">
+        <div class="row g-2 align-items-center">
+            <div class="col-auto">
+                <span class="row-num badge bg-secondary">__NUM__</span>
+            </div>
+            <div class="col-auto">
+                <div class="btn-group btn-group-sm" role="group">
+                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="dim_auto___IDX__" value="auto" checked>
+                    <label class="btn btn-outline-secondary" for="dim_auto___IDX__"><i class="fas fa-magic me-1"></i>Auto</label>
+                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="dim_manual___IDX__" value="manual">
+                    <label class="btn btn-outline-primary" for="dim_manual___IDX__"><i class="fas fa-hand-pointer me-1"></i>Ręczny wybór</label>
+                </div>
+            </div>
+            <div class="col col-mode-auto">
+                <select name="model_id[__IDX__]" class="form-select form-select-sm">
+                    <option value="">— wybierz model —</option>
+                    <?php foreach ($dashAvailableModels as $m): ?>
+                    <option value="<?= $m['model_id'] ?>"><?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col col-mode-manual" style="display:none">
+                <select name="device_id_manual[__IDX__]" class="form-select form-select-sm ts-device-dash">
+                    <option value="">— wybierz urządzenie —</option>
+                    <?php
+                    $tplDimGroup = '';
+                    foreach ($dashAvailableDevices as $dev):
+                        $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
+                        if ($grp !== $tplDimGroup) {
+                            if ($tplDimGroup) echo '</optgroup>';
+                            echo '<optgroup label="' . h($grp) . '">';
+                            $tplDimGroup = $grp;
+                        }
+                    ?>
+                    <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?><?= $dev['sim_number'] ? ' (' . h($dev['sim_number']) . ')' : '' ?></option>
+                    <?php endforeach; if ($tplDimGroup) echo '</optgroup>'; ?>
+                </select>
+            </div>
+            <div class="col-auto">
+                <input type="text" name="vehicle_registration[__IDX__]" class="form-control form-control-sm"
+                       required placeholder="Nr rej. pojazdu"
+                       style="text-transform:uppercase;min-width:130px">
+            </div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn"
+                        title="Usuń urządzenie z montażu"><i class="fas fa-times"></i></button>
+            </div>
+        </div>
+    </div>
+</template>
+
+
 <div class="modal fade" id="dashServiceModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -700,35 +865,228 @@ function dashUpdateDevCount() {
     else el.textContent = rows + ' urządzeń do dodania';
 }
 
-// ===== MODAL: Nowy montaż =====
+// ===== MODAL: Nowy montaż — wielourządzeniowy z TomSelect =====
+window.flDashDevices = <?= json_encode(array_values(array_map(function($d) {
+    $text = $d['serial_number'];
+    if ($d['imei'])       $text .= ' [' . $d['imei'] . ']';
+    if ($d['sim_number']) $text .= ' (' . $d['sim_number'] . ')';
+    return ['value' => (string)$d['id'], 'text' => $text];
+}, $dashAvailableDevices))) ?>;
+
+var dashInstClientAddresses = <?= json_encode(array_reduce($dashClients, function($carry, $c) {
+    $parts = array_filter([$c['address'] ?? '', trim(($c['postal_code'] ?? '') . ' ' . ($c['city'] ?? ''))]);
+    $carry[(string)$c['id']] = implode(', ', $parts);
+    return $carry;
+}, []), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
 function dashOpenInstall() {
-    document.getElementById('dashInstallDevice').value = '';
-    document.getElementById('dashInstallSim').value = '';
-    document.getElementById('dashInstallDate').value = new Date().toISOString().slice(0, 10);
-    document.getElementById('dashInstallClient').value = '';
-    document.getElementById('dashInstallVehicle').value = '';
-    document.getElementById('dashInstallVehicleReg').value = '';
-    dashFilterInstallVehicles();
+    // Reset first row
+    var container = document.getElementById('dashInstDevRowsContainer');
+    // Remove all extra rows, keep only first
+    Array.from(container.querySelectorAll('.device-row')).forEach(function(row, idx) {
+        if (idx > 0) {
+            dimDestroyTomSelect(row);
+            row.remove();
+        }
+    });
+    dimRowCounter = 1;
+    // Reset first row fields
+    var firstRow = container.querySelector('.device-row');
+    if (firstRow) {
+        firstRow.querySelector('input[name="vehicle_registration[0]"]').value = '';
+        var autoRadio = firstRow.querySelector('input[value="auto"]');
+        if (autoRadio) { autoRadio.checked = true; dimApplyMode(firstRow, 'auto'); }
+        var modelSel = firstRow.querySelector('select[name="model_id[0]"]');
+        if (modelSel) modelSel.value = '';
+        dimDestroyTomSelect(firstRow);
+    }
+    // Reset common fields
+    document.getElementById('dashInstClientSelect').value = '';
+    document.getElementById('dashInstAddrField').value = '';
+    document.getElementById('dashInstDateField').value = new Date().toISOString().slice(0, 10);
     new bootstrap.Modal(document.getElementById('dashInstallModal')).show();
 }
-function dashFilterInstallVehicles() {
-    var clientId = document.getElementById('dashInstallClient').value;
-    document.querySelectorAll('#dashInstallVehicle option').forEach(function(opt) {
-        if (!opt.value) { opt.style.display = ''; return; }
-        opt.style.display = (!clientId || !opt.dataset.client || parseInt(opt.dataset.client) === parseInt(clientId)) ? '' : 'none';
+
+var dimRowCounter = 1;
+
+function dimSyncDeviceDropdowns() {
+    var container = document.getElementById('dashInstDevRowsContainer');
+    if (!container) return;
+    var rows = Array.from(container.querySelectorAll('.device-row'));
+    var rowValues = new Map();
+    rows.forEach(function(row) {
+        var sel = row.querySelector('select.ts-device-dash');
+        if (!sel || !sel.tomselect) return;
+        rowValues.set(row, sel.tomselect.getValue() || '');
     });
-    document.getElementById('dashInstallVehicle').value = '';
+    rows.forEach(function(row) {
+        var sel = row.querySelector('select.ts-device-dash');
+        if (!sel || !sel.tomselect) return;
+        var ts = sel.tomselect;
+        var myVal = rowValues.get(row) || '';
+        var othersTaken = new Set();
+        rowValues.forEach(function(val, r) { if (r !== row && val) othersTaken.add(val); });
+        (window.flDashDevices || []).forEach(function(dev) {
+            if (othersTaken.has(dev.value)) {
+                if (ts.options[dev.value]) ts.removeOption(dev.value);
+            } else {
+                if (!ts.options[dev.value]) ts.addOption({ value: dev.value, text: dev.text });
+            }
+        });
+        ts.refreshOptions(false);
+        if (myVal && ts.options[myVal]) ts.setValue(myVal, true);
+    });
 }
+
+function dimInitTomSelect(row) {
+    row.querySelectorAll('select.ts-device-dash').forEach(function(sel) {
+        if (sel.tomselect) return;
+        if (typeof TomSelect === 'undefined') return;
+        new TomSelect(sel, {
+            placeholder: '— szukaj urządzenia —',
+            allowEmptyOption: true,
+            maxOptions: null,
+            searchField: ['text', 'value'],
+            render: { option: function(data, escape) { return '<div>' + escape(data.text) + '</div>'; } }
+        });
+    });
+}
+
+function dimDestroyTomSelect(row) {
+    row.querySelectorAll('select.ts-device-dash').forEach(function(sel) {
+        if (sel.tomselect) sel.tomselect.destroy();
+    });
+}
+
+function dimUpdateRowNumbers() {
+    var container = document.getElementById('dashInstDevRowsContainer');
+    if (!container) return;
+    var rows = container.querySelectorAll('.device-row');
+    rows.forEach(function(row, i) {
+        var numEl = row.querySelector('.row-num');
+        if (numEl) numEl.textContent = i + 1;
+        var btn = row.querySelector('.remove-row-btn');
+        if (btn) btn.style.display = rows.length > 1 ? '' : 'none';
+    });
+}
+
+function dimApplyMode(row, mode) {
+    var autoCol   = row.querySelector('.col-mode-auto');
+    var manualCol = row.querySelector('.col-mode-manual');
+    if (autoCol)   autoCol.style.display   = mode === 'auto'   ? '' : 'none';
+    if (manualCol) manualCol.style.display = mode === 'manual' ? '' : 'none';
+    if (mode === 'manual') {
+        dimInitTomSelect(row);
+        dimSyncDeviceDropdowns();
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    var devSel = document.getElementById('dashInstallDevice');
-    if (devSel) {
-        devSel.addEventListener('change', function() {
-            var opt = devSel.options[devSel.selectedIndex];
-            if (opt) document.getElementById('dashInstallSim').value = opt.dataset.sim || '';
+    var container = document.getElementById('dashInstDevRowsContainer');
+    var addBtn    = document.getElementById('dashInstAddDevRowBtn');
+
+    if (container) {
+        // Event delegation: mode toggle + device change
+        container.addEventListener('change', function(e) {
+            if (e.target.type === 'radio' && e.target.name && e.target.name.startsWith('device_mode')) {
+                dimApplyMode(e.target.closest('.device-row'), e.target.value);
+            }
+            if (e.target.classList.contains('ts-device-dash') || e.target.closest('select.ts-device-dash')) {
+                dimSyncDeviceDropdowns();
+            }
+        });
+        // Event delegation: remove row
+        container.addEventListener('click', function(e) {
+            var btn = e.target.closest('.remove-row-btn');
+            if (btn) {
+                var row = btn.closest('.device-row');
+                dimDestroyTomSelect(row);
+                row.remove();
+                dimUpdateRowNumbers();
+                dimSyncDeviceDropdowns();
+            }
+        });
+        // Init first row
+        container.querySelectorAll('.device-row').forEach(function(row) {
+            var checked = row.querySelector('.btn-check:checked');
+            if (checked) dimApplyMode(row, checked.value);
+        });
+        dimUpdateRowNumbers();
+    }
+
+    if (addBtn) {
+        addBtn.addEventListener('click', function() {
+            var tpl = document.getElementById('dashInstDevRowTemplate');
+            if (!tpl) return;
+            var idx   = dimRowCounter++;
+            var clone = tpl.content.cloneNode(true);
+            clone.querySelectorAll('[name]').forEach(function(el) { el.name = el.name.replace(/__IDX__/g, idx); });
+            clone.querySelectorAll('[id]').forEach(function(el)   { el.id   = el.id.replace(/__IDX__/g, idx); });
+            clone.querySelectorAll('[for]').forEach(function(el)  { el.htmlFor = el.htmlFor.replace(/__IDX__/g, idx); });
+            container.appendChild(clone);
+            dimUpdateRowNumbers();
         });
     }
-    var cliSel = document.getElementById('dashInstallClient');
-    if (cliSel) cliSel.addEventListener('change', dashFilterInstallVehicles);
+
+    // Auto-fill address on client change
+    var cliSel = document.getElementById('dashInstClientSelect');
+    var addrFld = document.getElementById('dashInstAddrField');
+    if (cliSel && addrFld) {
+        cliSel.addEventListener('change', function() {
+            var val = this.value;
+            if (val && dashInstClientAddresses[val]) {
+                addrFld.value = dashInstClientAddresses[val];
+            } else if (!val) {
+                addrFld.value = '';
+            }
+        });
+    }
+
+    // Quick-add client button
+    var qcBtn = document.getElementById('dashInstQuickClientBtn');
+    if (qcBtn) {
+        qcBtn.addEventListener('click', function() {
+            document.getElementById('dashInstQCName').value = '';
+            document.getElementById('dashInstQCCompany').value = '';
+            document.getElementById('dashInstQCPhone').value = '';
+            document.getElementById('dashInstQCEmail').value = '';
+            var errEl = document.getElementById('dashInstQCErr');
+            if (errEl) errEl.classList.add('d-none');
+            new bootstrap.Modal(document.getElementById('dashInstQuickClientModal')).show();
+        });
+    }
+
+    // Save quick client
+    var qcSave = document.getElementById('dashInstQCSaveBtn');
+    if (qcSave) {
+        qcSave.addEventListener('click', function() {
+            var name = document.getElementById('dashInstQCName').value.trim();
+            var errEl = document.getElementById('dashInstQCErr');
+            if (!name) { errEl.textContent = 'Imię i nazwisko kontaktu jest wymagane.'; errEl.classList.remove('d-none'); return; }
+            errEl.classList.add('d-none');
+            var fd = new FormData();
+            fd.append('action', 'quick_add_client');
+            fd.append('csrf_token', document.querySelector('#dashInstallForm input[name="csrf_token"]').value);
+            fd.append('contact_name', name);
+            fd.append('company_name', document.getElementById('dashInstQCCompany').value);
+            fd.append('phone', document.getElementById('dashInstQCPhone').value);
+            fd.append('email', document.getElementById('dashInstQCEmail').value);
+            fetch('installations.php', { method: 'POST', body: fd })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+                    var sel = document.getElementById('dashInstClientSelect');
+                    var opt = document.createElement('option');
+                    opt.value = data.id;
+                    opt.textContent = data.label;
+                    opt.selected = true;
+                    sel.appendChild(opt);
+                    sel.dispatchEvent(new Event('change'));
+                    bootstrap.Modal.getInstance(document.getElementById('dashInstQuickClientModal')).hide();
+                })
+                .catch(function() { errEl.textContent = 'Błąd połączenia z serwerem.'; errEl.classList.remove('d-none'); });
+        });
+    }
 
     // ===== Wyszukiwanie w selekcji urządzenia dla serwisu =====
     var svcSearch = document.getElementById('dashSvcDevSearch');
