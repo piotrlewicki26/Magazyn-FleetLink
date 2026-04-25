@@ -18,7 +18,8 @@ if (!file_exists($generatorFile)) {
     redirect(getBaseUrl() . 'dashboard.php');
 }
 
-// Serve the HTML generator file directly — it's a full standalone page
+// Security: restrict sources to known CDNs and same-origin
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn-cgi.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'");
 header('Content-Type: text/html; charset=UTF-8');
 readfile($generatorFile);
 exit;
