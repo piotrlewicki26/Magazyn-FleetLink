@@ -102,6 +102,15 @@ $pageTitle = ($pageTitle ?? 'Dashboard') . ' — FleetLink Magazyn';
                         <i class="fas fa-calendar-alt me-1"></i>Kalendarz
                     </a>
                 </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['offers','offer_generator']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                        <i class="fas fa-file-invoice-dollar me-1"></i>Oferty
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offers.php"><i class="fas fa-list me-2"></i>Lista ofert</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offer_generator.php" target="_blank"><i class="fas fa-magic me-2"></i>Generator ofert GPS</a></li>
+                    </ul>
+                </li>
                 <?php if (isAdmin()): ?>
                 <li class="nav-item">
                     <a class="nav-link <?= ($activePage ?? '') === 'statistics' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>statistics.php">

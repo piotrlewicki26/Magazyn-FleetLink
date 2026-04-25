@@ -55,6 +55,16 @@ function renderFlash() {
     return $html;
 }
 
+function formatPolishDate($timestamp = null) {
+    if ($timestamp === null) $timestamp = time();
+    $daysPL   = ['Niedziela','Poniedziałek','Wtorek','Środa','Czwartek','Piątek','Sobota'];
+    $monthsPL = [1=>'Stycznia','Lutego','Marca','Kwietnia','Maja','Czerwca',
+                    'Lipca','Sierpnia','Września','Października','Listopada','Grudnia'];
+    return $daysPL[(int)date('w', $timestamp)] . ', ' . (int)date('j', $timestamp)
+         . ' ' . $monthsPL[(int)date('n', $timestamp)] . ' ' . date('Y', $timestamp);
+}
+
+
 function formatDate($date, $format = 'd.m.Y') {
     if (empty($date) || $date === '0000-00-00') return '—';
     try {
