@@ -231,7 +231,7 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-wrench me-2 text-primary"></i>Serwisy</h1>
     <?php if ($action === 'list'): ?>
-    <a href="services.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowy serwis</a>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#svcListAddModal"><i class="fas fa-plus me-2"></i>Nowy serwis</button>
     <?php elseif ($action !== 'print'): ?>
     <a href="services.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -814,5 +814,123 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
     });
 }());
 </script>
+
+<?php if ($action === 'list'): ?>
+<!-- Modal: Nowy serwis (lista serwisów) -->
+<div class="modal fade" id="svcListAddModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="services.php" id="svcListAddForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-wrench me-2 text-warning"></i>Nowy serwis</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Urządzenie GPS</label>
+                            <input type="text" id="svcListDevSearch" class="form-control form-control-sm mb-1"
+                                   placeholder="Szukaj urządzenia (nr seryjny, model…)" autocomplete="off">
+                            <select name="device_id" id="svcListDevSelect" class="form-select" required size="4" style="height:auto">
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php
+                                $slGroup = '';
+                                foreach ($allDevices as $d):
+                                    $grp = $d['manufacturer_name'] . ' ' . $d['model_name'];
+                                    if ($grp !== $slGroup) {
+                                        if ($slGroup) echo '</optgroup>';
+                                        echo '<optgroup label="' . h($grp) . '">';
+                                        $slGroup = $grp;
+                                    }
+                                ?>
+                                <option value="<?= $d['id'] ?>"
+                                        data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'])) ?>">
+                                    <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?>
+                                </option>
+                                <?php endforeach; if ($slGroup) echo '</optgroup>'; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Powiązany montaż (aktywny)</label>
+                            <select name="installation_id" class="form-select">
+                                <option value="">— brak —</option>
+                                <?php foreach ($activeInstallations as $inst): ?>
+                                <option value="<?= $inst['id'] ?>"><?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Typ serwisu</label>
+                            <select name="type" id="svcListTypeSelect" class="form-select">
+                                <option value="przeglad" selected>Przegląd</option>
+                                <option value="naprawa">Naprawa</option>
+                                <option value="wymiana">Wymiana</option>
+                                <option value="aktualizacja">Aktualizacja firmware</option>
+                                <option value="inne">Inne</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Status</label>
+                            <select name="status" class="form-select">
+                                <option value="zaplanowany" selected>Zaplanowany</option>
+                                <option value="w_trakcie">W trakcie</option>
+                                <option value="zakończony">Zakończony</option>
+                                <option value="anulowany">Anulowany</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data zaplanowana</label>
+                            <input type="date" name="planned_date" id="svcListPlannedDate" class="form-control" required>
+                        </div>
+                        <?php if (!empty($users)): ?>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik</label>
+                            <select name="technician_id" class="form-select">
+                                <option value="">— aktualny użytkownik —</option>
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>"><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php endif; ?>
+                        <div class="col-12">
+                            <label class="form-label">Opis / Problem</label>
+                            <textarea name="description" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-warning btn-sm text-white"><i class="fas fa-save me-1"></i>Zarejestruj serwis</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var modal = document.getElementById('svcListAddModal');
+    if (!modal) return;
+    modal.addEventListener('show.bs.modal', function () {
+        document.getElementById('svcListDevSearch').value = '';
+        document.getElementById('svcListDevSelect').value = '';
+        document.querySelectorAll('#svcListDevSelect option').forEach(function (o) { o.style.display = ''; });
+        document.getElementById('svcListPlannedDate').value = new Date().toISOString().slice(0, 10);
+    });
+    var search = document.getElementById('svcListDevSearch');
+    if (search) {
+        search.addEventListener('input', function () {
+            var q = this.value.toLowerCase().trim();
+            document.querySelectorAll('#svcListDevSelect option').forEach(function (o) {
+                if (!o.value) { o.style.display = ''; return; }
+                o.style.display = (!q || (o.dataset.search || '').includes(q)) ? '' : 'none';
+            });
+        });
+    }
+}());
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

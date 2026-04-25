@@ -570,7 +570,7 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-car me-2 text-primary"></i>Montaże / Demontaże</h1>
     <?php if ($action === 'list'): ?>
-    <a href="installations.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Nowy montaż</a>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#instListAddModal"><i class="fas fa-plus me-2"></i>Nowy montaż</button>
     <?php else: ?>
     <a href="installations.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -1755,6 +1755,340 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
         if (checked) applyModeToRow(row, checked.value);
     });
     updateRowNumbers();
+}());
+</script>
+<?php endif; ?>
+
+<?php if ($action === 'list'): ?>
+<!-- Modal: Nowy montaż (lista montaży) — wielourządzeniowy z TomSelect -->
+<div class="modal fade" id="instListAddModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <form method="POST" action="installations.php" id="instListAddForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-car me-2 text-success"></i>Nowy montaż</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label required-star">Urządzenia GPS do montażu</label>
+                            <?php if (empty($availableModels) && empty($availableDevices)): ?>
+                            <div class="alert alert-warning py-2">Brak dostępnych urządzeń w magazynie. <a href="devices.php?action=add">Dodaj urządzenia</a>.</div>
+                            <?php endif; ?>
+                            <div id="instListDevRowsContainer" class="d-flex flex-column gap-2 mb-2">
+                                <div class="device-row border rounded p-2 bg-light" data-row-idx="0">
+                                    <div class="row g-2 align-items-center">
+                                        <div class="col-auto"><span class="row-num badge bg-secondary">1</span></div>
+                                        <div class="col-auto">
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <input type="radio" class="btn-check" name="device_mode[0]" id="ilm_auto_0" value="auto" checked>
+                                                <label class="btn btn-outline-secondary" for="ilm_auto_0"><i class="fas fa-magic me-1"></i>Auto</label>
+                                                <input type="radio" class="btn-check" name="device_mode[0]" id="ilm_manual_0" value="manual">
+                                                <label class="btn btn-outline-primary" for="ilm_manual_0"><i class="fas fa-hand-pointer me-1"></i>Ręczny</label>
+                                            </div>
+                                        </div>
+                                        <div class="col col-mode-auto">
+                                            <select name="model_id[0]" class="form-select form-select-sm">
+                                                <option value="">— wybierz model —</option>
+                                                <?php foreach ($availableModels as $m): ?>
+                                                <option value="<?= $m['model_id'] ?>"><?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)</option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                        <div class="col col-mode-manual" style="display:none">
+                                            <select name="device_id_manual[0]" class="form-select form-select-sm ts-device-il">
+                                                <option value="">— wybierz urządzenie —</option>
+                                                <?php
+                                                $ilGroup0 = '';
+                                                foreach ($availableDevices as $dev):
+                                                    $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
+                                                    if ($grp !== $ilGroup0) { if ($ilGroup0) echo '</optgroup>'; echo '<optgroup label="' . h($grp) . '">'; $ilGroup0 = $grp; }
+                                                ?>
+                                                <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' ['.h($dev['imei']).']' : '' ?><?= $dev['sim_number'] ? ' ('.h($dev['sim_number']).')' : '' ?></option>
+                                                <?php endforeach; if ($ilGroup0) echo '</optgroup>'; ?>
+                                            </select>
+                                        </div>
+                                        <div class="col-auto">
+                                            <input type="text" name="vehicle_registration[0]" class="form-control form-control-sm" required placeholder="Nr rej. pojazdu" style="text-transform:uppercase;min-width:130px">
+                                        </div>
+                                        <div class="col-auto">
+                                            <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" style="display:none" title="Usuń"><i class="fas fa-times"></i></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" id="instListAddRowBtn" class="btn btn-sm btn-outline-success"><i class="fas fa-plus me-1"></i>Dodaj kolejne urządzenie</button>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Klient</label>
+                            <div class="input-group">
+                                <select name="client_id" id="instListClientSel" class="form-select">
+                                    <option value="">— brak przypisania —</option>
+                                    <?php foreach ($clients as $cl): ?>
+                                    <option value="<?= $cl['id'] ?>"><?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-outline-success" id="instListQCBtn" title="Dodaj nowego klienta"><i class="fas fa-user-plus"></i></button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Adres instalacji</label>
+                            <input type="text" name="installation_address" id="instListAddrFld" class="form-control" placeholder="Automatycznie z klienta lub wpisz ręcznie">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik</label>
+                            <select name="technician_id" class="form-select">
+                                <option value="">— aktualny użytkownik —</option>
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>"><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data montażu</label>
+                            <input type="date" name="installation_date" id="instListDateFld" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Status</label>
+                            <select name="status" class="form-select">
+                                <option value="aktywna" selected>Aktywna</option>
+                                <option value="zakonczona">Zakończona</option>
+                                <option value="anulowana">Anulowana</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Miejsce montażu w pojeździe</label>
+                            <input type="text" name="location_in_vehicle" class="form-control" placeholder="np. pod deską rozdzielczą">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Quick-add klienta (montaż z listy) -->
+<div class="modal fade" id="instListQCModal" tabindex="-1" style="z-index:1090">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="fas fa-user-plus me-2"></i>Szybko dodaj klienta</h6>
+                <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2 text-danger small d-none" id="instListQCErr"></div>
+                <div class="mb-2"><label class="form-label form-label-sm required-star">Imię i nazwisko kontaktu</label><input type="text" id="instListQCName" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Nazwa firmy</label><input type="text" id="instListQCCompany" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Telefon</label><input type="text" id="instListQCPhone" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">E-mail</label><input type="email" id="instListQCEmail" class="form-control form-control-sm"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success btn-sm" id="instListQCSaveBtn"><i class="fas fa-save me-1"></i>Dodaj</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<template id="instListDevRowTemplate">
+    <div class="device-row border rounded p-2 bg-light" data-row-idx="__IDX__">
+        <div class="row g-2 align-items-center">
+            <div class="col-auto"><span class="row-num badge bg-secondary">__NUM__</span></div>
+            <div class="col-auto">
+                <div class="btn-group btn-group-sm" role="group">
+                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="ilm_auto___IDX__" value="auto" checked>
+                    <label class="btn btn-outline-secondary" for="ilm_auto___IDX__"><i class="fas fa-magic me-1"></i>Auto</label>
+                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="ilm_manual___IDX__" value="manual">
+                    <label class="btn btn-outline-primary" for="ilm_manual___IDX__"><i class="fas fa-hand-pointer me-1"></i>Ręczny</label>
+                </div>
+            </div>
+            <div class="col col-mode-auto">
+                <select name="model_id[__IDX__]" class="form-select form-select-sm">
+                    <option value="">— wybierz model —</option>
+                    <?php foreach ($availableModels as $m): ?>
+                    <option value="<?= $m['model_id'] ?>"><?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col col-mode-manual" style="display:none">
+                <select name="device_id_manual[__IDX__]" class="form-select form-select-sm ts-device-il">
+                    <option value="">— wybierz urządzenie —</option>
+                    <?php
+                    $ilTplGroup = '';
+                    foreach ($availableDevices as $dev):
+                        $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
+                        if ($grp !== $ilTplGroup) { if ($ilTplGroup) echo '</optgroup>'; echo '<optgroup label="' . h($grp) . '">'; $ilTplGroup = $grp; }
+                    ?>
+                    <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' ['.h($dev['imei']).']' : '' ?><?= $dev['sim_number'] ? ' ('.h($dev['sim_number']).')' : '' ?></option>
+                    <?php endforeach; if ($ilTplGroup) echo '</optgroup>'; ?>
+                </select>
+            </div>
+            <div class="col-auto">
+                <input type="text" name="vehicle_registration[__IDX__]" class="form-control form-control-sm" required placeholder="Nr rej. pojazdu" style="text-transform:uppercase;min-width:130px">
+            </div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" title="Usuń"><i class="fas fa-times"></i></button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+window.flIlDevices = <?= json_encode(array_values(array_map(function($d) {
+    $t = $d['serial_number'];
+    if ($d['imei'])       $t .= ' [' . $d['imei'] . ']';
+    if ($d['sim_number']) $t .= ' (' . $d['sim_number'] . ')';
+    return ['value' => (string)$d['id'], 'text' => $t];
+}, $availableDevices))) ?>;
+window.flIlClientAddresses = <?= json_encode(array_reduce($clients, function($c, $cl) {
+    $parts = array_filter([$cl['address'] ?? '', trim(($cl['postal_code'] ?? '') . ' ' . ($cl['city'] ?? ''))]);
+    $c[(string)$cl['id']] = implode(', ', $parts);
+    return $c;
+}, []), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+</script>
+<script>
+(function () {
+    var container  = document.getElementById('instListDevRowsContainer');
+    var addBtn     = document.getElementById('instListAddRowBtn');
+    var rowCounter = 1;
+    if (!container || !addBtn) return;
+
+    function ilSyncDropdowns() {
+        var rows = Array.from(container.querySelectorAll('.device-row'));
+        var rowVals = new Map();
+        rows.forEach(function (row) {
+            var sel = row.querySelector('select.ts-device-il');
+            if (!sel || !sel.tomselect) return;
+            rowVals.set(row, sel.tomselect.getValue() || '');
+        });
+        rows.forEach(function (row) {
+            var sel = row.querySelector('select.ts-device-il');
+            if (!sel || !sel.tomselect) return;
+            var ts = sel.tomselect, myVal = rowVals.get(row) || '';
+            var taken = new Set();
+            rowVals.forEach(function (v, r) { if (r !== row && v) taken.add(v); });
+            (window.flIlDevices || []).forEach(function (dev) {
+                if (taken.has(dev.value)) { if (ts.options[dev.value]) ts.removeOption(dev.value); }
+                else { if (!ts.options[dev.value]) ts.addOption({ value: dev.value, text: dev.text }); }
+            });
+            ts.refreshOptions(false);
+            if (myVal && ts.options[myVal]) ts.setValue(myVal, true);
+        });
+    }
+    function ilInitTS(row) {
+        row.querySelectorAll('select.ts-device-il').forEach(function (sel) {
+            if (sel.tomselect || typeof TomSelect === 'undefined') return;
+            new TomSelect(sel, { placeholder: '— szukaj urządzenia —', allowEmptyOption: true, maxOptions: null, searchField: ['text','value'] });
+        });
+    }
+    function ilDestroyTS(row) {
+        row.querySelectorAll('select.ts-device-il').forEach(function (sel) { if (sel.tomselect) sel.tomselect.destroy(); });
+    }
+    function ilApplyMode(row, mode) {
+        var ac = row.querySelector('.col-mode-auto'), mc = row.querySelector('.col-mode-manual');
+        if (ac) ac.style.display = mode === 'auto'   ? '' : 'none';
+        if (mc) mc.style.display = mode === 'manual' ? '' : 'none';
+        if (mode === 'manual') { ilInitTS(row); ilSyncDropdowns(); }
+    }
+    function ilUpdateNums() {
+        var rows = container.querySelectorAll('.device-row');
+        rows.forEach(function (row, i) {
+            var n = row.querySelector('.row-num'); if (n) n.textContent = i + 1;
+            var b = row.querySelector('.remove-row-btn'); if (b) b.style.display = rows.length > 1 ? '' : 'none';
+        });
+    }
+    container.addEventListener('change', function (e) {
+        if (e.target.type === 'radio' && (e.target.name || '').startsWith('device_mode'))
+            ilApplyMode(e.target.closest('.device-row'), e.target.value);
+        if (e.target.classList.contains('ts-device-il') || e.target.closest('select.ts-device-il'))
+            ilSyncDropdowns();
+    });
+    container.addEventListener('click', function (e) {
+        var btn = e.target.closest('.remove-row-btn');
+        if (btn) { var row = btn.closest('.device-row'); ilDestroyTS(row); row.remove(); ilUpdateNums(); ilSyncDropdowns(); }
+    });
+    addBtn.addEventListener('click', function () {
+        var tpl = document.getElementById('instListDevRowTemplate'); if (!tpl) return;
+        var idx = rowCounter++, clone = tpl.content.cloneNode(true);
+        clone.querySelectorAll('[name]').forEach(function (el) { el.name = el.name.replace(/__IDX__/g, idx); });
+        clone.querySelectorAll('[id]').forEach(function (el)   { el.id   = el.id.replace(/__IDX__/g, idx); });
+        clone.querySelectorAll('[for]').forEach(function (el)  { el.htmlFor = el.htmlFor.replace(/__IDX__/g, idx); });
+        container.appendChild(clone); ilUpdateNums();
+    });
+
+    var modal = document.getElementById('instListAddModal');
+    if (modal) {
+        modal.addEventListener('show.bs.modal', function () {
+            Array.from(container.querySelectorAll('.device-row')).forEach(function (row, i) {
+                if (i > 0) { ilDestroyTS(row); row.remove(); }
+            });
+            rowCounter = 1;
+            var firstRow = container.querySelector('.device-row');
+            if (firstRow) {
+                var reg = firstRow.querySelector('input[name="vehicle_registration[0]"]'); if (reg) reg.value = '';
+                var ar = firstRow.querySelector('input[value="auto"]'); if (ar) { ar.checked = true; ilApplyMode(firstRow, 'auto'); }
+                var ms = firstRow.querySelector('select[name="model_id[0]"]'); if (ms) ms.value = '';
+                ilDestroyTS(firstRow);
+            }
+            document.getElementById('instListClientSel').value = '';
+            document.getElementById('instListAddrFld').value = '';
+            document.getElementById('instListDateFld').value = new Date().toISOString().slice(0, 10);
+            ilUpdateNums();
+        });
+    }
+
+    var cliSel = document.getElementById('instListClientSel');
+    if (cliSel) cliSel.addEventListener('change', function () {
+        var v = this.value, addr = document.getElementById('instListAddrFld');
+        if (addr) addr.value = (v && window.flIlClientAddresses && window.flIlClientAddresses[v]) ? window.flIlClientAddresses[v] : '';
+    });
+
+    var qcBtn = document.getElementById('instListQCBtn');
+    if (qcBtn) qcBtn.addEventListener('click', function () {
+        ['instListQCName','instListQCCompany','instListQCPhone','instListQCEmail'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+        var err = document.getElementById('instListQCErr'); if (err) err.classList.add('d-none');
+        new bootstrap.Modal(document.getElementById('instListQCModal')).show();
+    });
+    var qcSave = document.getElementById('instListQCSaveBtn');
+    if (qcSave) qcSave.addEventListener('click', function () {
+        var name = (document.getElementById('instListQCName').value || '').trim();
+        var errEl = document.getElementById('instListQCErr');
+        if (!name) { errEl.textContent = 'Imię i nazwisko kontaktu jest wymagane.'; errEl.classList.remove('d-none'); return; }
+        errEl.classList.add('d-none');
+        var fd = new FormData();
+        fd.append('action', 'quick_add_client');
+        fd.append('csrf_token', document.querySelector('#instListAddForm input[name="csrf_token"]').value);
+        fd.append('contact_name', name);
+        fd.append('company_name', document.getElementById('instListQCCompany').value);
+        fd.append('phone', document.getElementById('instListQCPhone').value);
+        fd.append('email', document.getElementById('instListQCEmail').value);
+        fetch('installations.php', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+                var sel = document.getElementById('instListClientSel');
+                var opt = document.createElement('option'); opt.value = data.id; opt.textContent = data.label; opt.selected = true;
+                sel.appendChild(opt); sel.dispatchEvent(new Event('change'));
+                bootstrap.Modal.getInstance(document.getElementById('instListQCModal')).hide();
+            })
+            .catch(function () { errEl.textContent = 'Błąd połączenia z serwerem.'; errEl.classList.remove('d-none'); });
+    });
+
+    container.querySelectorAll('.device-row').forEach(function (row) {
+        var checked = row.querySelector('.btn-check:checked'); if (checked) ilApplyMode(row, checked.value);
+    });
+    ilUpdateNums();
 }());
 </script>
 <?php endif; ?>
