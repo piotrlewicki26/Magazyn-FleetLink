@@ -371,6 +371,15 @@ if ($action === 'view' && $id) {
         ");
         $availableAccessories = $aaStmt->fetchAll();
     } catch (Exception $e) { $availableAccessories = []; }
+
+    // All devices for the protocol modal (PS service device pickers)
+    $allDevicesForProto = $db->query("
+        SELECT d.id, d.serial_number, d.imei, m.name as model_name, mf.name as manufacturer_name
+        FROM devices d
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        ORDER BY mf.name, m.name, d.serial_number
+    ")->fetchAll();
 }
 
 if ($action === 'edit' && $id) {
@@ -817,7 +826,7 @@ function toggleBatchRows(groupKey, btn) {
                 <button onclick="showUninstallModal(<?= $installation['id'] ?>, <?= $installation['device_id'] ?>, '<?= h($installation['serial_number']) ?>')" class="btn btn-sm btn-warning"><i class="fas fa-minus-circle me-1"></i>Demontaż</button>
                 <?php endif; ?>
                 <a href="services.php?action=add&installation=<?= $installation['id'] ?>&device=<?= $installation['device_id'] ?>" class="btn btn-sm btn-outline-warning"><i class="fas fa-wrench me-1"></i>Serwis</a>
-                <a href="protocols.php?action=add&installation=<?= $installation['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#addProtocolModal"><i class="fas fa-clipboard me-1"></i>Protokół</button>
                 <a href="installations.php?action=print_batch&ids=<?= $installation['id'] ?>" class="btn btn-sm btn-outline-dark"><i class="fas fa-print me-1"></i>Drukuj</a>
             </div>
         </div>
@@ -940,6 +949,119 @@ function toggleBatchRows(groupKey, btn) {
         </div>
     </div>
 </div>
+
+<!-- Add Protocol Modal -->
+<div class="modal fade" id="addProtocolModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="protocols.php">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="batch_ref" value="inst:<?= $installation['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-clipboard me-2 text-secondary"></i>Nowy protokół</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Typ protokołu</label>
+                            <select name="type" id="protoModalType" class="form-select" required>
+                                <option value="PP" selected>PP — Protokół Przekazania</option>
+                                <option value="PU">PU — Protokół Uruchomienia</option>
+                                <option value="PS">PS — Protokół Serwisowy</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data</label>
+                            <input type="date" name="date" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik</label>
+                            <select name="technician_id" class="form-select">
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= getCurrentUser()['id'] == $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Podpis klienta</label>
+                            <input type="text" name="client_signature" class="form-control" placeholder="np. Jan Kowalski">
+                        </div>
+
+                        <!-- PS-specific section -->
+                        <div id="protoModalPsSection" class="col-12" style="display:none">
+                            <hr class="my-1">
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <label class="form-label fw-semibold text-warning-emphasis"><i class="fas fa-tools me-1"></i>Serwis dotyczy urządzenia</label>
+                                    <select name="service_device_id" class="form-select">
+                                        <option value="">— wybierz urządzenie —</option>
+                                        <?php foreach ($allDevicesForProto as $dev): ?>
+                                        <option value="<?= $dev['id'] ?>" <?= $dev['id'] == $installation['device_id'] ? 'selected' : '' ?>>
+                                            <?= h($dev['manufacturer_name'] . ' ' . $dev['model_name'] . ' — ' . $dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold text-warning-emphasis"><i class="fas fa-wrench me-1"></i>Typ czynności</label>
+                                    <select name="service_type" id="protoModalSvcType" class="form-select">
+                                        <option value="">— wybierz —</option>
+                                        <option value="przeglad">Przegląd</option>
+                                        <option value="naprawa">Naprawa</option>
+                                        <option value="wymiana">Wymiana</option>
+                                        <option value="aktualizacja">Aktualizacja firmware</option>
+                                        <option value="inne">Inne</option>
+                                    </select>
+                                </div>
+                                <div id="protoModalReplWrapper" class="col-12" style="display:none">
+                                    <label class="form-label fw-semibold text-danger"><i class="fas fa-exchange-alt me-1"></i>Urządzenie zastępcze</label>
+                                    <select name="replacement_device_id" class="form-select">
+                                        <option value="">— wybierz —</option>
+                                        <?php foreach ($allDevicesForProto as $dev): ?>
+                                        <option value="<?= $dev['id'] ?>">
+                                            <?= h($dev['manufacturer_name'] . ' ' . $dev['model_name'] . ' — ' . $dev['serial_number']) ?><?= $dev['imei'] ? ' [' . h($dev['imei']) . ']' : '' ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            </div>
+                            <hr class="my-1">
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label">Uwagi / Zakres prac</label>
+                            <textarea name="notes" class="form-control" rows="3"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-save me-1"></i>Utwórz protokół</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    var typeEl = document.getElementById('protoModalType');
+    var psSection = document.getElementById('protoModalPsSection');
+    var svcTypeEl = document.getElementById('protoModalSvcType');
+    var replWrapper = document.getElementById('protoModalReplWrapper');
+    if (typeEl) {
+        typeEl.addEventListener('change', function() {
+            psSection.style.display = this.value === 'PS' ? '' : 'none';
+        });
+    }
+    if (svcTypeEl) {
+        svcTypeEl.addEventListener('change', function() {
+            replWrapper.style.display = this.value === 'wymiana' ? '' : 'none';
+        });
+    }
+})();
+</script>
 
 <?php elseif ($action === 'add' || $action === 'edit'): ?>
 <div class="card" style="max-width:1400px">

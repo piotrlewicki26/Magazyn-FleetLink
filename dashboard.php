@@ -286,13 +286,13 @@ include __DIR__ . '/includes/header.php';
                             <span>Dodaj urządzenie</span>
                         </button>
                     </div>
+                    <?php endif; ?>
                     <div class="col-6 col-md-2">
                         <button type="button" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenAddSim()">
                             <i class="fas fa-sim-card fa-2x mb-2"></i>
                             <span>Dodaj kartę SIM</span>
                         </button>
                     </div>
-                    <?php endif; ?>
                     <div class="col-6 col-md-2">
                         <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenInstall()">
                             <i class="fas fa-car fa-2x mb-2"></i>
@@ -305,14 +305,12 @@ include __DIR__ . '/includes/header.php';
                             <span>Nowy serwis</span>
                         </button>
                     </div>
-                    <?php if (!isTechnician()): ?>
                     <div class="col-6 col-md-2">
                         <button type="button" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenClient()">
                             <i class="fas fa-user-plus fa-2x mb-2"></i>
                             <span>Nowy klient</span>
                         </button>
                     </div>
-                    <?php endif; ?>
                     <div class="col-6 col-md-2">
                         <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
                             <i class="fas fa-calendar-alt fa-2x mb-2"></i>
@@ -438,12 +436,13 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+<?php endif; ?>
+
 <datalist id="dashSimListAdd">
     <?php foreach ($dashSimOptions as $sc): ?>
     <option value="<?= h($sc) ?>">
     <?php endforeach; ?>
 </datalist>
-<?php endif; ?>
 
 <!-- Modal: Nowy montaż — pełny formularz z wieloma urządzeniami (Auto / Ręczny) -->
 <div class="modal fade" id="dashInstallModal" tabindex="-1">
@@ -827,7 +826,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php if (isAdmin()): ?>
+<?php // Modal: Dodaj kartę SIM — available to all logged-in users ?>
 <!-- Modal: Dodaj kartę SIM -->
 <div class="modal fade" id="dashAddSimModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
@@ -876,7 +875,6 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
-<?php endif; ?>
 
 <script>
 // ===== MODAL: Dodaj urządzenia =====
