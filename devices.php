@@ -1177,8 +1177,6 @@ function openSimEdit(deviceId, currentSim) {
             <div class="card-footer d-flex gap-2">
                 <?php if (!isTechnician()): ?>
                 <a href="devices.php?action=edit&id=<?= $device['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
-                <a href="installations.php?action=add&device=<?= $device['id'] ?>" class="btn btn-sm btn-success"><i class="fas fa-car me-1"></i>Montaż</a>
-                <a href="services.php?action=add&device=<?= $device['id'] ?>" class="btn btn-sm btn-warning"><i class="fas fa-wrench me-1"></i>Serwis</a>
                 <?php endif; ?>
             </div>
         </div>
