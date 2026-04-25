@@ -35,6 +35,8 @@ $dashAvailableDevices = $db->query("SELECT d.id, d.serial_number, d.imei, d.sim_
 $dashActiveInstallations = $db->query("SELECT i.id, v.registration, d.serial_number FROM installations i JOIN vehicles v ON v.id=i.vehicle_id JOIN devices d ON d.id=i.device_id WHERE i.status='aktywna' ORDER BY v.registration")->fetchAll();
 $dashUsers = [];
 try { $dashUsers = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll(); } catch (Exception $e) {}
+$dashAllDevicesForSim = [];
+try { $dashAllDevicesForSim = $db->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status NOT IN ('wycofany','sprzedany') ORDER BY mf.name, m.name, d.serial_number")->fetchAll(); } catch (Exception $e) {}
 
 // Recent installations – grouped by batch_id so multi-device batches appear as one row
 // Fetch more rows than needed so PHP grouping can collapse batches into 5 display items
@@ -286,10 +288,10 @@ include __DIR__ . '/includes/header.php';
                         </button>
                     </div>
                     <div class="col-6 col-md-2">
-                        <a href="sim_cards.php?action=add" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center">
+                        <button type="button" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenAddSim()">
                             <i class="fas fa-sim-card fa-2x mb-2"></i>
                             <span>Dodaj kartę SIM</span>
-                        </a>
+                        </button>
                     </div>
                     <?php endif; ?>
                     <div class="col-6 col-md-2">
@@ -318,14 +320,6 @@ include __DIR__ . '/includes/header.php';
                             <span>Kalendarz</span>
                         </a>
                     </div>
-                    <?php if (!isTechnician()): ?>
-                    <div class="col-6 col-md-2">
-                        <a href="statistics.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
-                            <i class="fas fa-chart-bar fa-2x mb-2"></i>
-                            <span>Statystyki</span>
-                        </a>
-                    </div>
-                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -834,6 +828,57 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php if (isAdmin()): ?>
+<!-- Modal: Dodaj kartę SIM -->
+<div class="modal fade" id="dashAddSimModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <form method="POST" action="sim_cards.php" id="dashAddSimForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="bulk_add_sims">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-sim-card me-2 text-dark"></i>Dodaj karty SIM</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3 pb-3 border-bottom">
+                        <div class="col-md-4">
+                            <label class="form-label">Operator <span class="text-muted">(wspólny dla wszystkich)</span></label>
+                            <input type="text" name="operator" class="form-control"
+                                   placeholder="np. Play, Orange, T-Mobile" maxlength="50">
+                        </div>
+                    </div>
+                    <div class="mb-2 d-flex align-items-center justify-content-between">
+                        <span class="fw-semibold text-muted small">Karty SIM do dodania</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="dashSimAddRow()"><i class="fas fa-plus me-1"></i>Dodaj wiersz</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:30px">#</th>
+                                    <th>Nr telefonu SIM <span class="text-danger">*</span></th>
+                                    <th>ICCID / nr karty</th>
+                                    <th>Przypisz do urządzenia</th>
+                                    <th>Uwagi</th>
+                                    <th style="width:42px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashSimBulkBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-muted small" id="dashSimBulkCount">0 kart do dodania</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-dark btn-sm"><i class="fas fa-save me-1"></i>Zapisz karty SIM</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <script>
 // ===== MODAL: Dodaj urządzenia =====
 var dashDevRowCount = 0;
@@ -1125,6 +1170,69 @@ function dashOpenService() {
 function dashOpenClient() {
     document.getElementById('dashClientForm').reset();
     new bootstrap.Modal(document.getElementById('dashClientModal')).show();
+}
+
+// ===== MODAL: Dodaj kartę SIM =====
+var dashSimDevices = <?= json_encode(array_values(array_map(function($d) {
+    return [
+        'id'    => (string)$d['id'],
+        'label' => $d['serial_number']
+                   . ($d['imei']       ? ' [' . $d['imei'] . ']' : '')
+                   . ($d['sim_number'] ? ' — SIM: ' . $d['sim_number'] : '')
+                   . ' (' . $d['manufacturer_name'] . ' ' . $d['model_name'] . ')',
+    ];
+}, $dashAllDevicesForSim))) ?>;
+
+var dashSimRowCount = 0;
+
+function dashSimBuildDeviceSelect() {
+    var opts = '<option value="">— brak —</option>';
+    dashSimDevices.forEach(function(d) {
+        opts += '<option value="' + d.id + '">' + d.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') + '</option>';
+    });
+    return '<select name="device_ids_sim[]" class="form-select form-select-sm">' + opts + '</select>';
+}
+
+function dashSimAddRow() {
+    dashSimRowCount++;
+    var n = dashSimRowCount;
+    var tbody = document.getElementById('dashSimBulkBody');
+    var tr = document.createElement('tr');
+    tr.id = 'dash-sim-row-' + n;
+    tr.innerHTML =
+        '<td class="text-muted text-center align-middle">' + n + '</td>' +
+        '<td><input type="text" name="phone_numbers[]" class="form-control form-control-sm" placeholder="+48 123 456 789" maxlength="30" required></td>' +
+        '<td><input type="text" name="iccids[]" class="form-control form-control-sm" placeholder="20-cyfrowy ICCID" maxlength="25"></td>' +
+        '<td>' + dashSimBuildDeviceSelect() + '</td>' +
+        '<td><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
+        '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="dashSimRemoveRow(' + n + ')" title="Usuń"><i class="fas fa-times"></i></button></td>';
+    tbody.appendChild(tr);
+    tr.querySelector('input[name="phone_numbers[]"]').focus();
+    dashSimUpdateCount();
+}
+
+function dashSimRemoveRow(n) {
+    var row = document.getElementById('dash-sim-row-' + n);
+    if (row) { row.remove(); dashSimUpdateCount(); }
+}
+
+function dashSimUpdateCount() {
+    var rows = document.querySelectorAll('#dashSimBulkBody tr').length;
+    var el = document.getElementById('dashSimBulkCount');
+    if (!el) return;
+    if (rows === 0) el.textContent = '0 kart do dodania';
+    else if (rows === 1) el.textContent = '1 karta do dodania';
+    else if (rows <= 4) el.textContent = rows + ' karty do dodania';
+    else el.textContent = rows + ' kart do dodania';
+}
+
+function dashOpenAddSim() {
+    dashSimRowCount = 0;
+    document.getElementById('dashSimBulkBody').innerHTML = '';
+    document.getElementById('dashAddSimForm').querySelector('[name="operator"]').value = '';
+    dashSimUpdateCount();
+    dashSimAddRow();
+    new bootstrap.Modal(document.getElementById('dashAddSimModal')).show();
 }
 </script>
 
