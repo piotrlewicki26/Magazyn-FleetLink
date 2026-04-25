@@ -683,7 +683,23 @@ include __DIR__ . '/includes/header.php';
                     <td><?= h($inst['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
                     <td>
-                        <a href="installations.php?action=view&id=<?= $inst['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showInstPreview(<?= htmlspecialchars(json_encode([
+                                    'id'                 => $inst['id'],
+                                    'status'             => $inst['status'],
+                                    'installation_date'  => $inst['installation_date'],
+                                    'uninstallation_date'=> $inst['uninstallation_date'] ?? null,
+                                    'serial_number'      => $inst['serial_number'],
+                                    'manufacturer_name'  => $inst['manufacturer_name'],
+                                    'model_name'         => $inst['model_name'],
+                                    'registration'       => $inst['registration'],
+                                    'make'               => $inst['make'],
+                                    'client'             => $inst['company_name'] ?: $inst['contact_name'] ?? '',
+                                    'technician_name'    => $inst['technician_name'] ?? '',
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd montażu">
+                            <i class="fas fa-eye"></i>
+                        </button>
                         <?php if ($inst['status'] === 'aktywna'): ?>
                         <button type="button" class="btn btn-sm btn-outline-warning btn-action"
                                 onclick="showUninstallModal(<?= $inst['id'] ?>, <?= $inst['device_id'] ?? 0 ?>, '<?= h($inst['serial_number']) ?>')">
@@ -717,7 +733,23 @@ include __DIR__ . '/includes/header.php';
                     <td><?= h($inst['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
                     <td>
-                        <a href="installations.php?action=view&id=<?= $inst['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showInstPreview(<?= htmlspecialchars(json_encode([
+                                    'id'                 => $inst['id'],
+                                    'status'             => $inst['status'],
+                                    'installation_date'  => $inst['installation_date'],
+                                    'uninstallation_date'=> $inst['uninstallation_date'] ?? null,
+                                    'serial_number'      => $inst['serial_number'],
+                                    'manufacturer_name'  => $inst['manufacturer_name'],
+                                    'model_name'         => $inst['model_name'],
+                                    'registration'       => $inst['registration'],
+                                    'make'               => $inst['make'],
+                                    'client'             => $inst['company_name'] ?: $inst['contact_name'] ?? '',
+                                    'technician_name'    => $inst['technician_name'] ?? '',
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd montażu">
+                            <i class="fas fa-eye"></i>
+                        </button>
                         <?php if ($inst['status'] === 'aktywna'): ?>
                         <button type="button" class="btn btn-sm btn-outline-warning btn-action"
                                 onclick="showUninstallModal(<?= $inst['id'] ?>, <?= $inst['device_id'] ?? 0 ?>, '<?= h($inst['serial_number']) ?>')">
@@ -753,7 +785,53 @@ function toggleBatchRows(groupKey, btn) {
         icon.classList.toggle('fa-chevron-up');
     }
 }
+
+function showInstPreview(data) {
+    var statusMap = {
+        'aktywna':    '<span class="badge bg-success">Aktywna</span>',
+        'zakonczona': '<span class="badge bg-secondary">Zakończona</span>',
+        'anulowana':  '<span class="badge bg-danger">Anulowana</span>'
+    };
+    var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
+    var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
+
+    document.getElementById('instPreviewTitle').textContent = 'Montaż #' + data.id;
+    document.getElementById('instPreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-0">' +
+        '<tr><th class="text-muted" style="width:40%">Status</th><td>' + statusBadge + '</td></tr>' +
+        '<tr><th class="text-muted">Data montażu</th><td>' + formatDate(data.installation_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Data demontażu</th><td>' + formatDate(data.uninstallation_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Urządzenie</th><td><strong>' + data.serial_number + '</strong><br><small class="text-muted">' + data.manufacturer_name + ' ' + data.model_name + '</small></td></tr>' +
+        '<tr><th class="text-muted">Pojazd</th><td>' + data.registration + '<br><small class="text-muted">' + data.make + '</small></td></tr>' +
+        '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Technik</th><td>' + (data.technician_name || '—') + '</td></tr>' +
+        '</table>';
+
+    document.getElementById('instPreviewViewBtn').href = 'installations.php?action=view&id=' + data.id;
+    document.getElementById('instPreviewPrintBtn').href = 'installations.php?action=print_batch&ids=' + data.id;
+
+    var modal = new bootstrap.Modal(document.getElementById('instPreviewModal'));
+    modal.show();
+}
 </script>
+
+<!-- Installation Preview Modal -->
+<div class="modal fade" id="instPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="instPreviewTitle"><i class="fas fa-car me-2 text-primary"></i>Podgląd montażu</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="instPreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <a id="instPreviewPrintBtn" href="#" target="_blank" class="btn btn-outline-dark btn-sm"><i class="fas fa-print me-1"></i>Drukuj</a>
+                <a id="instPreviewViewBtn" href="#" class="btn btn-info btn-sm text-white"><i class="fas fa-eye me-1"></i>Otwórz pełny widok</a>
+            </div>
+        </div>
+    </div>
+</div>
 
 </div><!-- /pane-montaze -->
 <div class="tab-pane fade" id="pane-protokoly" role="tabpanel">
@@ -856,49 +934,49 @@ function toggleBatchRows(groupKey, btn) {
                 </table>
             </div>
         </div>
-    </div>
-</div>
 
-<!-- Accessories section -->
-<div class="card mt-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria użyte przy tym montażu</span>
-        <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#issueAccModal">
-            <i class="fas fa-plus me-1"></i>Wydaj akcesorium
-        </button>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-sm mb-0">
-            <thead>
-                <tr><th>Akcesorium</th><th class="text-center">Ilość</th><th>Pobrał</th><th>Data pobrania</th><th>Uwagi</th><th></th></tr>
-            </thead>
-            <tbody>
-                <?php foreach ($installAccessories as $ia): ?>
-                <tr>
-                    <td class="fw-semibold"><?= h($ia['accessory_name']) ?></td>
-                    <td class="text-center fw-bold"><?= (int)$ia['quantity'] ?> szt</td>
-                    <td><?= h($ia['user_name']) ?></td>
-                    <td class="text-muted small"><?= formatDateTime($ia['issued_at']) ?></td>
-                    <td class="text-muted small"><?= h($ia['issue_notes'] ?? '') ?></td>
-                    <td>
-                        <form method="POST" class="d-inline">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="accessory_return">
-                            <input type="hidden" name="issue_id" value="<?= $ia['issue_id'] ?>">
-                            <input type="hidden" name="installation_id" value="<?= $installation['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
-                                    data-confirm="Cofnąć wydanie tego akcesorium?" title="Cofnij wydanie / zwróć do magazynu">
-                                <i class="fas fa-undo"></i>
-                            </button>
-                        </form>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-                <?php if (empty($installAccessories)): ?>
-                <tr><td colspan="6" class="text-center text-muted p-2">Brak akcesoriów przypisanych do tego zlecenia.</td></tr>
-                <?php endif; ?>
-            </tbody>
-        </table>
+        <!-- Accessories section -->
+        <div class="card mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria użyte przy tym montażu</span>
+                <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#issueAccModal">
+                    <i class="fas fa-plus me-1"></i>Wydaj akcesorium
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr><th>Akcesorium</th><th class="text-center">Ilość</th><th>Pobrał</th><th>Data pobrania</th><th>Uwagi</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($installAccessories as $ia): ?>
+                        <tr>
+                            <td class="fw-semibold"><?= h($ia['accessory_name']) ?></td>
+                            <td class="text-center fw-bold"><?= (int)$ia['quantity'] ?> szt</td>
+                            <td><?= h($ia['user_name']) ?></td>
+                            <td class="text-muted small"><?= formatDateTime($ia['issued_at']) ?></td>
+                            <td class="text-muted small"><?= h($ia['issue_notes'] ?? '') ?></td>
+                            <td>
+                                <form method="POST" class="d-inline">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="accessory_return">
+                                    <input type="hidden" name="issue_id" value="<?= $ia['issue_id'] ?>">
+                                    <input type="hidden" name="installation_id" value="<?= $installation['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                            data-confirm="Cofnąć wydanie tego akcesorium?" title="Cofnij wydanie / zwróć do magazynu">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($installAccessories)): ?>
+                        <tr><td colspan="6" class="text-center text-muted p-2">Brak akcesoriów przypisanych do tego zlecenia.</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 
