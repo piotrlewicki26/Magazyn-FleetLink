@@ -140,7 +140,7 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $v['installation_count'] ?></td>
                     <td>
                         <a href="vehicles.php?action=edit&id=<?= $v['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
-                        <button type="button" class="btn btn-sm btn-outline-success btn-action veh-new-inst-btn" title="Nowy montaż" data-registration="<?= h($v['registration']) ?>"><i class="fas fa-plus"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action veh-new-inst-btn" title="Nowy montaż" aria-label="Nowy montaż dla pojazdu <?= h($v['registration']) ?>" data-registration="<?= h($v['registration']) ?>"><i class="fas fa-plus"></i></button>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="delete">

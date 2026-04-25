@@ -1871,7 +1871,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
-                    <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
+                    <button type="submit" class="btn btn-success btn-sm" <?= (empty($availableModels) && empty($availableDevices)) ? 'disabled' : '' ?>><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
                 </div>
             </form>
         </div>
