@@ -770,7 +770,7 @@ function filterInstallVehicles() {
     var clientId = document.getElementById('installClientSelect').value;
     document.querySelectorAll('#installVehicleSelect option').forEach(function(opt) {
         if (!opt.value) { opt.style.display = ''; return; }
-        if (!clientId || opt.dataset.client == clientId || !opt.dataset.client || opt.dataset.client == '0') {
+        if (!clientId || parseInt(opt.dataset.client) === parseInt(clientId) || !opt.dataset.client || parseInt(opt.dataset.client) === 0) {
             opt.style.display = '';
         } else {
             opt.style.display = 'none';
@@ -917,7 +917,7 @@ function openSimEdit(deviceId, currentSim) {
                     ?>
                     <?php if ($activeInst): ?>
                     <tr><th class="text-muted">Data montażu</th><td><?= formatDate($activeInst['installation_date']) ?></td></tr>
-                    <tr><th class="text-muted">Pojazd (montaż)</th><td><?= h($activeInst['registration'] . ($activeInst['make'] ? ' ' . $activeInst['make'] : '')) ?></td></tr>
+                    <tr><th class="text-muted">Pojazd (montaż)</th><td><?= h($activeInst['registration']) . ($activeInst['make'] ? ' ' . h($activeInst['make']) : '') ?></td></tr>
                     <?php endif; ?>
                     <tr><th class="text-muted">Data zakupu</th><td><?= formatDate($device['purchase_date']) ?></td></tr>
                     <tr><th class="text-muted">Cena zakupu</th><td><?= $device['purchase_price'] ? formatMoney($device['purchase_price']) : '—' ?></td></tr>
