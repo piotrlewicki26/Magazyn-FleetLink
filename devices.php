@@ -426,7 +426,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Bulk actions panel (hidden until devices are selected) -->
 <form id="bulkPurchaseForm" method="POST">
     <?= csrfField() ?>
-    <div id="bulkActionsPanel" class="card border-warning mb-3" style="display:none">
+    <div id="bulkActionsPanel" class="card border-warning mb-3 d-none">
         <div class="card-header d-flex align-items-center gap-2 bg-warning bg-opacity-10">
             <i class="fas fa-tasks text-warning"></i>
             <strong>Akcje masowe</strong>
@@ -447,8 +447,7 @@ include __DIR__ . '/includes/header.php';
                     <button type="submit" name="action" value="bulk_purchase" class="btn btn-sm btn-warning">
                         <i class="fas fa-save me-1"></i>Przypisz cenę / datę
                     </button>
-                    <button type="submit" name="action" value="bulk_delete" class="btn btn-sm btn-danger"
-                            id="bulkDeleteBtn">
+                    <button type="button" class="btn btn-sm btn-danger" id="bulkDeleteBtn">
                         <i class="fas fa-trash me-1"></i>Usuń zaznaczone
                     </button>
                 </div>
@@ -588,10 +587,10 @@ function openSimEdit(deviceId, currentSim) {
     function syncPanel() {
         var n = countChecked();
         if (n > 0) {
-            panel.style.display = '';
+            panel.classList.remove('d-none');
             countEl.textContent = '(' + pluralLabel(n) + ' zaznaczonych)';
         } else {
-            panel.style.display = 'none';
+            panel.classList.add('d-none');
             countEl.textContent = '';
         }
     }
@@ -617,9 +616,16 @@ function openSimEdit(deviceId, currentSim) {
 
     if (deleteBtn) {
         deleteBtn.addEventListener('click', function (e) {
+            e.preventDefault();
             var n = countChecked();
-            if (!confirm('Czy na pewno chcesz usunąć ' + pluralLabel(n) + '? Tej operacji nie można cofnąć.')) {
-                e.preventDefault();
+            if (confirm('Czy na pewno chcesz usunąć ' + pluralLabel(n) + '? Tej operacji nie można cofnąć.')) {
+                var form = deleteBtn.closest('form');
+                var hidden = document.createElement('input');
+                hidden.type  = 'hidden';
+                hidden.name  = 'action';
+                hidden.value = 'bulk_delete';
+                form.appendChild(hidden);
+                form.submit();
             }
         });
     }
