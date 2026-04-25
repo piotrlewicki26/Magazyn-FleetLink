@@ -220,6 +220,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         flashSuccess('Zaktualizowano ' . $label . '.');
         redirect(getBaseUrl() . 'devices.php');
+
+    } elseif ($postAction === 'bulk_delete') {
+        if (!isAdmin()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'devices.php'); }
+        $bulkDelIds = array_map('intval', $_POST['device_ids'] ?? []);
+        $bulkDelIds = array_filter($bulkDelIds);
+        if (empty($bulkDelIds)) {
+            flashError('Nie wybrano żadnych urządzeń.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        $deleted = 0;
+        $errors  = 0;
+        foreach ($bulkDelIds as $bulkDelId) {
+            $delRow = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+            $delRow->execute([$bulkDelId]);
+            $delDevice = $delRow->fetch();
+            try {
+                $db->prepare("DELETE FROM devices WHERE id=?")->execute([$bulkDelId]);
+                if ($delDevice) {
+                    adjustInventoryForStatusChange($db, $delDevice['model_id'], $delDevice['status'], 'wycofany');
+                }
+                $deleted++;
+            } catch (PDOException $e) {
+                $errors++;
+            }
+        }
+        $n = $deleted;
+        if ($n === 1) { $label = '1 urządzenie'; }
+        elseif ($n <= 4) { $label = $n . ' urządzenia'; }
+        else { $label = $n . ' urządzeń'; }
+        if ($deleted > 0) {
+            $msg = 'Usunięto ' . $label . '.';
+            if ($errors > 0) { $msg .= ' ' . $errors . ' nie udało się usunąć (powiązane rekordy).'; }
+            flashSuccess($msg);
+        } else {
+            flashError('Nie udało się usunąć żadnego urządzenia — posiadają powiązane rekordy.');
+        }
+        redirect(getBaseUrl() . 'devices.php');
     }
 }
 
@@ -385,6 +422,42 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php if (isAdmin()): ?>
+<!-- Bulk actions panel (hidden until devices are selected) -->
+<form id="bulkPurchaseForm" method="POST">
+    <?= csrfField() ?>
+    <div id="bulkActionsPanel" class="card border-warning mb-3" style="display:none">
+        <div class="card-header d-flex align-items-center gap-2 bg-warning bg-opacity-10">
+            <i class="fas fa-tasks text-warning"></i>
+            <strong>Akcje masowe</strong>
+            <span class="text-muted small ms-1" id="selectedCount"></span>
+        </div>
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm mb-1">Cena zakupu (PLN)</label>
+                    <input type="number" name="bulk_purchase_price" class="form-control form-control-sm"
+                           min="0" step="0.01" placeholder="np. 299.00">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm mb-1">Data zakupu</label>
+                    <input type="date" name="bulk_purchase_date" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto d-flex gap-2 align-items-end">
+                    <button type="submit" name="action" value="bulk_purchase" class="btn btn-sm btn-warning">
+                        <i class="fas fa-save me-1"></i>Przypisz cenę / datę
+                    </button>
+                    <button type="submit" name="action" value="bulk_delete" class="btn btn-sm btn-danger"
+                            id="bulkDeleteBtn">
+                        <i class="fas fa-trash me-1"></i>Usuń zaznaczone
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+<?php endif; ?>
+
 <div class="card">
     <div class="card-header">Urządzenia (<?= count($devices) ?>)</div>
     <div class="table-responsive">
@@ -419,7 +492,6 @@ include __DIR__ . '/includes/header.php';
                             <?= formatDate($d['installation_date']) ?>
                         <?php elseif ($d['purchase_date']): ?>
                             <?= formatDate($d['purchase_date']) ?>
-                            <br><small class="text-muted">zakup</small>
                         <?php else: ?>
                             <span class="text-muted">—</span>
                         <?php endif; ?>
@@ -455,71 +527,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php // SIM-edit modal (all roles) ?>
-<?php if (isAdmin()): ?>
-<!-- Bulk purchase form (outside table to avoid nested-form issue) -->
-<form id="bulkPurchaseForm" method="POST" class="mt-3">
-    <?= csrfField() ?>
-    <input type="hidden" name="action" value="bulk_purchase">
-    <div class="card border-warning">
-        <div class="card-header d-flex align-items-center gap-2 bg-warning bg-opacity-10">
-            <i class="fas fa-tags text-warning"></i>
-            <strong>Masowe przypisanie ceny i daty zakupu</strong>
-            <span class="text-muted small ms-1" id="selectedCount">(zaznacz urządzenia powyżej)</span>
-        </div>
-        <div class="card-body py-2">
-            <div class="row g-2 align-items-end">
-                <div class="col-md-3">
-                    <label class="form-label form-label-sm mb-1">Cena zakupu (PLN)</label>
-                    <input type="number" name="bulk_purchase_price" class="form-control form-control-sm"
-                           min="0" step="0.01" placeholder="np. 299.00">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label form-label-sm mb-1">Data zakupu</label>
-                    <input type="date" name="bulk_purchase_date" class="form-control form-control-sm">
-                </div>
-                <div class="col-auto">
-                    <button type="submit" class="btn btn-sm btn-warning" id="bulkSubmitBtn" disabled>
-                        <i class="fas fa-save me-1"></i>Zapisz dla zaznaczonych
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-</form>
-<script>
-(function () {
-    var checkAll = document.getElementById('checkAll');
-    var countEl  = document.getElementById('selectedCount');
-    var submitBtn = document.getElementById('bulkSubmitBtn');
-
-    function updateCount(checkedCount) {
-        countEl.textContent = checkedCount > 0 ? '(' + checkedCount + ' urządzeń zaznaczonych)' : '(zaznacz urządzenia powyżej)';
-        submitBtn.disabled = checkedCount === 0;
-    }
-
-    if (checkAll) {
-        checkAll.addEventListener('change', function () {
-            document.querySelectorAll('.device-checkbox').forEach(function (cb) {
-                cb.checked = checkAll.checked;
-            });
-            updateCount(checkAll.checked ? document.querySelectorAll('.device-checkbox').length : 0);
-        });
-    }
-
-    document.querySelectorAll('.device-checkbox').forEach(function (cb) {
-        cb.addEventListener('change', function () {
-            var all = document.querySelectorAll('.device-checkbox');
-            var checkedCount = 0;
-            all.forEach(function (c) { if (c.checked) checkedCount++; });
-            checkAll.checked = checkedCount === all.length;
-            checkAll.indeterminate = checkedCount > 0 && checkedCount < all.length;
-            updateCount(checkedCount);
-        });
-    });
-})();
-</script>
-<?php endif; ?>
-
 <!-- SIM-edit modal -->
 <div class="modal fade" id="simEditModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
@@ -558,6 +565,66 @@ function openSimEdit(deviceId, currentSim) {
     var modal = new bootstrap.Modal(document.getElementById('simEditModal'));
     modal.show();
 }
+<?php if (isAdmin()): ?>
+(function () {
+    var checkAll   = document.getElementById('checkAll');
+    var panel      = document.getElementById('bulkActionsPanel');
+    var countEl    = document.getElementById('selectedCount');
+    var deleteBtn  = document.getElementById('bulkDeleteBtn');
+
+    function countChecked() {
+        var all = document.querySelectorAll('.device-checkbox');
+        var n = 0;
+        all.forEach(function (c) { if (c.checked) n++; });
+        return n;
+    }
+
+    function pluralLabel(n) {
+        if (n === 1) return '1 urządzenie';
+        if (n <= 4)  return n + ' urządzenia';
+        return n + ' urządzeń';
+    }
+
+    function syncPanel() {
+        var n = countChecked();
+        if (n > 0) {
+            panel.style.display = '';
+            countEl.textContent = '(' + pluralLabel(n) + ' zaznaczonych)';
+        } else {
+            panel.style.display = 'none';
+            countEl.textContent = '';
+        }
+    }
+
+    if (checkAll) {
+        checkAll.addEventListener('change', function () {
+            document.querySelectorAll('.device-checkbox').forEach(function (cb) {
+                cb.checked = checkAll.checked;
+            });
+            syncPanel();
+        });
+    }
+
+    document.querySelectorAll('.device-checkbox').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var all = document.querySelectorAll('.device-checkbox');
+            var n = countChecked();
+            checkAll.checked = n === all.length;
+            checkAll.indeterminate = n > 0 && n < all.length;
+            syncPanel();
+        });
+    });
+
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function (e) {
+            var n = countChecked();
+            if (!confirm('Czy na pewno chcesz usunąć ' + pluralLabel(n) + '? Tej operacji nie można cofnąć.')) {
+                e.preventDefault();
+            }
+        });
+    }
+})();
+<?php endif; ?>
 </script>
 
 <?php elseif ($action === 'view' && isset($device)): ?>
