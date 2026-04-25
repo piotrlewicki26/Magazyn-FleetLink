@@ -12,7 +12,11 @@ require_once __DIR__ . '/includes/functions.php';
 
 requireLogin();
 
-$generatorFile = __DIR__ . '/FleetLink_Generator_Ofert_umowa_18_3.html';
+// Preferuj nową wersję pliku generatora; jeśli nie istnieje, użyj starszej
+$generatorFile = __DIR__ . '/FleetLink_Generator_Ofert_umowa_19_3.html';
+if (!file_exists($generatorFile)) {
+    $generatorFile = __DIR__ . '/FleetLink_Generator_Ofert_umowa_18_3.html';
+}
 if (!file_exists($generatorFile)) {
     flashError('Plik generatora ofert nie istnieje. Skontaktuj się z administratorem.');
     redirect(getBaseUrl() . 'dashboard.php');

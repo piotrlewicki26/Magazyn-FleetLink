@@ -316,6 +316,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(getBaseUrl() . 'devices.php');
 
+    } elseif ($postAction === 'bulk_add_devices') {
+        if (!isAdmin()) { flashError('Dodawanie urządzeń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'devices.php'); }
+        $sharedModelId      = (int)($_POST['model_id'] ?? 0);
+        $sharedStatus       = sanitize($_POST['status'] ?? 'nowy');
+        $sharedPurchDate    = sanitize($_POST['purchase_date'] ?? '');
+        $sharedPurchPrice   = str_replace(',', '.', $_POST['purchase_price'] ?? '0');
+        $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'];
+        if (!in_array($sharedStatus, $validStatuses)) $sharedStatus = 'nowy';
+        if (!$sharedModelId) { flashError('Wybierz model urządzenia.'); redirect(getBaseUrl() . 'devices.php'); }
+
+        $serials   = $_POST['serial_numbers'] ?? [];
+        $imeis     = $_POST['imeis'] ?? [];
+        $sims      = $_POST['sim_numbers'] ?? [];
+        $notesList = $_POST['notes_list'] ?? [];
+
+        $added  = 0;
+        $errors = [];
+        foreach ($serials as $i => $rawSerial) {
+            $serial = sanitize($rawSerial);
+            if (empty($serial)) continue;
+            $imei   = sanitize($imeis[$i]   ?? '');
+            $sim    = sanitize($sims[$i]    ?? '');
+            $notes  = sanitize($notesList[$i] ?? '');
+            try {
+                $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, status, purchase_date, purchase_price, notes) VALUES (?,?,?,?,?,?,?,?)");
+                $stmt->execute([$sharedModelId, $serial, $imei ?: null, $sim ?: null, $sharedStatus, $sharedPurchDate ?: null, (float)$sharedPurchPrice, $notes ?: null]);
+                $newId = (int)$db->lastInsertId();
+                adjustInventoryForStatusChange($db, $sharedModelId, '', $sharedStatus);
+                if (!empty($sim)) {
+                    try {
+                        $chk = $db->prepare("SELECT id FROM sim_cards WHERE phone_number=? LIMIT 1");
+                        $chk->execute([$sim]);
+                        if (!$chk->fetch()) {
+                            $db->prepare("INSERT INTO sim_cards (phone_number, device_id) VALUES (?,?)")->execute([$sim, $newId]);
+                        } else {
+                            $db->prepare("UPDATE sim_cards SET device_id=? WHERE phone_number=? AND device_id IS NULL")->execute([$newId, $sim]);
+                        }
+                    } catch (PDOException $e) {}
+                }
+                $added++;
+            } catch (PDOException $e) {
+                $errors[] = $serial;
+            }
+        }
+        if ($added > 0) {
+            $n = $added;
+            if ($n === 1) $label = '1 urządzenie';
+            elseif ($n <= 4) $label = $n . ' urządzenia';
+            else $label = $n . ' urządzeń';
+            $msg = 'Dodano ' . $label . '.';
+            if (!empty($errors)) $msg .= ' Błąd dla: ' . implode(', ', $errors) . ' (duplikat nr seryjnego?).';
+            flashSuccess($msg);
+        } else {
+            flashError('Nie dodano żadnego urządzenia. Sprawdź czy numery seryjne nie są duplikatami.');
+        }
+        redirect(getBaseUrl() . 'devices.php');
+
     } elseif ($postAction === 'bulk_delete') {
         if (!isAdmin()) { flashError('Brak uprawnień.'); redirect(getBaseUrl() . 'devices.php'); }
         $bulkDelIds = array_map('intval', $_POST['device_ids'] ?? []);
@@ -478,7 +535,7 @@ include __DIR__ . '/includes/header.php';
     <?php if ($action === 'list'): ?>
     <div class="d-flex gap-2">
         <?php if (isAdmin()): ?>
-        <a href="devices.php?action=add" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</a>
+        <button type="button" class="btn btn-primary" onclick="openAddDeviceModal()"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</button>
         <a href="device_import.php" class="btn btn-outline-secondary"><i class="fas fa-file-import me-2"></i>Importuj</a>
         <?php endif; ?>
     </div>
@@ -625,7 +682,156 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php // SIM-edit modal (all roles) ?>
+<!-- Add Devices Modal -->
+<?php if (isAdmin()): ?>
+<div class="modal fade" id="addDevicesModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <form method="POST" id="addDevicesForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="bulk_add_devices">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plus me-2 text-primary"></i>Dodaj urządzenie / urządzenia</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Shared fields -->
+                    <div class="row g-3 mb-3 pb-3 border-bottom">
+                        <div class="col-md-4">
+                            <label class="form-label required-star">Model urządzenia (wspólny)</label>
+                            <select name="model_id" id="addModel" class="form-select" required>
+                                <option value="">— wybierz model —</option>
+                                <?php
+                                $curMf2 = '';
+                                foreach ($models as $m):
+                                    if ($m['manufacturer_name'] !== $curMf2) {
+                                        if ($curMf2) echo '</optgroup>';
+                                        echo '<optgroup label="' . h($m['manufacturer_name']) . '">';
+                                        $curMf2 = $m['manufacturer_name'];
+                                    }
+                                ?>
+                                <option value="<?= $m['id'] ?>"><?= h($m['name']) ?></option>
+                                <?php endforeach; if ($curMf2) echo '</optgroup>'; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Status (wspólny)</label>
+                            <select name="status" id="addStatus" class="form-select">
+                                <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'] as $s): ?>
+                                <option value="<?= $s ?>" <?= $s === 'nowy' ? 'selected' : '' ?>><?= h(ucfirst(str_replace('_',' ',$s))) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Data zakupu (wspólna)</label>
+                            <input type="date" name="purchase_date" id="addPurchaseDate" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Cena zakupu (wspólna)</label>
+                            <div class="input-group">
+                                <input type="number" name="purchase_price" id="addPurchasePrice" class="form-control" min="0" step="0.01" value="0">
+                                <span class="input-group-text">zł</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Device rows -->
+                    <div class="mb-2 d-flex align-items-center justify-content-between">
+                        <span class="fw-semibold text-muted small">Urządzenia do dodania</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addDeviceRow()"><i class="fas fa-plus me-1"></i>Dodaj wiersz</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0" id="addDevicesTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:30px">#</th>
+                                    <th>Nr seryjny <span class="text-danger">*</span></th>
+                                    <th>IMEI</th>
+                                    <th>Nr telefonu SIM</th>
+                                    <th>Uwagi</th>
+                                    <th style="width:42px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="addDevicesBody">
+                                <!-- rows inserted by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-muted small" id="addDevicesCount">0 urządzeń do dodania</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Zapisz urządzenia</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+var addDeviceRowCount = 0;
+
+function openAddDeviceModal() {
+    addDeviceRowCount = 0;
+    document.getElementById('addDevicesBody').innerHTML = '';
+    document.getElementById('addModel').value = '';
+    document.getElementById('addStatus').value = 'nowy';
+    document.getElementById('addPurchaseDate').value = '';
+    document.getElementById('addPurchasePrice').value = '0';
+    addDeviceRow();
+    updateAddCount();
+    new bootstrap.Modal(document.getElementById('addDevicesModal')).show();
+}
+
+function addDeviceRow() {
+    addDeviceRowCount++;
+    var n = addDeviceRowCount;
+    var tbody = document.getElementById('addDevicesBody');
+    var tr = document.createElement('tr');
+    tr.id = 'add-dev-row-' + n;
+    tr.innerHTML =
+        '<td class="text-muted text-center align-middle">' + n + '</td>' +
+        '<td><input type="text" name="serial_numbers[]" class="form-control form-control-sm" placeholder="np. SN123456" required></td>' +
+        '<td><input type="text" name="imeis[]" class="form-control form-control-sm" placeholder="15 cyfr" maxlength="20"></td>' +
+        '<td><input type="text" name="sim_numbers[]" class="form-control form-control-sm" placeholder="np. +48 600 000 000" list="addSimList"></td>' +
+        '<td><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
+        '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeDeviceRow(' + n + ')" title="Usuń wiersz"><i class="fas fa-times"></i></button></td>';
+    tbody.appendChild(tr);
+    tr.querySelector('input[name="serial_numbers[]"]').focus();
+    updateAddCount();
+}
+
+function removeDeviceRow(n) {
+    var row = document.getElementById('add-dev-row-' + n);
+    if (row) row.remove();
+    updateAddCount();
+}
+
+function updateAddCount() {
+    var rows = document.querySelectorAll('#addDevicesBody tr').length;
+    var el = document.getElementById('addDevicesCount');
+    if (!el) return;
+    if (rows === 0) { el.textContent = '0 urządzeń do dodania'; return; }
+    if (rows === 1) el.textContent = '1 urządzenie do dodania';
+    else if (rows <= 4) el.textContent = rows + ' urządzenia do dodania';
+    else el.textContent = rows + ' urządzeń do dodania';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Listen for row additions to keep count updated
+    var body = document.getElementById('addDevicesBody');
+    if (body) {
+        var obs = new MutationObserver(updateAddCount);
+        obs.observe(body, { childList: true });
+    }
+});
+</script>
+<!-- Datalist for SIM in add modal -->
+<datalist id="addSimList">
+    <?php foreach ($simCardOptions as $sc): ?>
+    <option value="<?= h($sc) ?>">
+    <?php endforeach; ?>
+</datalist>
+<?php endif; ?>
+
 <!-- SIM-edit modal -->
 <div class="modal fade" id="simEditModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
