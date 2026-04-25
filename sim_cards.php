@@ -361,6 +361,22 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $row['vehicle_registration'] ? h($row['vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?= ($row['company_name'] ?: $row['contact_name']) ? h($row['company_name'] ?: $row['contact_name']) : '<span class="text-muted">—</span>' ?></td>
                     <td>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showSimPreview(<?= htmlspecialchars(json_encode([
+                                    'sim_id'               => $row['sim_id'] ?? null,
+                                    'sim_number'           => $row['sim_number'],
+                                    'operator'             => $row['operator'] ?? '',
+                                    'iccid'                => $row['iccid'] ?? '',
+                                    'serial_number'        => $row['serial_number'] ?? '',
+                                    'imei'                 => $row['imei'] ?? '',
+                                    'manufacturer_name'    => $row['manufacturer_name'] ?? '',
+                                    'model_name'           => $row['model_name'] ?? '',
+                                    'device_status'        => $row['device_status'] ?? '',
+                                    'vehicle_registration' => $row['vehicle_registration'] ?? '',
+                                    'client'               => $row['company_name'] ?: ($row['contact_name'] ?? ''),
+                                    'device_id'            => $row['device_id'] ?? null,
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
                         <?php if ($row['row_source'] === 'sim_card'): ?>
                         <a href="sim_cards.php?action=edit&id=<?= $row['sim_id'] ?>"
                            class="btn btn-sm btn-outline-primary btn-action" title="Edytuj kartę SIM">
@@ -400,6 +416,71 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<!-- SIM Preview Modal -->
+<div class="modal fade" id="simPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="simPreviewTitle"><i class="fas fa-sim-card me-2 text-primary"></i>Podgląd karty SIM</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="simPreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <a id="simPreviewDeviceBtn" href="#" class="btn btn-info btn-sm text-white d-none"><i class="fas fa-microchip me-1"></i>Otwórz urządzenie</a>
+                <a id="simPreviewEditBtn" href="#" class="btn btn-primary btn-sm d-none"><i class="fas fa-edit me-1"></i>Edytuj kartę SIM</a>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function showSimPreview(data) {
+    var devStatusMap = {
+        'nowy':       '<span class="badge bg-primary">Nowy</span>',
+        'sprawny':    '<span class="badge bg-success">Sprawny</span>',
+        'zamontowany':'<span class="badge bg-info text-dark">Zamontowany</span>',
+        'w_serwisie': '<span class="badge bg-warning text-dark">W serwisie</span>',
+        'uszkodzony': '<span class="badge bg-danger">Uszkodzony</span>',
+        'wycofany':   '<span class="badge bg-secondary">Wycofany</span>',
+        'sprzedany':  '<span class="badge bg-dark">Sprzedany</span>'
+    };
+    var devBadge = data.device_status
+        ? (devStatusMap[data.device_status] || ('<span class="badge bg-secondary">' + data.device_status + '</span>'))
+        : '—';
+
+    document.getElementById('simPreviewTitle').innerHTML = '<i class="fas fa-sim-card me-2 text-primary"></i>Karta SIM: ' + data.sim_number;
+    document.getElementById('simPreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-0">' +
+        '<tr><th class="text-muted" style="width:40%">Nr telefonu SIM</th><td class="fw-bold">' + data.sim_number + '</td></tr>' +
+        '<tr><th class="text-muted">Operator</th><td>' + (data.operator || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">ICCID</th><td>' + (data.iccid || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Urządzenie (nr seryjny)</th><td>' + (data.serial_number || '— nie przypisano —') + '</td></tr>' +
+        '<tr><th class="text-muted">IMEI</th><td>' + (data.imei || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Model</th><td>' + (data.manufacturer_name ? data.manufacturer_name + ' ' + data.model_name : '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Status urządzenia</th><td>' + devBadge + '</td></tr>' +
+        '<tr><th class="text-muted">Pojazd</th><td>' + (data.vehicle_registration || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
+        '</table>';
+
+    var deviceBtn = document.getElementById('simPreviewDeviceBtn');
+    var editBtn   = document.getElementById('simPreviewEditBtn');
+    if (data.device_id) {
+        deviceBtn.href = 'devices.php?action=view&id=' + data.device_id;
+        deviceBtn.classList.remove('d-none');
+    } else {
+        deviceBtn.classList.add('d-none');
+    }
+    if (data.sim_id) {
+        editBtn.href = 'sim_cards.php?action=edit&id=' + data.sim_id;
+        editBtn.classList.remove('d-none');
+    } else {
+        editBtn.classList.add('d-none');
+    }
+    var modal = new bootstrap.Modal(document.getElementById('simPreviewModal'));
+    modal.show();
+}
+</script>
 
 <?php elseif ($action === 'add'): ?>
 

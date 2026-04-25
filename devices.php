@@ -634,7 +634,19 @@ include __DIR__ . '/includes/header.php';
                     <td><input type="checkbox" name="device_ids[]" value="<?= $d['id'] ?>" form="bulkPurchaseForm" class="device-checkbox"></td>
                     <?php endif; ?>
                     <td class="fw-semibold">
-                        <a href="devices.php?action=view&id=<?= $d['id'] ?>"><?= h($d['serial_number']) ?></a>
+                        <a href="#" onclick="showDevicePreview(<?= htmlspecialchars(json_encode([
+                            'id'                   => $d['id'],
+                            'serial_number'        => $d['serial_number'],
+                            'imei'                 => $d['imei'] ?? '',
+                            'sim_number'           => $d['sim_number'] ?? '',
+                            'status'               => $d['status'],
+                            'manufacturer_name'    => $d['manufacturer_name'],
+                            'model_name'           => $d['model_name'],
+                            'vehicle_registration' => $d['vehicle_registration'] ?? '',
+                            'client'               => $d['company_name'] ?: ($d['contact_name'] ?? ''),
+                            'installation_date'    => $d['installation_date'] ?? '',
+                            'purchase_date'        => $d['purchase_date'] ?? '',
+                        ]), ENT_QUOTES) ?>); return false;"><?= h($d['serial_number']) ?></a>
                     </td>
                     <td><?= h($d['imei'] ?? '—') ?></td>
                     <td><?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?></td>
@@ -652,7 +664,21 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $d['purchase_price'] > 0 ? formatMoney($d['purchase_price']) : '<span class="text-muted">—</span>' ?></td>
                     <?php endif; ?>
                     <td>
-                        <a href="devices.php?action=view&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Podgląd"><i class="fas fa-eye"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showDevicePreview(<?= htmlspecialchars(json_encode([
+                                    'id'                   => $d['id'],
+                                    'serial_number'        => $d['serial_number'],
+                                    'imei'                 => $d['imei'] ?? '',
+                                    'sim_number'           => $d['sim_number'] ?? '',
+                                    'status'               => $d['status'],
+                                    'manufacturer_name'    => $d['manufacturer_name'],
+                                    'model_name'           => $d['model_name'],
+                                    'vehicle_registration' => $d['vehicle_registration'] ?? '',
+                                    'client'               => $d['company_name'] ?: ($d['contact_name'] ?? ''),
+                                    'installation_date'    => $d['installation_date'] ?? '',
+                                    'purchase_date'        => $d['purchase_date'] ?? '',
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
                         <?php if (isAdmin()): ?>
                         <a href="devices.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>
                         <form method="POST" class="d-inline">
@@ -681,6 +707,57 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<!-- Device Preview Modal -->
+<div class="modal fade" id="devicePreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="devicePreviewTitle"><i class="fas fa-microchip me-2 text-primary"></i>Podgląd urządzenia</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="devicePreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <a id="devicePreviewViewBtn" href="#" class="btn btn-info btn-sm text-white"><i class="fas fa-eye me-1"></i>Otwórz pełny widok</a>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function showDevicePreview(data) {
+    var statusMap = {
+        'nowy':       '<span class="badge bg-primary">Nowy</span>',
+        'sprawny':    '<span class="badge bg-success">Sprawny</span>',
+        'zamontowany':'<span class="badge bg-info text-dark">Zamontowany</span>',
+        'w_serwisie': '<span class="badge bg-warning text-dark">W serwisie</span>',
+        'uszkodzony': '<span class="badge bg-danger">Uszkodzony</span>',
+        'wycofany':   '<span class="badge bg-secondary">Wycofany</span>',
+        'sprzedany':  '<span class="badge bg-dark">Sprzedany</span>',
+        'dzierżawa':  '<span class="badge bg-purple" style="background:#6f42c1">Dzierżawa</span>'
+    };
+    var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
+    var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
+
+    document.getElementById('devicePreviewTitle').innerHTML = '<i class="fas fa-microchip me-2 text-primary"></i>Urządzenie: ' + data.serial_number;
+    document.getElementById('devicePreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-0">' +
+        '<tr><th class="text-muted" style="width:40%">Nr seryjny</th><td class="fw-bold">' + data.serial_number + '</td></tr>' +
+        '<tr><th class="text-muted">IMEI</th><td>' + (data.imei || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Nr SIM</th><td>' + (data.sim_number || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Status</th><td>' + statusBadge + '</td></tr>' +
+        '<tr><th class="text-muted">Producent / Model</th><td>' + data.manufacturer_name + ' ' + data.model_name + '</td></tr>' +
+        '<tr><th class="text-muted">Rejestracja</th><td>' + (data.vehicle_registration || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Data montażu</th><td>' + formatDate(data.installation_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Data zakupu</th><td>' + formatDate(data.purchase_date) + '</td></tr>' +
+        '</table>';
+
+    document.getElementById('devicePreviewViewBtn').href = 'devices.php?action=view&id=' + data.id;
+    var modal = new bootstrap.Modal(document.getElementById('devicePreviewModal'));
+    modal.show();
+}
+</script>
 
 <!-- Add Devices Modal -->
 <?php if (isAdmin()): ?>

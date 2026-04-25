@@ -308,7 +308,23 @@ include __DIR__ . '/includes/header.php';
                     <td><?= $svc['cost'] > 0 ? formatMoney($svc['cost']) : '—' ?></td>
                     <td><?= h($svc['technician_name'] ?? '—') ?></td>
                     <td>
-                        <a href="services.php?action=view&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showServicePreview(<?= htmlspecialchars(json_encode([
+                                    'id'               => $svc['id'],
+                                    'type'             => $svc['type'],
+                                    'status'           => $svc['status'],
+                                    'serial_number'    => $svc['serial_number'] ?? '',
+                                    'manufacturer_name'=> $svc['manufacturer_name'] ?? '',
+                                    'model_name'       => $svc['model_name'] ?? '',
+                                    'device_id'        => $svc['device_id'] ?? null,
+                                    'registration'     => $svc['registration'] ?? '',
+                                    'make'             => $svc['make'] ?? '',
+                                    'planned_date'     => $svc['planned_date'] ?? '',
+                                    'completed_date'   => $svc['completed_date'] ?? '',
+                                    'cost'             => $svc['cost'] ?? 0,
+                                    'technician_name'  => $svc['technician_name'] ?? '',
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
                         <a href="services.php?action=edit&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
                         <a href="services.php?action=print&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie serwisowe"><i class="fas fa-print"></i></a>
                         <form method="POST" class="d-inline">
@@ -367,6 +383,55 @@ include __DIR__ . '/includes/header.php';
 </div>
 </div><!-- /pane-protokoly-s -->
 </div><!-- /tab-content -->
+
+<!-- Service Preview Modal -->
+<div class="modal fade" id="servicePreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="servicePreviewTitle"><i class="fas fa-wrench me-2 text-warning"></i>Podgląd serwisu</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="servicePreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <a id="servicePreviewPrintBtn" href="#" target="_blank" class="btn btn-outline-dark btn-sm"><i class="fas fa-print me-1"></i>Drukuj</a>
+                <a id="servicePreviewViewBtn" href="#" class="btn btn-info btn-sm text-white"><i class="fas fa-eye me-1"></i>Otwórz pełny widok</a>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function showServicePreview(data) {
+    var statusMap = {
+        'zaplanowany': '<span class="badge bg-warning text-dark">Zaplanowany</span>',
+        'w_trakcie':   '<span class="badge bg-primary">W trakcie</span>',
+        'zakończony':  '<span class="badge bg-success">Zakończony</span>',
+        'anulowany':   '<span class="badge bg-secondary">Anulowany</span>'
+    };
+    var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
+    var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
+    var costStr = data.cost > 0 ? parseFloat(data.cost).toFixed(2).replace('.', ',') + ' zł' : '—';
+
+    document.getElementById('servicePreviewTitle').innerHTML = '<i class="fas fa-wrench me-2 text-warning"></i>Serwis #' + data.id;
+    document.getElementById('servicePreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-0">' +
+        '<tr><th class="text-muted" style="width:40%">Status</th><td>' + statusBadge + '</td></tr>' +
+        '<tr><th class="text-muted">Typ</th><td><span class="badge bg-secondary">' + data.type.charAt(0).toUpperCase() + data.type.slice(1) + '</span></td></tr>' +
+        '<tr><th class="text-muted">Urządzenie</th><td><strong>' + (data.serial_number || '—') + '</strong><br><small class="text-muted">' + data.manufacturer_name + ' ' + data.model_name + '</small></td></tr>' +
+        '<tr><th class="text-muted">Pojazd</th><td>' + (data.registration ? data.registration + ' ' + data.make : '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Data zaplanowana</th><td>' + formatDate(data.planned_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Data realizacji</th><td>' + formatDate(data.completed_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Technik</th><td>' + (data.technician_name || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Koszt</th><td class="fw-bold">' + costStr + '</td></tr>' +
+        '</table>';
+
+    document.getElementById('servicePreviewViewBtn').href  = 'services.php?action=view&id=' + data.id;
+    document.getElementById('servicePreviewPrintBtn').href = 'services.php?action=print&id=' + data.id;
+    var modal = new bootstrap.Modal(document.getElementById('servicePreviewModal'));
+    modal.show();
+}
+</script>
 
 <?php elseif ($action === 'view' && isset($service)): ?>
 <div class="row g-3">

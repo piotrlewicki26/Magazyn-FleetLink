@@ -156,14 +156,34 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($clients as $c): ?>
                 <tr>
                     <td class="fw-semibold"><?= h($c['company_name'] ?: '—') ?></td>
-                    <td><a href="clients.php?action=view&id=<?= $c['id'] ?>"><?= h($c['contact_name']) ?></a></td>
+                    <td><a href="#" onclick="showClientPreview(<?= htmlspecialchars(json_encode([
+                            'id'            => $c['id'],
+                            'company_name'  => $c['company_name'] ?? '',
+                            'contact_name'  => $c['contact_name'],
+                            'email'         => $c['email'] ?? '',
+                            'phone'         => $c['phone'] ?? '',
+                            'nip'           => $c['nip'] ?? '',
+                            'vehicle_count' => (int)$c['vehicle_count'],
+                            'offer_count'   => (int)$c['offer_count'],
+                        ]), ENT_QUOTES) ?>); return false;"><?= h($c['contact_name']) ?></a></td>
                     <td><?= $c['email'] ? '<a href="mailto:' . h($c['email']) . '">' . h($c['email']) . '</a>' : '—' ?></td>
                     <td><?= h($c['phone'] ?? '—') ?></td>
                     <td><?= h($c['nip'] ?? '—') ?></td>
                     <td><?= $c['vehicle_count'] ?></td>
                     <td><?= $c['offer_count'] ?></td>
                     <td>
-                        <a href="clients.php?action=view&id=<?= $c['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showClientPreview(<?= htmlspecialchars(json_encode([
+                                    'id'            => $c['id'],
+                                    'company_name'  => $c['company_name'] ?? '',
+                                    'contact_name'  => $c['contact_name'],
+                                    'email'         => $c['email'] ?? '',
+                                    'phone'         => $c['phone'] ?? '',
+                                    'nip'           => $c['nip'] ?? '',
+                                    'vehicle_count' => (int)$c['vehicle_count'],
+                                    'offer_count'   => (int)$c['offer_count'],
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
                         <?php if (!isTechnician()): ?>
                         <a href="clients.php?action=edit&id=<?= $c['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
                         <form method="POST" class="d-inline">
@@ -182,6 +202,45 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<!-- Client Preview Modal -->
+<div class="modal fade" id="clientPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="clientPreviewTitle"><i class="fas fa-user me-2 text-primary"></i>Podgląd klienta</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="clientPreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <a id="clientPreviewViewBtn" href="#" class="btn btn-info btn-sm text-white"><i class="fas fa-eye me-1"></i>Otwórz pełny widok</a>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function showClientPreview(data) {
+    var title = data.company_name ? data.company_name : data.contact_name;
+    document.getElementById('clientPreviewTitle').innerHTML = '<i class="fas fa-user me-2 text-primary"></i>' + title;
+    var emailCell = data.email
+        ? '<a href="mailto:' + data.email + '">' + data.email + '</a>'
+        : '—';
+    document.getElementById('clientPreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-0">' +
+        (data.company_name ? '<tr><th class="text-muted" style="width:40%">Firma</th><td class="fw-bold">' + data.company_name + '</td></tr>' : '') +
+        '<tr><th class="text-muted">Kontakt</th><td>' + data.contact_name + '</td></tr>' +
+        '<tr><th class="text-muted">E-mail</th><td>' + emailCell + '</td></tr>' +
+        '<tr><th class="text-muted">Telefon</th><td>' + (data.phone || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">NIP</th><td>' + (data.nip || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Liczba pojazdów</th><td>' + data.vehicle_count + '</td></tr>' +
+        '<tr><th class="text-muted">Liczba ofert</th><td>' + data.offer_count + '</td></tr>' +
+        '</table>';
+    document.getElementById('clientPreviewViewBtn').href = 'clients.php?action=view&id=' + data.id;
+    var modal = new bootstrap.Modal(document.getElementById('clientPreviewModal'));
+    modal.show();
+}
+</script>
 
 <?php elseif ($action === 'view' && $client): ?>
 <div class="row g-3">
