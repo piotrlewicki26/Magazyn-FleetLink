@@ -221,16 +221,16 @@ $inventory = $db->query("
            (SELECT COUNT(*) FROM devices d2
             WHERE d2.model_id = m.id
               AND d2.status IN ('nowy','sprawny')) as actual_count,
-           (SELECT COALESCE(SUM(d3.purchase_price), 0) FROM devices d3
-            WHERE d3.model_id = m.id
-              AND d3.status IN ('nowy','sprawny')
-              AND d3.purchase_price IS NOT NULL AND d3.purchase_price > 0) as actual_purchase_value
+           (SELECT COALESCE(SUM(d5.purchase_price), 0) FROM devices d5
+            WHERE d5.model_id = m.id
+              AND d5.status IN ('nowy','sprawny')
+              AND d5.purchase_price IS NOT NULL AND d5.purchase_price > 0) as actual_purchase_value
     FROM models m
     JOIN manufacturers mf ON mf.id = m.manufacturer_id
     LEFT JOIN inventory i ON i.model_id = m.id
     WHERE m.active = 1
       AND (i.model_id IS NOT NULL
-           OR EXISTS (SELECT 1 FROM devices d4 WHERE d4.model_id = m.id))
+           OR EXISTS (SELECT 1 FROM devices d6 WHERE d6.model_id = m.id))
     ORDER BY mf.name, m.name
 ")->fetchAll();
 
