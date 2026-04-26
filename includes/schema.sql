@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS `devices` (
   `serial_number` VARCHAR(100) NOT NULL UNIQUE,
   `imei` VARCHAR(20) DEFAULT NULL,
   `sim_number` VARCHAR(30) DEFAULT NULL,
-  `status` ENUM('nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa') NOT NULL DEFAULT 'nowy',
+  `status` ENUM('nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa','do_demontazu') NOT NULL DEFAULT 'nowy',
   `purchase_date` DATE DEFAULT NULL,
   `purchase_price` DECIMAL(10,2) DEFAULT NULL,
   `sale_date` DATE DEFAULT NULL,

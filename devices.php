@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'devices.php');
     }
 
-    $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'];
+    $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa','do_demontazu'];
     if (!in_array($status, $validStatuses)) $status = 'nowy';
 
     if ($postAction === 'add') {
@@ -322,7 +322,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sharedStatus       = sanitize($_POST['status'] ?? 'nowy');
         $sharedPurchDate    = sanitize($_POST['purchase_date'] ?? '');
         $sharedPurchPrice   = str_replace(',', '.', $_POST['purchase_price'] ?? '0');
-        $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'];
+        $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa','do_demontazu'];
         if (!in_array($sharedStatus, $validStatuses)) $sharedStatus = 'nowy';
         if (!$sharedModelId) { flashError('Wybierz model urządzenia.'); redirect(getBaseUrl() . 'devices.php'); }
 
@@ -407,6 +407,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashSuccess($msg);
         } else {
             flashError('Nie udało się usunąć żadnego urządzenia — posiadają powiązane rekordy.');
+        }
+        redirect(getBaseUrl() . 'devices.php');
+
+    } elseif ($postAction === 'move_device') {
+        // Move device (active installation) to another client/company
+        $moveDeviceId  = (int)($_POST['device_id'] ?? 0);
+        $moveClientId  = (int)($_POST['new_client_id'] ?? 0) ?: null;
+        $moveVehicleId = (int)($_POST['new_vehicle_id'] ?? 0) ?: null;
+        $moveNotes     = sanitize($_POST['move_notes'] ?? '');
+        if (!$moveDeviceId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'devices.php'); }
+        $db->beginTransaction();
+        try {
+            // Update the active installation's client and optionally vehicle
+            if ($moveVehicleId) {
+                $db->prepare("UPDATE installations SET client_id=?, vehicle_id=? WHERE device_id=? AND status='aktywna'")
+                   ->execute([$moveClientId, $moveVehicleId, $moveDeviceId]);
+            } else {
+                $db->prepare("UPDATE installations SET client_id=? WHERE device_id=? AND status='aktywna'")
+                   ->execute([$moveClientId, $moveDeviceId]);
+            }
+            // Optionally append a note about the move
+            if ($moveNotes) {
+                $db->prepare("UPDATE installations SET notes=CONCAT(COALESCE(notes,''), IF(notes IS NULL OR notes='', '', '\n'), ?) WHERE device_id=? AND status='aktywna'")
+                   ->execute(['[Przeniesiono: ' . $moveNotes . ']', $moveDeviceId]);
+            }
+            $db->commit();
+            flashSuccess('Urządzenie zostało przeniesione do nowego klienta.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        // Redirect back to the view that triggered the action
+        $returnTo = sanitize($_POST['return_to'] ?? '');
+        if ($returnTo === 'view') {
+            redirect(getBaseUrl() . 'devices.php?action=view&id=' . $moveDeviceId);
         }
         redirect(getBaseUrl() . 'devices.php');
     }
@@ -525,6 +560,16 @@ if ($action === 'list') {
     $vehiclesList = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
 }
 
+// Load clients for move_device modal (also needed in view)
+if (in_array($action, ['list', 'view'])) {
+    if (empty($clientsList)) {
+        $clientsList = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
+    }
+    if (empty($vehiclesList)) {
+        $vehiclesList = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
+    }
+}
+
 $activePage = 'devices';
 $pageTitle = 'Urządzenia';
 include __DIR__ . '/includes/header.php';
@@ -555,7 +600,7 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-3">
                 <select name="status" class="form-select form-select-sm">
                     <option value="">Wszystkie statusy</option>
-                    <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'] as $s): ?>
+                    <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa','do_demontazu'] as $s): ?>
                     <option value="<?= $s ?>" <?= ($_GET['status'] ?? '') === $s ? 'selected' : '' ?>><?= h(ucfirst(str_replace('_',' ',$s))) ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -693,6 +738,12 @@ include __DIR__ . '/includes/header.php';
                                 onclick="openInstallModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
                             <i class="fas fa-car"></i>
                         </button>
+                        <?php if ($d['status'] === 'zamontowany' || $d['status'] === 'do_demontazu'): ?>
+                        <button type="button" class="btn btn-sm btn-outline-warning btn-action" title="Przenieś do innej firmy"
+                                onclick="openMoveDeviceModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, 'list')">
+                            <i class="fas fa-exchange-alt"></i>
+                        </button>
+                        <?php endif; ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień nr SIM"
                                 onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
                             <i class="fas fa-sim-card"></i>
@@ -719,22 +770,29 @@ include __DIR__ . '/includes/header.php';
             <div class="modal-body" id="devicePreviewBody"></div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <button type="button" id="devicePreviewMoveBtn" class="btn btn-outline-warning btn-sm d-none"
+                        onclick="openMoveDeviceModalFromPreview()">
+                    <i class="fas fa-exchange-alt me-1"></i>Przenieś do firmy
+                </button>
                 <a id="devicePreviewViewBtn" href="#" class="btn btn-info btn-sm text-white"><i class="fas fa-eye me-1"></i>Otwórz pełny widok</a>
             </div>
         </div>
     </div>
 </div>
 <script>
+var _previewDeviceData = null;
 function showDevicePreview(data) {
+    _previewDeviceData = data;
     var statusMap = {
-        'nowy':       '<span class="badge bg-primary">Nowy</span>',
-        'sprawny':    '<span class="badge bg-success">Sprawny</span>',
-        'zamontowany':'<span class="badge bg-info text-dark">Zamontowany</span>',
-        'w_serwisie': '<span class="badge bg-warning text-dark">W serwisie</span>',
-        'uszkodzony': '<span class="badge bg-danger">Uszkodzony</span>',
-        'wycofany':   '<span class="badge bg-secondary">Wycofany</span>',
-        'sprzedany':  '<span class="badge bg-dark">Sprzedany</span>',
-        'dzierżawa':  '<span class="badge bg-purple" style="background:#6f42c1">Dzierżawa</span>'
+        'nowy':          '<span class="badge bg-primary">Nowy</span>',
+        'sprawny':       '<span class="badge bg-success">Sprawny</span>',
+        'zamontowany':   '<span class="badge bg-info text-dark">Zamontowany</span>',
+        'w_serwisie':    '<span class="badge bg-warning text-dark">W serwisie</span>',
+        'uszkodzony':    '<span class="badge bg-danger">Uszkodzony</span>',
+        'wycofany':      '<span class="badge bg-secondary">Wycofany</span>',
+        'sprzedany':     '<span class="badge bg-dark">Sprzedany</span>',
+        'dzierżawa':     '<span class="badge" style="background:#6f42c1">Dzierżawa</span>',
+        'do_demontazu':  '<span class="badge" style="background:#e67e22">Do demontażu</span>'
     };
     var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
     var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
@@ -754,8 +812,20 @@ function showDevicePreview(data) {
         '</table>';
 
     document.getElementById('devicePreviewViewBtn').href = 'devices.php?action=view&id=' + data.id;
-    var modal = new bootstrap.Modal(document.getElementById('devicePreviewModal'));
-    modal.show();
+    // Show "Przenieś" button only for mounted or scheduled-for-disassembly devices
+    var moveBtn = document.getElementById('devicePreviewMoveBtn');
+    if (data.status === 'zamontowany' || data.status === 'do_demontazu') {
+        moveBtn.classList.remove('d-none');
+    } else {
+        moveBtn.classList.add('d-none');
+    }
+    new bootstrap.Modal(document.getElementById('devicePreviewModal')).show();
+}
+
+function openMoveDeviceModalFromPreview() {
+    if (!_previewDeviceData) return;
+    bootstrap.Modal.getInstance(document.getElementById('devicePreviewModal')).hide();
+    setTimeout(function() { openMoveDeviceModal(_previewDeviceData.id, _previewDeviceData.serial_number, 'list'); }, 300);
 }
 </script>
 
@@ -794,7 +864,7 @@ function showDevicePreview(data) {
                         <div class="col-md-2">
                             <label class="form-label">Status (wspólny)</label>
                             <select name="status" id="addStatus" class="form-select">
-                                <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'] as $s): ?>
+                                <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa','do_demontazu'] as $s): ?>
                                 <option value="<?= $s ?>" <?= $s === 'nowy' ? 'selected' : '' ?>><?= h(ucfirst(str_replace('_',' ',$s))) ?></option>
                                 <?php endforeach; ?>
                             </select>
@@ -1180,6 +1250,16 @@ function openSimEdit(deviceId, currentSim) {
 </script>
 
 <?php elseif ($action === 'view' && isset($device)): ?>
+<?php if ($device['status'] === 'do_demontazu'): ?>
+<div class="alert alert-warning d-flex align-items-center gap-2 mb-3">
+    <i class="fas fa-tools fa-lg text-warning"></i>
+    <div>
+        <strong>Urządzenie zaplanowane do demontażu.</strong>
+        Urządzenie jest aktualnie oznaczone jako <em>Do demontażu</em>.
+        Po wykonaniu demontażu użyj opcji <a href="installations.php?action=demontaze"><strong>Demontaże</strong></a>, aby zakończyć proces.
+    </div>
+</div>
+<?php endif; ?>
 <div class="row g-3">
     <div class="col-md-4">
         <div class="card">
@@ -1254,6 +1334,12 @@ function openSimEdit(deviceId, currentSim) {
             <div class="card-footer d-flex gap-2">
                 <?php if (!isTechnician()): ?>
                 <a href="devices.php?action=edit&id=<?= $device['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                <?php endif; ?>
+                <?php if (in_array($device['status'], ['zamontowany','do_demontazu'])): ?>
+                <button type="button" class="btn btn-sm btn-outline-warning"
+                        onclick="openMoveDeviceModal(<?= $device['id'] ?>, <?= htmlspecialchars(json_encode($device['serial_number'])) ?>, 'view')">
+                    <i class="fas fa-exchange-alt me-1"></i>Przenieś do firmy
+                </button>
                 <?php endif; ?>
             </div>
         </div>
@@ -1388,7 +1474,7 @@ function openSimEdit(deviceId, currentSim) {
                 <div class="col-md-6">
                     <label class="form-label">Status</label>
                     <select name="status" id="deviceStatus" class="form-select">
-                        <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'] as $s): ?>
+                        <?php foreach (['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa','do_demontazu'] as $s): ?>
                         <option value="<?= $s ?>" <?= ($device['status'] ?? 'nowy') === $s ? 'selected' : '' ?>>
                             <?= h(ucfirst(str_replace('_',' ',$s))) ?>
                         </option>
@@ -1440,6 +1526,74 @@ function toggleStatusFields() {
 }
 document.getElementById('deviceStatus').addEventListener('change', toggleStatusFields);
 toggleStatusFields(); // run on page load
+</script>
+<?php endif; ?>
+
+<!-- Move Device Modal (shared between list and view) -->
+<?php if (in_array($action, ['list', 'view'])): ?>
+<div class="modal fade" id="moveDeviceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" id="moveDeviceForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="move_device">
+                <input type="hidden" name="device_id" id="moveDeviceId" value="">
+                <input type="hidden" name="return_to" id="moveReturnTo" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-exchange-alt me-2 text-warning"></i>Przenieś urządzenie do innej firmy</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">Urządzenie: <strong id="moveDeviceSerial"></strong></p>
+                    <p class="text-muted small mb-3">
+                        Przeniesienie urządzenia zmienia przypisanie klienta w aktywnym montażu.
+                        Urządzenie pozostaje zamontowane w tym samym pojeździe, ale zmienia się firma klienta.
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Nowy klient / firma</label>
+                            <select name="new_client_id" id="moveNewClientId" class="form-select">
+                                <option value="">— brak klienta —</option>
+                                <?php foreach ($clientsList as $cl): ?>
+                                <option value="<?= $cl['id'] ?>">
+                                    <?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Nowy pojazd (opcjonalnie)</label>
+                            <select name="new_vehicle_id" class="form-select">
+                                <option value="">— pozostaw bez zmiany —</option>
+                                <?php foreach ($vehiclesList as $vl): ?>
+                                <option value="<?= $vl['id'] ?>"><?= h($vl['registration'] . ($vl['make'] ? ' — ' . $vl['make'] : '')) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Powód przeniesienia / Uwagi</label>
+                            <input type="text" name="move_notes" class="form-control" placeholder="np. Sprzedaż pojazdu, zmiana klienta...">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-warning text-white"><i class="fas fa-exchange-alt me-1"></i>Przenieś</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openMoveDeviceModal(deviceId, serial, returnTo) {
+    document.getElementById('moveDeviceId').value = deviceId;
+    document.getElementById('moveDeviceSerial').textContent = serial;
+    document.getElementById('moveReturnTo').value = returnTo || 'list';
+    document.getElementById('moveNewClientId').value = '';
+    document.querySelector('#moveDeviceForm [name="new_vehicle_id"]').value = '';
+    document.querySelector('#moveDeviceForm [name="move_notes"]').value = '';
+    new bootstrap.Modal(document.getElementById('moveDeviceModal')).show();
+}
 </script>
 <?php endif; ?>
 

@@ -321,6 +321,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashSuccess('Wydanie cofnięte — akcesorium zwrócono do stanu magazynowego.');
         } catch (Exception $e) { flashError($e->getMessage()); }
         redirect(getBaseUrl() . 'installations.php?action=view&id=' . $instId);
+
+    } elseif ($postAction === 'add_disassembly') {
+        // Schedule disassembly: mark device status as 'do_demontazu'
+        $disDeviceId    = (int)($_POST['device_id'] ?? 0);
+        $disTechnicianId= (int)($_POST['technician_id'] ?? 0) ?: getCurrentUser()['id'];
+        $disDate        = sanitize($_POST['disassembly_date'] ?? date('Y-m-d'));
+        $disNotes       = sanitize($_POST['notes'] ?? '');
+        if (!$disDeviceId) { flashError('Nie wybrano urządzenia.'); redirect(getBaseUrl() . 'installations.php?action=demontaze'); }
+        $db->beginTransaction();
+        try {
+            $devCheck = $db->prepare("SELECT id, model_id, status FROM devices WHERE id=? LIMIT 1");
+            $devCheck->execute([$disDeviceId]);
+            $devRow = $devCheck->fetch();
+            if (!$devRow) { throw new Exception('Urządzenie nie istnieje.'); }
+            if ($devRow['status'] === 'do_demontazu') { throw new Exception('Urządzenie jest już oznaczone do demontażu.'); }
+            $oldStatus = $devRow['status'];
+            $db->prepare("UPDATE devices SET status='do_demontazu' WHERE id=?")->execute([$disDeviceId]);
+            adjustInventoryForStatusChange($db, $devRow['model_id'], $oldStatus, 'do_demontazu');
+            // Update active installation notes/technician if exists
+            if ($disNotes || $disTechnicianId) {
+                $db->prepare("UPDATE installations SET technician_id=?, notes=CONCAT(COALESCE(notes,''), IF(notes IS NULL OR notes='', '', '\n'), ?) WHERE device_id=? AND status='aktywna'")
+                   ->execute([$disTechnicianId, $disNotes ? '[Demontaż zaplanowany: ' . $disNotes . ']' : '[Demontaż zaplanowany]', $disDeviceId]);
+            }
+            $db->commit();
+            flashSuccess('Urządzenie zostało oznaczone do demontażu.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'installations.php?action=demontaze');
+
+    } elseif ($postAction === 'complete_disassembly') {
+        // Complete disassembly: mark device as sprawny, close active installation
+        $disDeviceId = (int)($_POST['device_id'] ?? 0);
+        $disInstId   = (int)($_POST['installation_id'] ?? 0);
+        $disDate     = sanitize($_POST['disassembly_date'] ?? date('Y-m-d'));
+        if (!$disDeviceId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'installations.php?action=demontaze'); }
+        $db->beginTransaction();
+        try {
+            $devInfo = $db->prepare("SELECT model_id, status FROM devices WHERE id=? FOR UPDATE");
+            $devInfo->execute([$disDeviceId]);
+            $devRow = $devInfo->fetch();
+            if (!$devRow) { throw new Exception('Urządzenie nie istnieje.'); }
+            // Close active installation
+            if ($disInstId) {
+                $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE id=? AND status='aktywna'")
+                   ->execute([$disDate, $disInstId]);
+            } else {
+                $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE device_id=? AND status='aktywna'")
+                   ->execute([$disDate, $disDeviceId]);
+            }
+            // Change device status back to sprawny (available for reinstallation)
+            $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$disDeviceId]);
+            adjustInventoryForStatusChange($db, $devRow['model_id'], $devRow['status'], 'sprawny');
+            $db->commit();
+            flashSuccess('Demontaż zakończony. Urządzenie jest teraz dostępne do ponownego montażu.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'installations.php?action=demontaze');
     }
 }
 
@@ -588,15 +649,142 @@ if ($action === 'list') {
     } catch (Exception $e) { $installationProtocols = []; }
 }
 
+// Fetch "Moje Montaże" — installations assigned to the current user
+$myInstallations = [];
+$myInstallationGroups = [];
+if ($action === 'my') {
+    $currentUser = getCurrentUser();
+    $myUserId    = (int)$currentUser['id'];
+    $mySearch    = sanitize($_GET['search'] ?? '');
+    $myStatus    = sanitize($_GET['status'] ?? '');
+    $mySql = "
+        SELECT i.id, i.device_id, i.batch_id, i.installation_date, i.uninstallation_date, i.status,
+               d.serial_number, m.name as model_name, mf.name as manufacturer_name,
+               v.registration, v.make,
+               c.contact_name, c.company_name,
+               u.name as technician_name
+        FROM installations i
+        JOIN devices d ON d.id=i.device_id
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN clients c ON c.id=i.client_id
+        LEFT JOIN users u ON u.id=i.technician_id
+        WHERE i.technician_id=?
+    ";
+    $myParams = [$myUserId];
+    if ($myStatus) { $mySql .= " AND i.status=?"; $myParams[] = $myStatus; }
+    if ($mySearch) {
+        $mySql .= " AND (d.serial_number LIKE ? OR v.registration LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ?)";
+        $myParams = array_merge($myParams, ["%$mySearch%","%$mySearch%","%$mySearch%","%$mySearch%"]);
+    }
+    $mySql .= " ORDER BY i.installation_date DESC, i.batch_id, i.id";
+    try {
+        $myStmt = $db->prepare($mySql);
+        $myStmt->execute($myParams);
+        $myInstallations = $myStmt->fetchAll();
+    } catch (PDOException $e) {
+        $mySqlFallback = str_replace(
+            ['i.device_id, i.batch_id,', 'i.batch_id, i.id'],
+            ['i.device_id, NULL as batch_id,', 'i.id'],
+            $mySql
+        );
+        $myStmt = $db->prepare($mySqlFallback);
+        $myStmt->execute($myParams);
+        $myInstallations = $myStmt->fetchAll();
+    }
+    $mySeenBatches = [];
+    foreach ($myInstallations as $inst) {
+        $bid = $inst['batch_id'];
+        if ($bid !== null) {
+            if (!isset($mySeenBatches[$bid])) {
+                $mySeenBatches[$bid] = count($myInstallationGroups);
+                $myInstallationGroups[] = ['is_batch' => true, 'items' => [$inst], 'ids' => [$inst['id']]];
+            } else {
+                $idx = $mySeenBatches[$bid];
+                $myInstallationGroups[$idx]['items'][] = $inst;
+                $myInstallationGroups[$idx]['ids'][]   = $inst['id'];
+            }
+        } else {
+            $myInstallationGroups[] = ['is_batch' => false, 'items' => [$inst], 'ids' => [$inst['id']]];
+        }
+    }
+}
+
+// Fetch "Demontaże" — devices scheduled for disassembly (status = 'do_demontazu')
+$disassemblyDevices   = [];
+$disassemblyInstalled = []; // device_id => active installation info
+if ($action === 'demontaze') {
+    $disSearch = sanitize($_GET['search'] ?? '');
+    $disSql = "
+        SELECT d.id as device_id, d.serial_number, d.imei, d.sim_number, d.status as device_status,
+               m.name as model_name, mf.name as manufacturer_name,
+               i.id as installation_id, i.installation_date, i.status as inst_status,
+               v.registration, v.make,
+               c.contact_name, c.company_name,
+               u.name as technician_name
+        FROM devices d
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        LEFT JOIN installations i ON i.device_id=d.id AND i.status='aktywna'
+        LEFT JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN clients c ON c.id=i.client_id
+        LEFT JOIN users u ON u.id=i.technician_id
+        WHERE d.status='do_demontazu'
+    ";
+    $disParams = [];
+    if ($disSearch) {
+        $disSql .= " AND (d.serial_number LIKE ? OR v.registration LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ?)";
+        $disParams = ["%$disSearch%","%$disSearch%","%$disSearch%","%$disSearch%"];
+    }
+    $disSql .= " ORDER BY i.installation_date DESC, d.id";
+    $disStmt = $db->prepare($disSql);
+    $disStmt->execute($disParams);
+    $disassemblyDevices = $disStmt->fetchAll();
+
+    // For "Nowy demontaż" modal — list of active installations to pick from
+    $activeInstForDis = $db->query("
+        SELECT i.id, i.installation_date, d.id as device_id, d.serial_number, d.status as device_status,
+               m.name as model_name, mf.name as manufacturer_name,
+               v.registration, c.contact_name, c.company_name
+        FROM installations i
+        JOIN devices d ON d.id=i.device_id AND d.status NOT IN ('do_demontazu','wycofany','sprzedany')
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN clients c ON c.id=i.client_id
+        WHERE i.status='aktywna'
+        ORDER BY i.installation_date DESC
+    ")->fetchAll();
+}
+
 $activePage = 'installations';
 $pageTitle = 'Montaże';
 include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="page-header">
-    <h1><i class="fas fa-car me-2 text-primary"></i>Montaże / Demontaże</h1>
+    <h1>
+        <?php if ($action === 'my'): ?>
+        <i class="fas fa-user-check me-2 text-primary"></i>Moje Montaże
+        <?php elseif ($action === 'demontaze'): ?>
+        <i class="fas fa-tools me-2 text-warning"></i>Demontaże
+        <?php else: ?>
+        <i class="fas fa-car me-2 text-primary"></i>Montaże / Demontaże
+        <?php endif; ?>
+    </h1>
     <?php if ($action === 'list'): ?>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#instListAddModal"><i class="fas fa-plus me-2"></i>Nowy montaż</button>
+    <?php elseif ($action === 'my'): ?>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#instListAddModal"><i class="fas fa-plus me-2"></i>Nowy montaż</button>
+        <a href="installations.php" class="btn btn-outline-secondary"><i class="fas fa-list me-1"></i>Wszystkie montaże</a>
+    </div>
+    <?php elseif ($action === 'demontaze'): ?>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-warning text-white" data-bs-toggle="modal" data-bs-target="#newDisassemblyModal"><i class="fas fa-plus me-2"></i>Nowy demontaż</button>
+        <a href="installations.php" class="btn btn-outline-secondary"><i class="fas fa-list me-1"></i>Lista montaży</a>
+    </div>
     <?php else: ?>
     <a href="installations.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
@@ -893,7 +1081,337 @@ function showInstPreview(data) {
 </div><!-- /pane-protokoly -->
 </div><!-- /tab-content -->
 
-<?php elseif ($action === 'view' && isset($installation)): ?>
+<?php elseif ($action === 'my'): ?>
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2">
+            <input type="hidden" name="action" value="my">
+            <div class="col-md-4">
+                <input type="search" name="search" class="form-control form-control-sm" placeholder="Szukaj (nr seryjny, rejestracja, klient...)" value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-md-3">
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">Wszystkie statusy</option>
+                    <option value="aktywna" <?= ($_GET['status'] ?? '') === 'aktywna' ? 'selected' : '' ?>>Aktywna</option>
+                    <option value="zakonczona" <?= ($_GET['status'] ?? '') === 'zakonczona' ? 'selected' : '' ?>>Zakończona</option>
+                    <option value="anulowana" <?= ($_GET['status'] ?? '') === 'anulowana' ? 'selected' : '' ?>>Anulowana</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="installations.php?action=my" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header">Moje montaże (<?= count($myInstallationGroups) ?> pozycji / <?= count($myInstallations) ?> urządzeń)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Data montażu</th><th>Urządzenie / Zlecenie</th><th>Pojazd</th><th>Klient</th><th>Technik</th><th>Status</th><th>Akcje</th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($myInstallationGroups as $gi => $group): ?>
+                <?php $first = $group['items'][0]; ?>
+                <?php if ($group['is_batch'] && count($group['items']) > 1): ?>
+                <tr class="table-info batch-header-row" data-batch-toggle="mybatch-<?= $gi ?>">
+                    <td><?= formatDate($first['installation_date']) ?></td>
+                    <td>
+                        <span class="badge bg-primary me-1"><?= count($group['items']) ?> urządzeń</span>
+                        <span class="text-muted small">Zlecenie grupowe</span>
+                        <div class="small text-muted mt-1"><?= h(implode(', ', array_column($group['items'], 'serial_number'))) ?></div>
+                    </td>
+                    <td><?= h(implode(', ', array_unique(array_column($group['items'], 'registration')))) ?></td>
+                    <td><?= h($first['company_name'] ?: $first['contact_name'] ?? '—') ?></td>
+                    <td><?= h($first['technician_name'] ?? '—') ?></td>
+                    <td><?= getStatusBadge($first['status'], 'installation') ?></td>
+                    <td>
+                        <a href="installations.php?action=print_batch&ids=<?= implode(',', $group['ids']) ?>"
+                           class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie"><i class="fas fa-print"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
+                                onclick="toggleBatchRows('mybatch-<?= $gi ?>', this)" title="Rozwiń / zwiń">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </td>
+                </tr>
+                <?php foreach ($group['items'] as $inst): ?>
+                <tr class="batch-child-row d-none" data-batch-group="mybatch-<?= $gi ?>">
+                    <td class="ps-4 text-muted small"><?= formatDate($inst['installation_date']) ?></td>
+                    <td class="ps-4">
+                        <a href="devices.php?action=view&id=<?= $inst['device_id'] ?? '' ?>"><?= h($inst['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?></small>
+                    </td>
+                    <td><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
+                    <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
+                    <td><?= h($inst['technician_name'] ?? '—') ?></td>
+                    <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showInstPreview(<?= htmlspecialchars(json_encode(['id'=>$inst['id'],'status'=>$inst['status'],'installation_date'=>$inst['installation_date'],'uninstallation_date'=>$inst['uninstallation_date']??null,'serial_number'=>$inst['serial_number'],'manufacturer_name'=>$inst['manufacturer_name'],'model_name'=>$inst['model_name'],'registration'=>$inst['registration'],'make'=>$inst['make'],'client'=>$inst['company_name']?:$inst['contact_name']??'','technician_name'=>$inst['technician_name']??'']),ENT_QUOTES) ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
+                        <?php if ($inst['status'] === 'aktywna'): ?>
+                        <button type="button" class="btn btn-sm btn-outline-warning btn-action"
+                                onclick="showUninstallModal(<?= $inst['id'] ?>, <?= $inst['device_id'] ?? 0 ?>, '<?= h($inst['serial_number']) ?>')">
+                            <i class="fas fa-minus-circle"></i>
+                        </button>
+                        <?php endif; ?>
+                        <a href="installations.php?action=view&id=<?= $inst['id'] ?>" class="btn btn-sm btn-outline-secondary btn-action" title="Otwórz"><i class="fas fa-external-link-alt"></i></a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php else: ?>
+                <?php $inst = $first; ?>
+                <tr>
+                    <td><?= formatDate($inst['installation_date']) ?></td>
+                    <td>
+                        <a href="devices.php?action=view&id=<?= $inst['device_id'] ?? '' ?>"><?= h($inst['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?></small>
+                    </td>
+                    <td><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
+                    <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
+                    <td><?= h($inst['technician_name'] ?? '—') ?></td>
+                    <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showInstPreview(<?= htmlspecialchars(json_encode(['id'=>$inst['id'],'status'=>$inst['status'],'installation_date'=>$inst['installation_date'],'uninstallation_date'=>$inst['uninstallation_date']??null,'serial_number'=>$inst['serial_number'],'manufacturer_name'=>$inst['manufacturer_name'],'model_name'=>$inst['model_name'],'registration'=>$inst['registration'],'make'=>$inst['make'],'client'=>$inst['company_name']?:$inst['contact_name']??'','technician_name'=>$inst['technician_name']??'']),ENT_QUOTES) ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
+                        <?php if ($inst['status'] === 'aktywna'): ?>
+                        <button type="button" class="btn btn-sm btn-outline-warning btn-action"
+                                onclick="showUninstallModal(<?= $inst['id'] ?>, <?= $inst['device_id'] ?? 0 ?>, '<?= h($inst['serial_number']) ?>')">
+                            <i class="fas fa-minus-circle"></i>
+                        </button>
+                        <?php endif; ?>
+                        <a href="installations.php?action=view&id=<?= $inst['id'] ?>" class="btn btn-sm btn-outline-secondary btn-action" title="Otwórz"><i class="fas fa-external-link-alt"></i></a>
+                    </td>
+                </tr>
+                <?php endif; ?>
+                <?php endforeach; ?>
+                <?php if (empty($myInstallationGroups)): ?><tr><td colspan="7" class="text-center text-muted p-3">Brak montaży przypisanych do Ciebie.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<script>
+function toggleBatchRows(groupKey, btn) {
+    var rows = document.querySelectorAll('[data-batch-group="' + groupKey + '"]');
+    var icon = btn.querySelector('i');
+    rows.forEach(function(r) { r.classList.toggle('d-none'); });
+    if (icon) { icon.classList.toggle('fa-chevron-down'); icon.classList.toggle('fa-chevron-up'); }
+}
+</script>
+
+<!-- Installation Preview Modal (reused for my view) -->
+<div class="modal fade" id="instPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="instPreviewTitle"><i class="fas fa-car me-2 text-primary"></i>Podgląd montażu</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="instPreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+                <a id="instPreviewPrintBtn" href="#" target="_blank" class="btn btn-outline-dark btn-sm"><i class="fas fa-print me-1"></i>Drukuj</a>
+                <a id="instPreviewViewBtn" href="#" class="btn btn-info btn-sm text-white"><i class="fas fa-eye me-1"></i>Otwórz pełny widok</a>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function showInstPreview(data) {
+    var statusMap = {
+        'aktywna':    '<span class="badge bg-success">Aktywna</span>',
+        'zakonczona': '<span class="badge bg-secondary">Zakończona</span>',
+        'anulowana':  '<span class="badge bg-danger">Anulowana</span>'
+    };
+    var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
+    var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
+    document.getElementById('instPreviewTitle').textContent = 'Montaż #' + data.id;
+    document.getElementById('instPreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-0">' +
+        '<tr><th class="text-muted" style="width:40%">Status</th><td>' + statusBadge + '</td></tr>' +
+        '<tr><th class="text-muted">Data montażu</th><td>' + formatDate(data.installation_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Data demontażu</th><td>' + formatDate(data.uninstallation_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Urządzenie</th><td><strong>' + data.serial_number + '</strong><br><small class="text-muted">' + data.manufacturer_name + ' ' + data.model_name + '</small></td></tr>' +
+        '<tr><th class="text-muted">Pojazd</th><td>' + data.registration + '<br><small class="text-muted">' + data.make + '</small></td></tr>' +
+        '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Technik</th><td>' + (data.technician_name || '—') + '</td></tr>' +
+        '</table>';
+    document.getElementById('instPreviewViewBtn').href = 'installations.php?action=view&id=' + data.id;
+    document.getElementById('instPreviewPrintBtn').href = 'installations.php?action=print_batch&ids=' + data.id;
+    new bootstrap.Modal(document.getElementById('instPreviewModal')).show();
+}
+</script>
+
+<?php elseif ($action === 'demontaze'): ?>
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2">
+            <input type="hidden" name="action" value="demontaze">
+            <div class="col-md-5">
+                <input type="search" name="search" class="form-control form-control-sm" placeholder="Szukaj (nr seryjny, rejestracja, klient...)" value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="installations.php?action=demontaze" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header d-flex align-items-center gap-2">
+        <i class="fas fa-tools text-warning me-1"></i>
+        Urządzenia do demontażu (<?= count($disassemblyDevices) ?>)
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Technik</th><th>Data montażu</th><th>Status</th><th>Akcje</th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($disassemblyDevices as $dd): ?>
+                <tr>
+                    <td>
+                        <a href="devices.php?action=view&id=<?= $dd['device_id'] ?>"><?= h($dd['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($dd['manufacturer_name'] . ' ' . $dd['model_name']) ?></small>
+                        <?php if ($dd['imei']): ?><br><small class="text-muted">IMEI: <?= h($dd['imei']) ?></small><?php endif; ?>
+                    </td>
+                    <td>
+                        <?= $dd['registration'] ? h($dd['registration']) : '<span class="text-muted">—</span>' ?>
+                        <?php if ($dd['make']): ?><br><small class="text-muted"><?= h($dd['make']) ?></small><?php endif; ?>
+                    </td>
+                    <td><?= h($dd['company_name'] ?: $dd['contact_name'] ?? '—') ?></td>
+                    <td><?= h($dd['technician_name'] ?? '—') ?></td>
+                    <td><?= $dd['installation_date'] ? formatDate($dd['installation_date']) : '<span class="text-muted">—</span>' ?></td>
+                    <td><?= getStatusBadge($dd['device_status'], 'device') ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action"
+                                title="Zakończ demontaż"
+                                onclick="showCompleteDisassemblyModal(<?= $dd['device_id'] ?>, '<?= h($dd['serial_number']) ?>', <?= (int)($dd['installation_id'] ?? 0) ?>)">
+                            <i class="fas fa-check-circle"></i>
+                        </button>
+                        <a href="devices.php?action=view&id=<?= $dd['device_id'] ?>" class="btn btn-sm btn-outline-secondary btn-action" title="Szczegóły urządzenia">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                        <?php if ($dd['installation_id']): ?>
+                        <a href="installations.php?action=view&id=<?= $dd['installation_id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Otwórz montaż">
+                            <i class="fas fa-car"></i>
+                        </a>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($disassemblyDevices)): ?>
+                <tr><td colspan="7" class="text-center text-muted p-3"><i class="fas fa-check-circle text-success me-2"></i>Brak urządzeń do demontażu.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Complete Disassembly Modal -->
+<div class="modal fade" id="completeDisassemblyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="complete_disassembly">
+                <input type="hidden" name="device_id" id="cdDeviceId" value="">
+                <input type="hidden" name="installation_id" id="cdInstallationId" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-check-circle me-2 text-success"></i>Zakończ demontaż</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">Urządzenie: <strong id="cdSerialNumber"></strong></p>
+                    <p class="text-muted small mb-3">Po zakończeniu demontażu urządzenie wróci do stanu magazynowego jako <strong>Sprawne</strong> i będzie dostępne do ponownego montażu.</p>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Data demontażu</label>
+                        <input type="date" name="disassembly_date" id="cdDate" class="form-control" required value="<?= date('Y-m-d') ?>">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success"><i class="fas fa-check me-1"></i>Zakończ demontaż</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- New Disassembly Modal -->
+<div class="modal fade" id="newDisassemblyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add_disassembly">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-tools me-2 text-warning"></i>Nowy demontaż</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label required-star">Urządzenie do demontażu</label>
+                            <select name="device_id" class="form-select" required id="disassemblyDeviceSelect">
+                                <option value="">— wybierz urządzenie z aktywnego montażu —</option>
+                                <?php foreach ($activeInstForDis ?? [] as $ai): ?>
+                                <option value="<?= $ai['device_id'] ?>">
+                                    <?= h($ai['serial_number']) ?> — <?= h($ai['manufacturer_name'] . ' ' . $ai['model_name']) ?>
+                                    | Rejestracja: <?= h($ai['registration']) ?>
+                                    <?= $ai['company_name'] || $ai['contact_name'] ? '| ' . h($ai['company_name'] ?: $ai['contact_name']) : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                                <?php if (empty($activeInstForDis ?? [])): ?>
+                                <?php endif; ?>
+                            </select>
+                            <?php if (empty($activeInstForDis ?? [])): ?>
+                            <div class="form-text text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Brak aktywnych montaży do zaplanowania demontażu.</div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik wykonujący demontaż</label>
+                            <select name="technician_id" class="form-select">
+                                <option value="">— aktualny użytkownik —</option>
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= getCurrentUser()['id'] == $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Planowana data demontażu</label>
+                            <input type="date" name="disassembly_date" class="form-control" value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Powód demontażu, dodatkowe informacje..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-warning text-white" <?= empty($activeInstForDis ?? []) ? 'disabled' : '' ?>>
+                        <i class="fas fa-tools me-1"></i>Zaplanuj demontaż
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function showCompleteDisassemblyModal(deviceId, serial, installationId) {
+    document.getElementById('cdDeviceId').value = deviceId;
+    document.getElementById('cdInstallationId').value = installationId;
+    document.getElementById('cdSerialNumber').textContent = serial;
+    document.getElementById('cdDate').value = new Date().toISOString().split('T')[0];
+    new bootstrap.Modal(document.getElementById('completeDisassemblyModal')).show();
+}
+</script>
+
+
 <div class="row g-3">
     <div class="col-md-4">
         <div class="card">
@@ -1976,7 +2494,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
 </script>
 <?php endif; ?>
 
-<?php if ($action === 'list'): ?>
+<?php if ($action === 'list' || $action === 'my'): ?>
 <!-- Modal: Nowy montaż (lista montaży) — wielourządzeniowy z TomSelect -->
 <div class="modal fade" id="instListAddModal" tabindex="-1">
     <div class="modal-dialog modal-xl">

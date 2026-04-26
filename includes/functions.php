@@ -97,7 +97,8 @@ function getStatusBadge($status, $type = 'device') {
             'zamontowany'=> ['primary', 'Zamontowany'],
             'wycofany'   => ['secondary', 'Wycofany'],
             'sprzedany'  => ['info', 'Sprzedany'],
-            'dzierżawa'  => ['purple', 'Dzierżawa'],
+            'dzierżawa'    => ['purple', 'Dzierżawa'],
+            'do_demontazu' => ['warning-orange', 'Do demontażu'],
         ],
         'installation' => [
             'aktywna'    => ['success', 'Aktywna'],
@@ -122,6 +123,9 @@ function getStatusBadge($status, $type = 'device') {
     // 'purple' is a custom color not in Bootstrap – render inline
     if ($item[0] === 'purple') {
         return '<span class="badge" style="background:#6f42c1">' . h($item[1]) . '</span>';
+    }
+    if ($item[0] === 'warning-orange') {
+        return '<span class="badge" style="background:#e67e22">' . h($item[1]) . '</span>';
     }
     return '<span class="badge bg-' . $item[0] . '">' . h($item[1]) . '</span>';
 }
