@@ -2495,7 +2495,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
 <?php if ($action === 'list' || $action === 'my'): ?>
 <!-- Modal: Nowy montaż (lista montaży) — wielourządzeniowy z TomSelect -->
 <div class="modal fade" id="instListAddModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
         <div class="modal-content">
             <form method="POST" action="installations.php" id="instListAddForm">
                 <?= csrfField() ?>
@@ -2513,7 +2513,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                             <?php endif; ?>
                             <div id="instListDevRowsContainer" class="d-flex flex-column gap-2 mb-2">
                                 <div class="device-row border rounded p-2 bg-light" data-row-idx="0">
-                                    <div class="row g-2 align-items-center">
+                                    <div class="row g-2 align-items-center flex-wrap">
                                         <div class="col-auto"><span class="row-num badge bg-secondary">1</span></div>
                                         <div class="col-auto">
                                             <div class="btn-group btn-group-sm" role="group">
@@ -2523,7 +2523,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                                                 <label class="btn btn-outline-primary" for="ilm_manual_0"><i class="fas fa-hand-pointer me-1"></i>Ręczny</label>
                                             </div>
                                         </div>
-                                        <div class="col col-mode-auto">
+                                        <div class="col-12 col-sm col-mode-auto">
                                             <select name="model_id[0]" class="form-select form-select-sm">
                                                 <option value="">— wybierz model —</option>
                                                 <?php foreach ($availableModels as $m): ?>
@@ -2531,7 +2531,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                                                 <?php endforeach; ?>
                                             </select>
                                         </div>
-                                        <div class="col col-mode-manual" style="display:none">
+                                        <div class="col-12 col-sm col-mode-manual" style="display:none">
                                             <select name="device_id_manual[0]" class="form-select form-select-sm ts-device-il">
                                                 <option value="">— wybierz urządzenie —</option>
                                                 <?php
@@ -2544,7 +2544,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                                                 <?php endforeach; if ($ilGroup0) echo '</optgroup>'; ?>
                                             </select>
                                         </div>
-                                        <div class="col-auto">
+                                        <div class="col-12 col-sm-auto">
                                             <input type="text" name="vehicle_registration[0]" class="form-control form-control-sm" required placeholder="Nr rej. pojazdu" style="text-transform:uppercase;min-width:130px">
                                         </div>
                                         <div class="col-auto">
@@ -2636,7 +2636,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
 
 <template id="instListDevRowTemplate">
     <div class="device-row border rounded p-2 bg-light" data-row-idx="__IDX__">
-        <div class="row g-2 align-items-center">
+        <div class="row g-2 align-items-center flex-wrap">
             <div class="col-auto"><span class="row-num badge bg-secondary">__NUM__</span></div>
             <div class="col-auto">
                 <div class="btn-group btn-group-sm" role="group">
@@ -2646,7 +2646,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                     <label class="btn btn-outline-primary" for="ilm_manual___IDX__"><i class="fas fa-hand-pointer me-1"></i>Ręczny</label>
                 </div>
             </div>
-            <div class="col col-mode-auto">
+            <div class="col-12 col-sm col-mode-auto">
                 <select name="model_id[__IDX__]" class="form-select form-select-sm">
                     <option value="">— wybierz model —</option>
                     <?php foreach ($availableModels as $m): ?>
@@ -2654,7 +2654,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col col-mode-manual" style="display:none">
+            <div class="col-12 col-sm col-mode-manual" style="display:none">
                 <select name="device_id_manual[__IDX__]" class="form-select form-select-sm ts-device-il">
                     <option value="">— wybierz urządzenie —</option>
                     <?php
@@ -2667,7 +2667,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                     <?php endforeach; if ($ilTplGroup) echo '</optgroup>'; ?>
                 </select>
             </div>
-            <div class="col-auto">
+            <div class="col-12 col-sm-auto">
                 <input type="text" name="vehicle_registration[__IDX__]" class="form-control form-control-sm" required placeholder="Nr rej. pojazdu" style="text-transform:uppercase;min-width:130px">
             </div>
             <div class="col-auto">
@@ -2827,3 +2827,11 @@ window.flIlClientAddresses = <?= json_encode(array_reduce($clients, function($c,
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
+<style>
+/* Mobile fix: TomSelect dropdown scrollable in modal */
+@media (max-width: 767.98px) {
+    .ts-dropdown { max-height: 200px; overflow-y: auto; }
+    #instListAddModal .modal-body { overflow-y: auto; }
+    #instListAddModal .device-row .col-12 { width: 100%; }
+}
+</style>

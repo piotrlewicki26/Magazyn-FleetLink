@@ -509,8 +509,15 @@ if ($action === 'view' && $id) {
     $deviceHistory = $histStmt->fetchAll();
 }
 
-// Models for select
-$models = $db->query("SELECT m.id, m.name, mf.name as manufacturer_name FROM models m JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE m.active=1 ORDER BY mf.name, m.name")->fetchAll();
+// Models for select (with device counts for filter tiles)
+$models = $db->query("
+    SELECT m.id, m.name, mf.name as manufacturer_name,
+           (SELECT COUNT(*) FROM devices d2 WHERE d2.model_id = m.id) as device_count
+    FROM models m
+    JOIN manufacturers mf ON mf.id = m.manufacturer_id
+    WHERE m.active = 1
+    ORDER BY mf.name, m.name
+")->fetchAll();
 
 // List with filters
 $devices = [];
@@ -622,6 +629,29 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+
+<!-- Model filter tiles -->
+<?php
+$modelsWithDevices = array_filter($models, fn($m) => $m['device_count'] > 0);
+$activeModelFilter = (int)($_GET['model'] ?? 0);
+?>
+<?php if (!empty($modelsWithDevices)): ?>
+<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+    <span class="text-muted small me-1">Model:</span>
+    <?php foreach ($modelsWithDevices as $m): ?>
+    <a href="devices.php?<?= http_build_query(array_merge($_GET, ['model' => $m['id']])) ?>"
+       class="btn btn-sm <?= $activeModelFilter === (int)$m['id'] ? 'btn-primary' : 'btn-outline-secondary' ?>">
+        <?= h($m['manufacturer_name'] . ' ' . $m['name']) ?>
+        <span class="badge <?= $activeModelFilter === (int)$m['id'] ? 'bg-white text-primary' : 'bg-secondary' ?> ms-1"><?= (int)$m['device_count'] ?></span>
+    </a>
+    <?php endforeach; ?>
+    <?php if ($activeModelFilter): ?>
+    <a href="devices.php?<?= http_build_query(array_merge(array_filter($_GET, fn($k) => $k !== 'model', ARRAY_FILTER_USE_KEY))) ?>" class="btn btn-sm btn-outline-danger">
+        <i class="fas fa-times me-1"></i>Wyczyść filtr modelu
+    </a>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
 
 <?php if (isAdmin()): ?>
 <!-- Bulk actions panel (hidden until devices are selected) -->

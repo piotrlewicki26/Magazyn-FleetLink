@@ -280,41 +280,47 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body">
                 <div class="row g-2">
                     <?php if (isAdmin()): ?>
-                    <div class="col-6 col-md-2">
-                        <button type="button" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenAddDevice()">
-                            <i class="fas fa-plus-circle fa-2x mb-2"></i>
-                            <span>Dodaj urządzenie</span>
+                    <div class="col-6 col-md-auto flex-fill">
+                        <button type="button" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenAddDevice()">
+                            <i class="fas fa-plus-circle fa-lg mb-1"></i>
+                            <span class="small">Dodaj urządzenie</span>
                         </button>
                     </div>
                     <?php endif; ?>
-                    <div class="col-6 col-md-2">
-                        <button type="button" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenAddSim()">
-                            <i class="fas fa-sim-card fa-2x mb-2"></i>
-                            <span>Dodaj kartę SIM</span>
+                    <div class="col-6 col-md-auto flex-fill">
+                        <button type="button" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenAddSim()">
+                            <i class="fas fa-sim-card fa-lg mb-1"></i>
+                            <span class="small">Dodaj kartę SIM</span>
                         </button>
                     </div>
-                    <div class="col-6 col-md-2">
-                        <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenInstall()">
-                            <i class="fas fa-car fa-2x mb-2"></i>
-                            <span>Nowy montaż</span>
+                    <div class="col-6 col-md-auto flex-fill">
+                        <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenInstall()">
+                            <i class="fas fa-car fa-lg mb-1"></i>
+                            <span class="small">Nowy montaż</span>
                         </button>
                     </div>
-                    <div class="col-6 col-md-2">
-                        <button type="button" class="btn btn-outline-warning quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenService()">
-                            <i class="fas fa-wrench fa-2x mb-2"></i>
-                            <span>Nowy serwis</span>
+                    <div class="col-6 col-md-auto flex-fill">
+                        <a href="installations.php?action=my" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-2">
+                            <i class="fas fa-user-check fa-lg mb-1"></i>
+                            <span class="small">Moje montaże</span>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-auto flex-fill">
+                        <button type="button" class="btn btn-outline-warning quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenService()">
+                            <i class="fas fa-wrench fa-lg mb-1"></i>
+                            <span class="small">Nowy serwis</span>
                         </button>
                     </div>
-                    <div class="col-6 col-md-2">
-                        <button type="button" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center" onclick="dashOpenClient()">
-                            <i class="fas fa-user-plus fa-2x mb-2"></i>
-                            <span>Nowy klient</span>
+                    <div class="col-6 col-md-auto flex-fill">
+                        <button type="button" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenClient()">
+                            <i class="fas fa-user-plus fa-lg mb-1"></i>
+                            <span class="small">Nowy klient</span>
                         </button>
                     </div>
-                    <div class="col-6 col-md-2">
-                        <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center">
-                            <i class="fas fa-calendar-alt fa-2x mb-2"></i>
-                            <span>Kalendarz</span>
+                    <div class="col-6 col-md-auto flex-fill">
+                        <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center py-2">
+                            <i class="fas fa-calendar-alt fa-lg mb-1"></i>
+                            <span class="small">Kalendarz</span>
                         </a>
                     </div>
                 </div>

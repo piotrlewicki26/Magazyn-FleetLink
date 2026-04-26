@@ -220,13 +220,17 @@ $inventory = $db->query("
            mf.name as manufacturer_name,
            (SELECT COUNT(*) FROM devices d2
             WHERE d2.model_id = m.id
-              AND d2.status IN ('nowy','sprawny')) as actual_count
+              AND d2.status IN ('nowy','sprawny')) as actual_count,
+           (SELECT COALESCE(SUM(d3.purchase_price), 0) FROM devices d3
+            WHERE d3.model_id = m.id
+              AND d3.status IN ('nowy','sprawny')
+              AND d3.purchase_price IS NOT NULL AND d3.purchase_price > 0) as actual_purchase_value
     FROM models m
     JOIN manufacturers mf ON mf.id = m.manufacturer_id
     LEFT JOIN inventory i ON i.model_id = m.id
     WHERE m.active = 1
       AND (i.model_id IS NOT NULL
-           OR EXISTS (SELECT 1 FROM devices d3 WHERE d3.model_id = m.id))
+           OR EXISTS (SELECT 1 FROM devices d4 WHERE d4.model_id = m.id))
     ORDER BY mf.name, m.name
 ")->fetchAll();
 
@@ -379,7 +383,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Summary Stats -->
 <?php
 $totalStock = array_sum(array_column($inventory, 'quantity'));
-$totalValue = array_sum(array_map(fn($i) => $i['quantity'] * $i['price_purchase'], $inventory));
+$totalValue = array_sum(array_column($inventory, 'actual_purchase_value'));
 $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['min_quantity']));
 ?>
 <div class="row g-3 mb-4">
@@ -449,8 +453,8 @@ $lowStockCount = count(array_filter($inventory, fn($i) => $i['quantity'] <= $i['
                     </td>
                     <td><?= (int)$item['min_quantity'] ?> szt</td>
                     <?php if (isAdmin()): ?>
-                    <td><?= formatMoney($item['quantity'] * $item['price_purchase']) ?></td>
-                    <td><?= formatMoney($item['quantity'] * $item['price_sale']) ?></td>
+                    <td><?= formatMoney($item['actual_purchase_value']) ?></td>
+                    <td><?= $item['price_sale'] > 0 ? formatMoney($item['actual_count'] * $item['price_sale']) : '—' ?></td>
                     <?php endif; ?>
                     <td class="text-muted small"><?= $item['updated_at'] ? formatDateTime($item['updated_at']) : '—' ?></td>
                     <td>
