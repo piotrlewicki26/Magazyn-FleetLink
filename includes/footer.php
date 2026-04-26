@@ -5,20 +5,19 @@ if (!defined('IN_APP')) {
 }
 ?>
 </div><!-- /.container-fluid -->
-<footer class="bg-light border-top mt-5 py-3">
+<footer class="bg-light border-top mt-5 py-2">
     <div class="container-fluid">
         <div class="row align-items-center">
-            <div class="col text-muted small">
+            <div class="col text-muted" style="font-size:.78rem">
                 &copy; <?= date('Y') ?> FleetLink System GPS v<?= defined('APP_VERSION') ? APP_VERSION : '1.0.0' ?>
-                &mdash; System zarządzania urządzeniami GPS
             </div>
-            <div class="col-auto text-muted small">
+            <div class="col-auto text-muted" style="font-size:.78rem">
                 <a href="https://www.fleetlink.pl" target="_blank" rel="noopener" class="text-muted text-decoration-none me-3">
-                    <i class="fas fa-globe me-1"></i>www.fleetlink.pl
+                    <i class="fas fa-globe me-1"></i><span class="d-none d-sm-inline">www.fleetlink.pl</span>
                 </a>
                 <?php if (isAdmin()): ?>
                 <a href="<?= getBaseUrl() ?>settings.php" class="text-muted text-decoration-none">
-                    <i class="fas fa-cog me-1"></i>Ustawienia
+                    <i class="fas fa-cog me-1"></i><span class="d-none d-sm-inline">Ustawienia</span>
                 </a>
                 <?php endif; ?>
             </div>

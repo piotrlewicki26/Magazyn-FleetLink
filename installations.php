@@ -1974,7 +1974,7 @@ body.print-page { background: #f0f4f8; }
     background: #fff;
     color: #111827;
     font-family: 'DM Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
-    max-width: 960px;
+    max-width: 800px;
     margin: 0 auto;
     border-radius: 10px;
     box-shadow: 0 4px 32px rgba(37,99,235,.10);
@@ -1984,17 +1984,18 @@ body.print-page { background: #f0f4f8; }
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    padding: 28px 32px 20px;
+    padding: 24px 28px 18px;
     border-bottom: 3px solid #2563eb;
     background: linear-gradient(135deg,#f8faff 0%,#e8f0ff 100%);
     border-radius: 10px 10px 0 0;
 }
-.pd-logo { font-size: 1.6rem; font-weight: 900; color: #111827; letter-spacing: -1px; }
+.pd-logo-img { height: 40px; display: block; margin-bottom: 6px; }
+.pd-logo { font-size: 1.5rem; font-weight: 900; color: #111827; letter-spacing: -1px; }
 .pd-logo span { color: #2563eb; }
-.pd-logo-sub { font-size: .78rem; color: #6b7280; margin-top: 2px; }
+.pd-logo-sub { font-size: .76rem; color: #6b7280; margin-top: 2px; line-height: 1.5; }
 .pd-title-block { text-align: right; }
 .pd-doc-type { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #2563eb; margin-bottom: 4px; }
-.pd-doc-number { font-size: 1.4rem; font-weight: 800; color: #111827; letter-spacing: -0.5px; }
+.pd-doc-number { font-size: 1.3rem; font-weight: 800; color: #111827; letter-spacing: -0.5px; }
 .pd-doc-meta { font-size: .8rem; color: #6b7280; margin-top: 3px; }
 /* Info grid */
 .pd-info-row {
@@ -2004,19 +2005,19 @@ body.print-page { background: #f0f4f8; }
     border-bottom: 1px solid #e5e7eb;
 }
 .pd-info-cell {
-    padding: 16px 20px;
+    padding: 14px 18px;
     border-right: 1px solid #e5e7eb;
 }
 .pd-info-cell:last-child { border-right: none; }
 .pd-info-label { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #2563eb; margin-bottom: 5px; }
-.pd-info-value { font-size: .9rem; font-weight: 700; color: #111827; }
-.pd-info-sub { font-size: .78rem; color: #6b7280; margin-top: 2px; }
+.pd-info-value { font-size: .88rem; font-weight: 700; color: #111827; }
+.pd-info-sub { font-size: .76rem; color: #6b7280; margin-top: 2px; }
 /* Section heading */
 .pd-section {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 14px 20px 8px;
+    padding: 12px 18px 6px;
     font-size: .72rem;
     font-weight: 800;
     text-transform: uppercase;
@@ -2029,68 +2030,65 @@ body.print-page { background: #f0f4f8; }
     width: 100%;
     border-collapse: collapse;
     margin: 0 0 8px;
-    font-size: .83rem;
+    font-size: .82rem;
 }
 .pd-device-table thead tr {
     background: #1d4ed8;
     color: #fff;
 }
 .pd-device-table thead th {
-    padding: 10px 12px;
+    padding: 9px 10px;
     font-weight: 700;
-    font-size: .72rem;
+    font-size: .7rem;
     text-transform: uppercase;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.5px;
     border: none;
     text-align: left;
     white-space: nowrap;
 }
-.pd-device-table tbody tr.dev-main-row {
-    border-bottom: none;
-}
 .pd-device-table tbody tr.dev-main-row td {
-    padding: 10px 12px 4px;
+    padding: 9px 10px 3px;
     border-bottom: none;
     vertical-align: middle;
     font-weight: 600;
 }
 .pd-device-table tbody tr.dev-detail-row td {
-    padding: 2px 12px 10px;
+    padding: 2px 10px 9px;
     border-bottom: 1px solid #e5e7eb;
-    font-size: .78rem;
+    font-size: .76rem;
     color: #6b7280;
     vertical-align: top;
 }
 .pd-device-table tbody tr.dev-main-row:nth-child(4n+1),
 .pd-device-table tbody tr.dev-detail-row:nth-child(4n+2) { background: #f8faff; }
 .pd-device-table tbody tr:last-child td { border-bottom: none; }
-.dev-num { color: #2563eb; font-weight: 800; font-size: .9rem; }
-.dev-reg { font-family: 'Courier New', monospace; font-weight: 800; font-size: .95rem; letter-spacing: 1px; color: #111827; background: #f0f4ff; padding: 2px 6px; border-radius: 4px; }
-.dev-imei { font-family: 'Courier New', monospace; font-size: .82rem; color: #374151; }
-.dev-serial { font-family: 'Courier New', monospace; font-size: .82rem; font-weight: 700; color: #111827; }
-.detail-chip { display: inline-flex; align-items: center; gap: 4px; background: #f3f4f6; border-radius: 4px; padding: 2px 7px; margin: 2px 4px 2px 0; font-size: .75rem; color: #374151; }
-.detail-chip i { font-size: .65rem; color: #9ca3af; }
+.dev-num { color: #2563eb; font-weight: 800; font-size: .88rem; }
+.dev-reg { font-family: 'Courier New', monospace; font-weight: 800; font-size: .9rem; letter-spacing: 1px; color: #111827; background: #f0f4ff; padding: 1px 5px; border-radius: 3px; }
+.dev-imei { font-family: 'Courier New', monospace; font-size: .78rem; color: #374151; }
+.dev-serial { font-family: 'Courier New', monospace; font-size: .78rem; font-weight: 700; color: #111827; }
+.detail-chip { display: inline-flex; align-items: center; gap: 4px; background: #f3f4f6; border-radius: 4px; padding: 2px 6px; margin: 2px 3px 2px 0; font-size: .73rem; color: #374151; }
+.detail-chip i { font-size: .63rem; color: #9ca3af; }
 /* Accessories table */
-.pd-acc-table { width:100%; border-collapse:collapse; font-size:.82rem; margin-bottom:8px; }
-.pd-acc-table thead th { background:#374151; color:#fff; padding:8px 12px; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; text-align:left; }
-.pd-acc-table tbody td { padding:7px 12px; border-bottom:1px solid #e5e7eb; }
+.pd-acc-table { width:100%; border-collapse:collapse; font-size:.8rem; margin-bottom:8px; }
+.pd-acc-table thead th { background:#374151; color:#fff; padding:8px 10px; font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; text-align:left; }
+.pd-acc-table tbody td { padding:7px 10px; border-bottom:1px solid #e5e7eb; }
 .pd-acc-table tbody tr:nth-child(even) { background:#f9fafb; }
 .pd-acc-table tbody tr:last-child td { border-bottom:none; }
-/* Notes box */
-.pd-notes-box { margin: 0 20px 20px; background: #fffbeb; border: 1px solid #fcd34d; border-radius:6px; padding:10px 14px; font-size:.85rem; color:#92400e; }
+/* Statement box */
+.pd-statement { padding:12px 18px; margin:8px 0; background:#f8faff; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; font-size:.8rem; color:#374151; line-height:1.6; }
 /* Signatures */
-.pd-sig-section { padding: 24px 32px 20px; }
-.pd-sig-row { display: flex; gap: 24px; }
-.pd-sig-box { flex: 1; border: 1px solid #d1d5db; border-radius: 8px; padding: 16px 20px; }
-.pd-sig-box-title { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-bottom: 8px; }
-.pd-sig-line { border-top: 2px solid #111827; margin-top: 52px; padding-top: 8px; font-size: .8rem; color: #374151; font-weight: 600; }
-.pd-sig-date { font-size: .75rem; color: #9ca3af; margin-top: 4px; }
+.pd-sig-section { padding: 20px 28px 16px; }
+.pd-sig-row { display: flex; gap: 20px; }
+.pd-sig-box { flex: 1; border: 1px solid #d1d5db; border-radius: 7px; padding: 14px 16px; }
+.pd-sig-box-title { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-bottom: 6px; }
+.pd-sig-line { border-top: 2px solid #111827; margin-top: 48px; padding-top: 7px; font-size: .78rem; color: #374151; font-weight: 600; }
+.pd-sig-date { font-size: .73rem; color: #9ca3af; margin-top: 3px; }
 /* Footer */
 .pd-footer {
     text-align: center;
-    font-size: .72rem;
+    font-size: .7rem;
     color: #9ca3af;
-    padding: 16px 20px;
+    padding: 12px 18px;
     border-top: 1px solid #e5e7eb;
     background: #f9fafb;
     border-radius: 0 0 10px 10px;
@@ -2098,7 +2096,7 @@ body.print-page { background: #f0f4f8; }
 .pd-footer strong { color: #6b7280; }
 /* Print media */
 @media print {
-    @page { size: A4; margin: 15mm 12mm; }
+    @page { size: A4; margin: 14mm 14mm; }
     body { background: #fff !important; margin: 0 !important; }
     body.print-page { background: #fff !important; }
     .no-print { display: none !important; }
@@ -2109,7 +2107,9 @@ body.print-page { background: #f0f4f8; }
     .pd-device-table thead tr { background: #1d4ed8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .pd-device-table tbody tr.dev-main-row:nth-child(4n+1),
     .pd-device-table tbody tr.dev-detail-row:nth-child(4n+2) { background: #f8faff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pd-acc-table thead th { background: #374151 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .pd-footer { background: #f9fafb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pd-statement { background: #f8faff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .dev-reg { background: #f0f4ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .pd-device-table { page-break-inside: auto; }
     .pd-device-table tbody tr { page-break-inside: avoid; }
@@ -2133,6 +2133,7 @@ body.print-page { background: #f0f4f8; }
     <!-- ══ NAGŁÓWEK ══════════════════════════════════════════════════════ -->
     <div class="pd-header">
         <div>
+            <img src="<?= getBaseUrl() ?>assets/fleetlink-logo-v2.png" alt="FleetLink" class="pd-logo-img">
             <?php if ($companyName): ?>
             <div class="pd-logo"><?= h($companyName) ?></div>
             <?php else: ?>
@@ -2140,8 +2141,8 @@ body.print-page { background: #f0f4f8; }
             <?php endif; ?>
             <div class="pd-logo-sub">
                 <?php if ($companyAddr): ?><i class="fas fa-map-marker-alt me-1"></i><?= h($companyAddr) ?><?php endif; ?>
-                <?php if ($companyPhone): ?> &nbsp;·&nbsp; <i class="fas fa-phone me-1"></i><?= h($companyPhone) ?><?php endif; ?>
-                <?php if ($companyEmail): ?> &nbsp;·&nbsp; <i class="fas fa-envelope me-1"></i><?= h($companyEmail) ?><?php endif; ?>
+                <?php if ($companyPhone): ?><br><i class="fas fa-phone me-1"></i><?= h($companyPhone) ?><?php endif; ?>
+                <?php if ($companyEmail): ?><br><i class="fas fa-envelope me-1"></i><?= h($companyEmail) ?><?php endif; ?>
             </div>
         </div>
         <div class="pd-title-block">
@@ -2263,7 +2264,7 @@ body.print-page { background: #f0f4f8; }
     <?php endif; ?>
 
     <!-- ══ OŚWIADCZENIE ═════════════════════════════════════════════════ -->
-    <div style="padding:16px 20px;margin:8px 0;background:#f8faff;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;font-size:.82rem;color:#374151;line-height:1.6">
+    <div class="pd-statement">
         <strong style="color:#111827">Oświadczenie:</strong>
         Strony potwierdzają, że wymienione powyżej urządzenia GPS zostały prawidłowo zainstalowane, przetestowane i przekazane w stanie sprawnym.
         Odbiorca przyjmuje urządzenia bez zastrzeżeń i potwierdza ich zgodność z zamówieniem.

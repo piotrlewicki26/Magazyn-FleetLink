@@ -1006,6 +1006,7 @@ function dimInitTomSelect(row) {
             allowEmptyOption: true,
             maxOptions: null,
             searchField: ['text', 'value'],
+            dropdownParent: 'body',
             render: { option: function(data, escape) { return '<div>' + escape(data.text) + '</div>'; } }
         });
     });
