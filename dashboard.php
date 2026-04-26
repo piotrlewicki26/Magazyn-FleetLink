@@ -281,44 +281,44 @@ include __DIR__ . '/includes/header.php';
                 <div class="row g-2">
                     <?php if (isAdmin()): ?>
                     <div class="col-6 col-md-auto flex-fill">
-                        <button type="button" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenAddDevice()">
+                        <button type="button" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-3" onclick="dashOpenAddDevice()">
                             <i class="fas fa-plus-circle fa-lg mb-1"></i>
                             <span class="small">Dodaj urządzenie</span>
                         </button>
                     </div>
                     <?php endif; ?>
                     <div class="col-6 col-md-auto flex-fill">
-                        <button type="button" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenAddSim()">
+                        <button type="button" class="btn btn-outline-dark quick-action-btn w-100 d-flex flex-column align-items-center py-3" onclick="dashOpenAddSim()">
                             <i class="fas fa-sim-card fa-lg mb-1"></i>
                             <span class="small">Dodaj kartę SIM</span>
                         </button>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenInstall()">
+                        <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center py-3" onclick="dashOpenInstall()">
                             <i class="fas fa-car fa-lg mb-1"></i>
                             <span class="small">Nowy montaż</span>
                         </button>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <a href="installations.php?action=my" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-2">
+                        <a href="installations.php?action=my" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-3">
                             <i class="fas fa-user-check fa-lg mb-1"></i>
                             <span class="small">Moje montaże</span>
                         </a>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <button type="button" class="btn btn-outline-warning quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenService()">
+                        <button type="button" class="btn btn-outline-warning quick-action-btn w-100 d-flex flex-column align-items-center py-3" onclick="dashOpenService()">
                             <i class="fas fa-wrench fa-lg mb-1"></i>
                             <span class="small">Nowy serwis</span>
                         </button>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <button type="button" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center py-2" onclick="dashOpenClient()">
+                        <button type="button" class="btn btn-outline-secondary quick-action-btn w-100 d-flex flex-column align-items-center py-3" onclick="dashOpenClient()">
                             <i class="fas fa-user-plus fa-lg mb-1"></i>
                             <span class="small">Nowy klient</span>
                         </button>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center py-2">
+                        <a href="calendar.php" class="btn btn-outline-info quick-action-btn w-100 d-flex flex-column align-items-center py-3">
                             <i class="fas fa-calendar-alt fa-lg mb-1"></i>
                             <span class="small">Kalendarz</span>
                         </a>
@@ -452,7 +452,7 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Modal: Nowy montaż — pełny formularz z wieloma urządzeniami (Auto / Ręczny) -->
 <div class="modal fade" id="dashInstallModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
         <div class="modal-content">
             <form method="POST" action="installations.php" id="dashInstallForm">
                 <?= csrfField() ?>
@@ -475,7 +475,7 @@ include __DIR__ . '/includes/header.php';
                             <div id="dashInstDevRowsContainer" class="d-flex flex-column gap-2 mb-2">
                                 <!-- Pierwszy wiersz (index 0) -->
                                 <div class="device-row border rounded p-2 bg-light" data-row-idx="0">
-                                    <div class="row g-2 align-items-center">
+                                    <div class="row g-2 align-items-center flex-wrap">
                                         <div class="col-auto">
                                             <span class="row-num badge bg-secondary">1</span>
                                         </div>
@@ -487,7 +487,7 @@ include __DIR__ . '/includes/header.php';
                                                 <label class="btn btn-outline-primary" for="dim_manual_0"><i class="fas fa-hand-pointer me-1"></i>Ręczny wybór</label>
                                             </div>
                                         </div>
-                                        <div class="col col-mode-auto">
+                                        <div class="col-12 col-sm col-mode-auto">
                                             <select name="model_id[0]" class="form-select form-select-sm">
                                                 <option value="">— wybierz model —</option>
                                                 <?php foreach ($dashAvailableModels as $m): ?>
@@ -495,7 +495,7 @@ include __DIR__ . '/includes/header.php';
                                                 <?php endforeach; ?>
                                             </select>
                                         </div>
-                                        <div class="col col-mode-manual" style="display:none">
+                                        <div class="col-12 col-sm col-mode-manual" style="display:none">
                                             <select name="device_id_manual[0]" class="form-select form-select-sm ts-device-dash">
                                                 <option value="">— wybierz urządzenie —</option>
                                                 <?php
@@ -512,7 +512,7 @@ include __DIR__ . '/includes/header.php';
                                                 <?php endforeach; if ($dimGroup) echo '</optgroup>'; ?>
                                             </select>
                                         </div>
-                                        <div class="col-auto">
+                                        <div class="col-12 col-sm-auto">
                                             <input type="text" name="vehicle_registration[0]" class="form-control form-control-sm"
                                                    required placeholder="Nr rej. pojazdu"
                                                    style="text-transform:uppercase;min-width:130px">
@@ -634,7 +634,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Template dla nowych wierszy urządzeń w montażu (dashboard) -->
 <template id="dashInstDevRowTemplate">
     <div class="device-row border rounded p-2 bg-light" data-row-idx="__IDX__">
-        <div class="row g-2 align-items-center">
+        <div class="row g-2 align-items-center flex-wrap">
             <div class="col-auto">
                 <span class="row-num badge bg-secondary">__NUM__</span>
             </div>
@@ -646,7 +646,7 @@ include __DIR__ . '/includes/header.php';
                     <label class="btn btn-outline-primary" for="dim_manual___IDX__"><i class="fas fa-hand-pointer me-1"></i>Ręczny wybór</label>
                 </div>
             </div>
-            <div class="col col-mode-auto">
+            <div class="col-12 col-sm col-mode-auto">
                 <select name="model_id[__IDX__]" class="form-select form-select-sm">
                     <option value="">— wybierz model —</option>
                     <?php foreach ($dashAvailableModels as $m): ?>
@@ -654,7 +654,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col col-mode-manual" style="display:none">
+            <div class="col-12 col-sm col-mode-manual" style="display:none">
                 <select name="device_id_manual[__IDX__]" class="form-select form-select-sm ts-device-dash">
                     <option value="">— wybierz urządzenie —</option>
                     <?php
@@ -671,7 +671,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; if ($tplDimGroup) echo '</optgroup>'; ?>
                 </select>
             </div>
-            <div class="col-auto">
+            <div class="col-12 col-sm-auto">
                 <input type="text" name="vehicle_registration[__IDX__]" class="form-control form-control-sm"
                        required placeholder="Nr rej. pojazdu"
                        style="text-transform:uppercase;min-width:130px">

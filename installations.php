@@ -1945,17 +1945,19 @@ $technicianName = $firstRow['technician_name'] ?? '—';
 $installDate    = $firstRow['installation_date'] ?? date('Y-m-d');
 $batchFirstId   = $firstRow['id'] ?? 0;
 $batchCount     = count($batchInstallations);
-$orderNumber    = sprintf('ZM/%s/%04d-%d', date('Y', strtotime($installDate ?: 'now')), $batchFirstId, $batchCount);
+$orderNumber    = sprintf('PP/%s/%04d', date('Y', strtotime($installDate ?: 'now')), $batchFirstId);
 $companyName    = '';
 $companyAddr    = '';
 $companyPhone   = '';
+$companyEmail   = '';
 try {
     $cfg = [];
-    $settingsStmt = $db->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('company_name','company_address','company_city','company_postal_code','company_phone')");
+    $settingsStmt = $db->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('company_name','company_address','company_city','company_postal_code','company_phone','company_email')");
     foreach ($settingsStmt->fetchAll() as $s) { $cfg[$s['key']] = $s['value']; }
     $companyName  = $cfg['company_name'] ?? '';
     $companyAddr  = trim(($cfg['company_address'] ?? '') . ', ' . ($cfg['company_postal_code'] ?? '') . ' ' . ($cfg['company_city'] ?? ''), ', ');
     $companyPhone = $cfg['company_phone'] ?? '';
+    $companyEmail = $cfg['company_email'] ?? '';
 } catch (Exception $e) {}
 $clientAddrParts = array_filter([
     $firstRow['client_address'] ?? '',
@@ -1965,63 +1967,160 @@ $clientAddrFull = implode(', ', $clientAddrParts);
 $installAddr = $firstRow['installation_address'] ?? '';
 ?>
 <style>
-/* ── Print order styles ─────────────────────────── */
+/* ── Protokół przekazania – profesjonalne style druku ─── */
+* { box-sizing: border-box; }
+body.print-page { background: #f0f4f8; }
 .print-doc {
     background: #fff;
-    color: #1a1a2e;
-    font-family: 'DM Sans','Segoe UI',system-ui,sans-serif;
-    max-width: 900px;
+    color: #111827;
+    font-family: 'DM Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
+    max-width: 960px;
     margin: 0 auto;
+    border-radius: 10px;
+    box-shadow: 0 4px 32px rgba(37,99,235,.10);
 }
-.print-doc-header {
+/* Header */
+.pd-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    padding-bottom: 18px;
-    margin-bottom: 22px;
+    padding: 28px 32px 20px;
     border-bottom: 3px solid #2563eb;
+    background: linear-gradient(135deg,#f8faff 0%,#e8f0ff 100%);
+    border-radius: 10px 10px 0 0;
 }
-.print-doc-logo { font-size: 1.5rem; font-weight: 800; color: #1a1a2e; letter-spacing: -0.5px; }
-.print-doc-logo span { color: #2563eb; }
-.print-doc-title { font-size: 1.25rem; font-weight: 700; color: #2563eb; letter-spacing: 1px; text-transform: uppercase; }
-.print-doc-meta { font-size: 0.83rem; color: #666; margin-top: 2px; }
-.print-section-label {
-    font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
-    color: #2563eb; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+.pd-logo { font-size: 1.6rem; font-weight: 900; color: #111827; letter-spacing: -1px; }
+.pd-logo span { color: #2563eb; }
+.pd-logo-sub { font-size: .78rem; color: #6b7280; margin-top: 2px; }
+.pd-title-block { text-align: right; }
+.pd-doc-type { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #2563eb; margin-bottom: 4px; }
+.pd-doc-number { font-size: 1.4rem; font-weight: 800; color: #111827; letter-spacing: -0.5px; }
+.pd-doc-meta { font-size: .8rem; color: #6b7280; margin-top: 3px; }
+/* Info grid */
+.pd-info-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    border-bottom: 1px solid #e5e7eb;
 }
-.print-section-label::after { content:''; flex:1; height:1px; background: #e0e7ff; }
-.print-info-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; margin-bottom: 24px; }
-.print-info-box { background: #f8faff; border: 1px solid #e0e7ff; border-radius: 8px; padding: 12px 14px; }
-.print-info-box .label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #2563eb; margin-bottom: 4px; }
-.print-info-box .value { font-size: 0.9rem; font-weight: 600; color: #1a1a2e; }
-.print-info-box .sub   { font-size: 0.78rem; color: #666; margin-top: 2px; }
-.print-device-table { width:100%; border-collapse: collapse; margin-bottom: 24px; font-size: 0.82rem; }
-.print-device-table thead th {
-    background: #2563eb; color: #fff; font-weight: 700; padding: 9px 10px;
-    text-align: left; font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.5px;
+.pd-info-cell {
+    padding: 16px 20px;
+    border-right: 1px solid #e5e7eb;
 }
-.print-device-table thead th:first-child { border-radius: 6px 0 0 0; }
-.print-device-table thead th:last-child  { border-radius: 0 6px 0 0; }
-.print-device-table tbody tr:nth-child(even) { background: #f8faff; }
-.print-device-table tbody td { padding: 8px 10px; border-bottom: 1px solid #e0e7ff; vertical-align: top; }
-.print-device-table tbody tr:last-child td { border-bottom: none; }
-.print-sig-row { display: flex; gap: 32px; margin-top: 40px; }
-.print-sig-box { flex:1; text-align: center; }
-.print-sig-line { border-top: 2px solid #1a1a2e; padding-top: 6px; margin-top: 52px; font-size: 0.78rem; color: #444; }
-.print-footer { text-align: center; font-size: 0.72rem; color: #999; margin-top: 30px; padding-top: 12px; border-top: 1px solid #e0e7ff; }
+.pd-info-cell:last-child { border-right: none; }
+.pd-info-label { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #2563eb; margin-bottom: 5px; }
+.pd-info-value { font-size: .9rem; font-weight: 700; color: #111827; }
+.pd-info-sub { font-size: .78rem; color: #6b7280; margin-top: 2px; }
+/* Section heading */
+.pd-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px 8px;
+    font-size: .72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #2563eb;
+}
+.pd-section::after { content:''; flex:1; height:2px; background:#e5e7eb; }
+/* Device table */
+.pd-device-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 8px;
+    font-size: .83rem;
+}
+.pd-device-table thead tr {
+    background: #1d4ed8;
+    color: #fff;
+}
+.pd-device-table thead th {
+    padding: 10px 12px;
+    font-weight: 700;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    border: none;
+    text-align: left;
+    white-space: nowrap;
+}
+.pd-device-table tbody tr.dev-main-row {
+    border-bottom: none;
+}
+.pd-device-table tbody tr.dev-main-row td {
+    padding: 10px 12px 4px;
+    border-bottom: none;
+    vertical-align: middle;
+    font-weight: 600;
+}
+.pd-device-table tbody tr.dev-detail-row td {
+    padding: 2px 12px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: .78rem;
+    color: #6b7280;
+    vertical-align: top;
+}
+.pd-device-table tbody tr.dev-main-row:nth-child(4n+1),
+.pd-device-table tbody tr.dev-detail-row:nth-child(4n+2) { background: #f8faff; }
+.pd-device-table tbody tr:last-child td { border-bottom: none; }
+.dev-num { color: #2563eb; font-weight: 800; font-size: .9rem; }
+.dev-reg { font-family: 'Courier New', monospace; font-weight: 800; font-size: .95rem; letter-spacing: 1px; color: #111827; background: #f0f4ff; padding: 2px 6px; border-radius: 4px; }
+.dev-imei { font-family: 'Courier New', monospace; font-size: .82rem; color: #374151; }
+.dev-serial { font-family: 'Courier New', monospace; font-size: .82rem; font-weight: 700; color: #111827; }
+.detail-chip { display: inline-flex; align-items: center; gap: 4px; background: #f3f4f6; border-radius: 4px; padding: 2px 7px; margin: 2px 4px 2px 0; font-size: .75rem; color: #374151; }
+.detail-chip i { font-size: .65rem; color: #9ca3af; }
+/* Accessories table */
+.pd-acc-table { width:100%; border-collapse:collapse; font-size:.82rem; margin-bottom:8px; }
+.pd-acc-table thead th { background:#374151; color:#fff; padding:8px 12px; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; text-align:left; }
+.pd-acc-table tbody td { padding:7px 12px; border-bottom:1px solid #e5e7eb; }
+.pd-acc-table tbody tr:nth-child(even) { background:#f9fafb; }
+.pd-acc-table tbody tr:last-child td { border-bottom:none; }
+/* Notes box */
+.pd-notes-box { margin: 0 20px 20px; background: #fffbeb; border: 1px solid #fcd34d; border-radius:6px; padding:10px 14px; font-size:.85rem; color:#92400e; }
+/* Signatures */
+.pd-sig-section { padding: 24px 32px 20px; }
+.pd-sig-row { display: flex; gap: 24px; }
+.pd-sig-box { flex: 1; border: 1px solid #d1d5db; border-radius: 8px; padding: 16px 20px; }
+.pd-sig-box-title { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-bottom: 8px; }
+.pd-sig-line { border-top: 2px solid #111827; margin-top: 52px; padding-top: 8px; font-size: .8rem; color: #374151; font-weight: 600; }
+.pd-sig-date { font-size: .75rem; color: #9ca3af; margin-top: 4px; }
+/* Footer */
+.pd-footer {
+    text-align: center;
+    font-size: .72rem;
+    color: #9ca3af;
+    padding: 16px 20px;
+    border-top: 1px solid #e5e7eb;
+    background: #f9fafb;
+    border-radius: 0 0 10px 10px;
+}
+.pd-footer strong { color: #6b7280; }
+/* Print media */
 @media print {
+    @page { size: A4; margin: 15mm 12mm; }
+    body { background: #fff !important; margin: 0 !important; }
+    body.print-page { background: #fff !important; }
     .no-print { display: none !important; }
-    body { background: #fff !important; }
-    .navbar, footer { display: none !important; }
+    .navbar, footer, .sidebar, .page-header { display: none !important; }
     .container-fluid { padding: 0 !important; }
-    .print-doc { max-width: 100%; }
+    .print-doc { max-width: 100% !important; box-shadow: none !important; border-radius: 0 !important; }
+    .pd-header { background: #f8faff !important; border-radius: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pd-device-table thead tr { background: #1d4ed8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pd-device-table tbody tr.dev-main-row:nth-child(4n+1),
+    .pd-device-table tbody tr.dev-detail-row:nth-child(4n+2) { background: #f8faff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pd-footer { background: #f9fafb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .dev-reg { background: #f0f4ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pd-device-table { page-break-inside: auto; }
+    .pd-device-table tbody tr { page-break-inside: avoid; }
+    .pd-sig-section { page-break-inside: avoid; }
 }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-4 no-print">
-    <h5 class="mb-0"><i class="fas fa-file-alt me-2 text-primary"></i>Zlecenie montażu — podgląd wydruku</h5>
-    <div>
-        <button type="button" class="btn btn-primary me-2" onclick="window.print()">
+    <h5 class="mb-0"><i class="fas fa-file-contract me-2 text-primary"></i>Protokół przekazania — podgląd wydruku</h5>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-primary" onclick="window.print()">
             <i class="fas fa-print me-2"></i>Drukuj / PDF
         </button>
         <a href="installations.php" class="btn btn-outline-secondary">
@@ -2030,102 +2129,121 @@ $installAddr = $firstRow['installation_address'] ?? '';
     </div>
 </div>
 
-<div class="print-doc p-4 card">
-    <!-- ── Header ─────────────────────────── -->
-    <div class="print-doc-header">
+<div class="print-doc">
+    <!-- ══ NAGŁÓWEK ══════════════════════════════════════════════════════ -->
+    <div class="pd-header">
         <div>
             <?php if ($companyName): ?>
-            <div class="print-doc-logo"><?= h($companyName) ?></div>
-            <?php if ($companyAddr): ?><div style="font-size:.82rem;color:#666;margin-top:3px"><?= h($companyAddr) ?></div><?php endif; ?>
-            <?php if ($companyPhone): ?><div style="font-size:.82rem;color:#666">Tel: <?= h($companyPhone) ?></div><?php endif; ?>
+            <div class="pd-logo"><?= h($companyName) ?></div>
             <?php else: ?>
-            <div class="print-doc-logo">Fleet<span>Link</span></div>
-            <div style="font-size:.82rem;color:#666">System zarządzania urządzeniami GPS</div>
+            <div class="pd-logo">Fleet<span>Link</span></div>
             <?php endif; ?>
+            <div class="pd-logo-sub">
+                <?php if ($companyAddr): ?><i class="fas fa-map-marker-alt me-1"></i><?= h($companyAddr) ?><?php endif; ?>
+                <?php if ($companyPhone): ?> &nbsp;·&nbsp; <i class="fas fa-phone me-1"></i><?= h($companyPhone) ?><?php endif; ?>
+                <?php if ($companyEmail): ?> &nbsp;·&nbsp; <i class="fas fa-envelope me-1"></i><?= h($companyEmail) ?><?php endif; ?>
+            </div>
         </div>
-        <div style="text-align:right">
-            <div class="print-doc-title">Zlecenie montażu</div>
-            <div class="print-doc-meta">Nr zlecenia: <strong><?= h($orderNumber) ?></strong></div>
-            <div class="print-doc-meta">Data: <strong><?= formatDate($installDate) ?></strong></div>
-            <div class="print-doc-meta">Urządzeń: <strong><?= $batchCount ?></strong></div>
+        <div class="pd-title-block">
+            <div class="pd-doc-type">Protokół przekazania</div>
+            <div class="pd-doc-number"><?= h($orderNumber) ?></div>
+            <div class="pd-doc-meta">Data sporządzenia: <strong><?= formatDate($installDate) ?></strong></div>
+            <div class="pd-doc-meta">Liczba urządzeń: <strong><?= $batchCount ?></strong></div>
         </div>
     </div>
 
-    <!-- ── Info grid ──────────────────────── -->
-    <div class="print-info-grid">
-        <div class="print-info-box">
-            <div class="label">Klient</div>
-            <div class="value"><?= h($clientLabel) ?></div>
-            <?php if ($firstRow && $firstRow['client_phone']): ?>
-            <div class="sub"><i class="fas fa-phone me-1" style="color:#2563eb;font-size:.7rem"></i><?= h($firstRow['client_phone']) ?></div>
-            <?php endif; ?>
-            <?php if ($clientAddrFull): ?>
-            <div class="sub"><i class="fas fa-map-marker-alt me-1" style="color:#2563eb;font-size:.7rem"></i><?= h($clientAddrFull) ?></div>
-            <?php endif; ?>
+    <!-- ══ DANE STRON ════════════════════════════════════════════════════ -->
+    <div class="pd-info-row">
+        <div class="pd-info-cell">
+            <div class="pd-info-label"><i class="fas fa-building me-1"></i>Przekazujący / Wykonawca</div>
+            <div class="pd-info-value"><?= $companyName ? h($companyName) : 'FleetLink' ?></div>
+            <?php if ($companyAddr): ?><div class="pd-info-sub"><i class="fas fa-map-marker-alt me-1" style="color:#2563eb"></i><?= h($companyAddr) ?></div><?php endif; ?>
+            <?php if ($companyPhone): ?><div class="pd-info-sub"><i class="fas fa-phone me-1" style="color:#2563eb"></i><?= h($companyPhone) ?></div><?php endif; ?>
         </div>
-        <div class="print-info-box">
-            <div class="label">Adres instalacji</div>
-            <div class="value"><?= $installAddr ? h($installAddr) : '<span style="color:#999">—</span>' ?></div>
+        <div class="pd-info-cell">
+            <div class="pd-info-label"><i class="fas fa-user me-1"></i>Odbiorca / Klient</div>
+            <div class="pd-info-value"><?= h($clientLabel) ?></div>
+            <?php if ($firstRow && $firstRow['contact_name'] && $firstRow['company_name']): ?>
+            <div class="pd-info-sub"><i class="fas fa-user me-1" style="color:#2563eb"></i><?= h($firstRow['contact_name']) ?></div>
+            <?php endif; ?>
+            <?php if ($firstRow && $firstRow['client_phone']): ?><div class="pd-info-sub"><i class="fas fa-phone me-1" style="color:#2563eb"></i><?= h($firstRow['client_phone']) ?></div><?php endif; ?>
+            <?php if ($clientAddrFull): ?><div class="pd-info-sub"><i class="fas fa-map-marker-alt me-1" style="color:#2563eb"></i><?= h($clientAddrFull) ?></div><?php endif; ?>
         </div>
-        <div class="print-info-box">
-            <div class="label">Technik</div>
-            <div class="value"><?= h($technicianName) ?></div>
-            <div class="sub">Data montażu: <?= formatDate($installDate) ?></div>
+        <div class="pd-info-cell">
+            <div class="pd-info-label"><i class="fas fa-user-cog me-1"></i>Technik instalujący</div>
+            <div class="pd-info-value"><?= h($technicianName) ?></div>
+            <div class="pd-info-sub"><i class="fas fa-calendar me-1" style="color:#2563eb"></i>Data montażu: <strong><?= formatDate($installDate) ?></strong></div>
+            <?php if ($installAddr): ?><div class="pd-info-sub"><i class="fas fa-warehouse me-1" style="color:#2563eb"></i><?= h($installAddr) ?></div><?php endif; ?>
         </div>
     </div>
 
-    <!-- ── Devices table ──────────────────── -->
-    <div class="print-section-label">Wykaz urządzeń</div>
-    <table class="print-device-table">
+    <!-- ══ WYKAZ URZĄDZEŃ ════════════════════════════════════════════════ -->
+    <div class="pd-section"><i class="fas fa-microchip"></i>Przekazywane urządzenia GPS</div>
+    <table class="pd-device-table">
         <thead>
             <tr>
-                <th style="width:32px">#</th>
+                <th style="width:36px">#</th>
                 <th>Model urządzenia</th>
-                <th>Nr seryjny</th>
+                <th>Numer seryjny</th>
                 <th>IMEI</th>
-                <th>Nr SIM</th>
-                <th>Rejestracja</th>
-                <th>Pojazd</th>
-                <th>Miejsce montażu</th>
+                <th>Nr rejestracyjny</th>
+                <th>Data instalacji</th>
             </tr>
         </thead>
         <tbody>
-            <?php foreach ($batchInstallations as $i => $bi): ?>
-            <tr>
-                <td style="color:#2563eb;font-weight:700"><?= $i + 1 ?></td>
+            <?php foreach ($batchInstallations as $i => $bi):
+                $vehicleStr = trim(($bi['make'] ?? '') . ' ' . ($bi['vehicle_model'] ?? ''));
+                $hasSim     = !empty($bi['sim_number']);
+                $hasLoc     = !empty($bi['location_in_vehicle']);
+                $hasNotes   = !empty($bi['notes']);
+                $hasVehicle = !empty($vehicleStr);
+            ?>
+            <tr class="dev-main-row">
+                <td><span class="dev-num"><?= $i + 1 ?></span></td>
                 <td><?= h($bi['manufacturer_name'] . ' ' . $bi['model_name']) ?></td>
-                <td style="font-weight:700"><?= h($bi['serial_number']) ?></td>
-                <td style="color:#666;font-size:.78rem"><?= h($bi['imei'] ?? '—') ?></td>
-                <td style="color:#666;font-size:.78rem"><?= h($bi['sim_number'] ?? '—') ?></td>
-                <td style="font-weight:700"><?= h($bi['registration']) ?></td>
-                <td style="color:#666"><?= h(trim($bi['make'] . ' ' . ($bi['vehicle_model'] ?? ''))) ?: '—' ?></td>
-                <td style="color:#666"><?= h($bi['location_in_vehicle'] ?? '—') ?></td>
+                <td><span class="dev-serial"><?= h($bi['serial_number']) ?></span></td>
+                <td><span class="dev-imei"><?= h($bi['imei'] ?? '—') ?></span></td>
+                <td><span class="dev-reg"><?= h($bi['registration']) ?></span></td>
+                <td style="white-space:nowrap"><?= formatDate($bi['installation_date']) ?></td>
+            </tr>
+            <tr class="dev-detail-row">
+                <td></td>
+                <td colspan="5">
+                    <?php if ($hasVehicle): ?>
+                    <span class="detail-chip"><i class="fas fa-car"></i><?= h($vehicleStr) ?></span>
+                    <?php endif; ?>
+                    <?php if ($hasSim): ?>
+                    <span class="detail-chip"><i class="fas fa-sim-card"></i>SIM: <?= h($bi['sim_number']) ?></span>
+                    <?php endif; ?>
+                    <?php if ($hasLoc): ?>
+                    <span class="detail-chip"><i class="fas fa-tools"></i><?= h($bi['location_in_vehicle']) ?></span>
+                    <?php endif; ?>
+                    <?php if ($hasNotes): ?>
+                    <span class="detail-chip" style="color:#92400e;background:#fffbeb"><i class="fas fa-sticky-note" style="color:#d97706"></i><?= h($bi['notes']) ?></span>
+                    <?php endif; ?>
+                    <?php if (!$hasVehicle && !$hasSim && !$hasLoc && !$hasNotes): ?>
+                    <span style="color:#d1d5db;font-size:.75rem">brak dodatkowych informacji</span>
+                    <?php endif; ?>
+                </td>
             </tr>
             <?php endforeach; ?>
             <?php if (empty($batchInstallations)): ?>
-            <tr><td colspan="8" style="text-align:center;color:#999;padding:16px">Brak danych.</td></tr>
+            <tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:20px">Brak danych do wyświetlenia.</td></tr>
             <?php endif; ?>
         </tbody>
     </table>
 
-    <!-- ── Notes ─────────────────────────── -->
-    <?php if ($firstRow && $firstRow['notes']): ?>
-    <div class="print-section-label">Uwagi</div>
-    <div style="font-size:.87rem;color:#333;margin-bottom:24px;padding:10px 14px;background:#f8faff;border-radius:6px;border:1px solid #e0e7ff">
-        <?= h($firstRow['notes']) ?>
-    </div>
-    <?php endif; ?>
-
-    <!-- ── Accessories ──────────────────── -->
+    <!-- ══ AKCESORIA ════════════════════════════════════════════════════ -->
     <?php if (!empty($batchAccessories)): ?>
-    <div class="print-section-label">Materiały eksploatacyjne / Akcesoria</div>
-    <table class="print-device-table" style="margin-bottom:24px">
+    <div class="pd-section"><i class="fas fa-box-open"></i>Materiały i akcesoria</div>
+    <table class="pd-acc-table" style="margin:0 0 8px">
         <thead>
             <tr>
-                <th style="width:32px">#</th>
-                <th>Akcesorium</th>
+                <th style="width:36px">#</th>
+                <th>Akcesorium / Materiał</th>
                 <th style="width:80px;text-align:center">Ilość</th>
                 <th>Wydał</th>
+                <th>Data wydania</th>
                 <th>Uwagi</th>
             </tr>
         </thead>
@@ -2134,27 +2252,53 @@ $installAddr = $firstRow['installation_address'] ?? '';
             <tr>
                 <td style="color:#2563eb;font-weight:700"><?= $ai + 1 ?></td>
                 <td style="font-weight:600"><?= h($bacc['accessory_name']) ?></td>
-                <td style="text-align:center;font-weight:700"><?= (int)$bacc['quantity'] ?> szt</td>
-                <td style="color:#666"><?= h($bacc['user_name']) ?></td>
-                <td style="color:#666;font-size:.78rem"><?= h($bacc['notes'] ?? '') ?></td>
+                <td style="text-align:center;font-weight:800"><?= (int)$bacc['quantity'] ?> szt.</td>
+                <td><?= h($bacc['user_name']) ?></td>
+                <td style="white-space:nowrap;color:#6b7280"><?= $bacc['issued_at'] ? formatDate(substr($bacc['issued_at'],0,10)) : '—' ?></td>
+                <td style="color:#6b7280;font-size:.75rem"><?= h($bacc['notes'] ?? '') ?></td>
             </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
     <?php endif; ?>
 
-    <!-- ── Signatures ─────────────────────── -->
-    <div class="print-sig-row">
-        <div class="print-sig-box">
-            <div class="print-sig-line">Podpis technika<br><strong><?= h($technicianName) ?></strong></div>
-        </div>
-        <div class="print-sig-box">
-            <div class="print-sig-line">Podpis klienta / odbiór<br><strong><?= h($clientLabel) ?></strong></div>
+    <!-- ══ OŚWIADCZENIE ═════════════════════════════════════════════════ -->
+    <div style="padding:16px 20px;margin:8px 0;background:#f8faff;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;font-size:.82rem;color:#374151;line-height:1.6">
+        <strong style="color:#111827">Oświadczenie:</strong>
+        Strony potwierdzają, że wymienione powyżej urządzenia GPS zostały prawidłowo zainstalowane, przetestowane i przekazane w stanie sprawnym.
+        Odbiorca przyjmuje urządzenia bez zastrzeżeń i potwierdza ich zgodność z zamówieniem.
+    </div>
+
+    <!-- ══ PODPISY ══════════════════════════════════════════════════════ -->
+    <div class="pd-sig-section">
+        <div class="pd-sig-row">
+            <div class="pd-sig-box">
+                <div class="pd-sig-box-title"><i class="fas fa-user-cog me-1"></i>Przekazujący / Technik</div>
+                <div class="pd-sig-line">
+                    <?= h($technicianName) ?><br>
+                    <span style="font-size:.75rem;font-weight:400;color:#9ca3af">Imię i nazwisko / Podpis</span>
+                </div>
+                <div class="pd-sig-date">Data: <?= formatDate($installDate) ?></div>
+            </div>
+            <div class="pd-sig-box">
+                <div class="pd-sig-box-title"><i class="fas fa-user me-1"></i>Odbierający / Klient</div>
+                <div class="pd-sig-line">
+                    <?= h($clientLabel) ?><br>
+                    <span style="font-size:.75rem;font-weight:400;color:#9ca3af">Imię i nazwisko / Podpis / Pieczątka</span>
+                </div>
+                <div class="pd-sig-date">Data: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</div>
+            </div>
         </div>
     </div>
 
-    <div class="print-footer">
-        Dokument wygenerowany przez <?= $companyName ? h($companyName) : 'FleetLink System GPS' ?> &mdash; <?= date('d.m.Y H:i') ?> &mdash; <a href="https://www.fleetlink.pl" style="color:inherit;text-decoration:none">www.fleetlink.pl</a>
+    <!-- ══ STOPKA ═══════════════════════════════════════════════════════ -->
+    <div class="pd-footer">
+        <strong><?= $companyName ? h($companyName) : 'FleetLink System GPS' ?></strong>
+        &nbsp;&mdash;&nbsp;
+        Dokument wygenerowany automatycznie &nbsp;&mdash;&nbsp;
+        <?= date('d.m.Y, H:i') ?>
+        &nbsp;&mdash;&nbsp;
+        Nr protokołu: <strong><?= h($orderNumber) ?></strong>
     </div>
 </div>
 <?php endif; ?>
