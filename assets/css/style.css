@@ -641,3 +641,16 @@ footer, .table, .form-control, .form-select, .input-group-text,
     .stat-card .stat-number { font-size: 1.8rem; }
     .table-responsive { font-size: 0.85rem; }
 }
+
+/* ── TomSelect: mobile touch scroll fix ─────────────────── */
+/* Ensures the dropdown list is independently scrollable on
+   touch devices even when rendered inside a Bootstrap modal. */
+.ts-dropdown {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+.ts-dropdown .ts-dropdown-content {
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    overscroll-behavior: contain;
+}
