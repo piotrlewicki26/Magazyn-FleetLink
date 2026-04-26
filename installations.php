@@ -1361,11 +1361,9 @@ function showInstPreview(data) {
                                 <option value="<?= $ai['device_id'] ?>">
                                     <?= h($ai['serial_number']) ?> — <?= h($ai['manufacturer_name'] . ' ' . $ai['model_name']) ?>
                                     | Rejestracja: <?= h($ai['registration']) ?>
-                                    <?= $ai['company_name'] || $ai['contact_name'] ? '| ' . h($ai['company_name'] ?: $ai['contact_name']) : '' ?>
+                                    <?= ($ai['company_name'] ?: $ai['contact_name']) ? '| ' . h($ai['company_name'] ?: $ai['contact_name']) : '' ?>
                                 </option>
                                 <?php endforeach; ?>
-                                <?php if (empty($activeInstForDis ?? [])): ?>
-                                <?php endif; ?>
                             </select>
                             <?php if (empty($activeInstForDis ?? [])): ?>
                             <div class="form-text text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Brak aktywnych montaży do zaplanowania demontażu.</div>
