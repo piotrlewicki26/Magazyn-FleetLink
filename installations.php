@@ -258,7 +258,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$csId || !in_array($newStatus, $allowed)) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'installations.php'); }
         if ($newStatus === 'aktywna') {
             // Check if device already has another active installation
-            $devIdForCheck = (int)$db->query("SELECT device_id FROM installations WHERE id=$csId")->fetchColumn();
+            $devCheckStmt = $db->prepare("SELECT device_id FROM installations WHERE id=?");
+            $devCheckStmt->execute([$csId]);
+            $devIdForCheck = (int)$devCheckStmt->fetchColumn();
             $conflict = $db->prepare("SELECT id FROM installations WHERE device_id=? AND status='aktywna' AND id<>?");
             $conflict->execute([$devIdForCheck, $csId]);
             if ($conflict->fetch()) { flashError('Urządzenie ma już aktywną instalację.'); redirect(getBaseUrl() . 'installations.php'); }
@@ -1303,9 +1305,9 @@ function showBatchEditModal(batchId, date, clientId, technicianId) {
     document.getElementById('batchEditBatchId').value = batchId;
     document.getElementById('batchEditDate').value = date;
     var cSel = document.getElementById('batchEditClient');
-    for (var i=0; i<cSel.options.length; i++) { if (cSel.options[i].value == clientId) { cSel.selectedIndex = i; break; } }
+    for (var i=0; i<cSel.options.length; i++) { if (cSel.options[i].value === String(clientId)) { cSel.selectedIndex = i; break; } }
     var tSel = document.getElementById('batchEditTechnician');
-    for (var i=0; i<tSel.options.length; i++) { if (tSel.options[i].value == technicianId) { tSel.selectedIndex = i; break; } }
+    for (var i=0; i<tSel.options.length; i++) { if (tSel.options[i].value === String(technicianId)) { tSel.selectedIndex = i; break; } }
     document.getElementById('batchEditNotes').value = '';
     new bootstrap.Modal(document.getElementById('batchEditModal')).show();
 }
