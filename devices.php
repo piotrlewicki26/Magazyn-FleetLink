@@ -584,10 +584,40 @@ if ($action === 'list') {
     }
     if ($filterModel) { $sql .= " AND d.model_id=?"; $params[] = $filterModel; }
     if ($filterStatus) { $sql .= " AND d.status=?"; $params[] = $filterStatus; }
-    $sql .= " ORDER BY d.id DESC";
+    // Pagination params – persist via URL; remember choice in session
+    $allowedPerPage = [15, 50, 100, 150];
+    if (isset($_GET['per_page']) && in_array((int)$_GET['per_page'], $allowedPerPage)) {
+        $_SESSION['devices_per_page'] = (int)$_GET['per_page'];
+    }
+    $perPage = $_SESSION['devices_per_page'] ?? 15;
+    $currentPage = max(1, (int)($_GET['page'] ?? 1));
+
+    // Count total matching rows for pagination
+    $countSql = "SELECT COUNT(*)
+        FROM devices d
+        JOIN models m ON m.id = d.model_id
+        JOIN manufacturers mf ON mf.id = m.manufacturer_id
+        WHERE 1=1";
+    $countParams = [];
+    if ($search) {
+        $countSql .= " AND (d.serial_number LIKE ? OR d.imei LIKE ? OR m.name LIKE ? OR mf.name LIKE ?)";
+        $countParams = array_merge($countParams, ["%$search%","%$search%","%$search%","%$search%"]);
+    }
+    if ($filterModel) { $countSql .= " AND d.model_id=?"; $countParams[] = $filterModel; }
+    if ($filterStatus) { $countSql .= " AND d.status=?"; $countParams[] = $filterStatus; }
+    $countStmt = $db->prepare($countSql);
+    $countStmt->execute($countParams);
+    $totalDevices = (int)$countStmt->fetchColumn();
+    $totalPages = max(1, (int)ceil($totalDevices / $perPage));
+    if ($currentPage > $totalPages) $currentPage = $totalPages;
+    $offset = ($currentPage - 1) * $perPage;
+
+    // Priority sort: nowy/sprawny first, then rest; within group by id DESC
+    $sql .= " ORDER BY CASE d.status WHEN 'nowy' THEN 0 WHEN 'sprawny' THEN 0 ELSE 1 END ASC, d.id DESC";
+    $sql .= " LIMIT ? OFFSET ?";
 
     $stmt = $db->prepare($sql);
-    $stmt->execute($params);
+    $stmt->execute(array_merge($params, [$perPage, $offset]));
     $devices = $stmt->fetchAll();
 }
 
@@ -628,7 +658,16 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
     <?php else: ?>
-    <a href="devices.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
+    <a href="devices.php" id="backToListBtn" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
+    <script>
+    (function() {
+        var saved = sessionStorage.getItem('devicesListUrl');
+        if (saved) {
+            var el = document.getElementById('backToListBtn');
+            if (el) el.href = saved;
+        }
+    })();
+    </script>
     <?php endif; ?>
 </div>
 
@@ -725,7 +764,16 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
 <?php endif; ?>
 
 <div class="card">
-    <div class="card-header">Urządzenia (<?= count($devices) ?>)</div>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>Urządzenia (<?= $totalDevices ?>)</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small">Na stronę:</span>
+            <?php foreach ([15, 50, 100, 150] as $pp): ?>
+            <a href="devices.php?<?= http_build_query(array_merge($_GET, ['per_page' => $pp, 'page' => 1])) ?>"
+               class="btn btn-sm <?= $perPage === $pp ? 'btn-primary' : 'btn-outline-secondary' ?>"><?= $pp ?></a>
+            <?php endforeach; ?>
+        </div>
+    </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
@@ -835,6 +883,42 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
             </tbody>
         </table>
     </div>
+    <?php if ($totalPages > 1): ?>
+    <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+        <span class="text-muted small">
+            Strona <?= $currentPage ?> z <?= $totalPages ?>
+            &nbsp;(<?= $totalDevices ?> urządzeń, po <?= $perPage ?> na stronę)
+        </span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+                <?php
+                $buildPageUrl = fn($p) => 'devices.php?' . http_build_query(array_merge($_GET, ['page' => $p, 'per_page' => $perPage]));
+                ?>
+                <li class="page-item <?= $currentPage <= 1 ? 'disabled' : '' ?>">
+                    <a class="page-link" href="<?= $buildPageUrl(1) ?>"><i class="fas fa-angle-double-left"></i></a>
+                </li>
+                <li class="page-item <?= $currentPage <= 1 ? 'disabled' : '' ?>">
+                    <a class="page-link" href="<?= $buildPageUrl($currentPage - 1) ?>"><i class="fas fa-angle-left"></i></a>
+                </li>
+                <?php
+                $start = max(1, $currentPage - 2);
+                $end   = min($totalPages, $currentPage + 2);
+                for ($p = $start; $p <= $end; $p++):
+                ?>
+                <li class="page-item <?= $p === $currentPage ? 'active' : '' ?>">
+                    <a class="page-link" href="<?= $buildPageUrl($p) ?>"><?= $p ?></a>
+                </li>
+                <?php endfor; ?>
+                <li class="page-item <?= $currentPage >= $totalPages ? 'disabled' : '' ?>">
+                    <a class="page-link" href="<?= $buildPageUrl($currentPage + 1) ?>"><i class="fas fa-angle-right"></i></a>
+                </li>
+                <li class="page-item <?= $currentPage >= $totalPages ? 'disabled' : '' ?>">
+                    <a class="page-link" href="<?= $buildPageUrl($totalPages) ?>"><i class="fas fa-angle-double-right"></i></a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    <?php endif; ?>
 </div>
 
 <!-- Device Preview Modal -->
@@ -858,6 +942,14 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
     </div>
 </div>
 <script>
+// Remember current list URL (page + per_page) so browser back button restores position
+(function() {
+    var url = window.location.href;
+    if (url.indexOf('action=') === -1 || url.indexOf('action=list') !== -1) {
+        sessionStorage.setItem('devicesListUrl', url);
+    }
+})();
+
 var _previewDeviceData = null;
 function showDevicePreview(data) {
     _previewDeviceData = data;
