@@ -533,11 +533,26 @@ if ($action === 'list') {
                m.name as model_name, mf.name as manufacturer_name,
                v.registration as vehicle_registration,
                c.contact_name, c.company_name,
-               i.installation_date
+               i.installation_date, i.status as inst_status
         FROM devices d
         JOIN models m ON m.id = d.model_id
         JOIN manufacturers mf ON mf.id = m.manufacturer_id
-        LEFT JOIN installations i ON i.device_id = d.id AND i.status = 'aktywna'
+        LEFT JOIN (
+            SELECT i2.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY i2.device_id
+                       ORDER BY
+                           CASE i2.status
+                               WHEN 'aktywna'    THEN 0
+                               WHEN 'zakonczona' THEN 1
+                               WHEN 'archiwum'   THEN 2
+                               ELSE 3
+                           END,
+                           i2.installation_date DESC
+                   ) AS rn
+            FROM installations i2
+            WHERE i2.status != 'anulowana'
+        ) i ON i.device_id = d.id AND i.rn = 1
         LEFT JOIN vehicles v ON v.id = i.vehicle_id
         LEFT JOIN clients c ON c.id = i.client_id
         WHERE 1=1
@@ -1321,34 +1336,34 @@ function openSimEdit(deviceId, currentSim) {
                     <?php endif; ?>
                     <tr><th class="text-muted">Data zakupu</th><td><?= formatDate($device['purchase_date']) ?></td></tr>
                     <tr><th class="text-muted">Cena zakupu</th><td><?= $device['purchase_price'] ? formatMoney($device['purchase_price']) : '—' ?></td></tr>
-                    <?php if ($device['status'] === 'sprzedany'): ?>
-                    <tr><th class="text-muted">Data sprzedaży</th><td><?= formatDate($device['sale_date'] ?? '') ?></td></tr>
-                    <?php if (!empty($device['sale_date'])): ?>
-                    <?php
-                        $saleDateTime = new DateTime($device['sale_date']);
-                        $warrantyEnd  = (clone $saleDateTime)->modify('+24 months');
-                        $now          = new DateTime();
-                        $warrantyExpired = $warrantyEnd < $now;
-                        // Remaining whole months (using exact day comparison)
-                        $remainingMonths = 0;
-                        if (!$warrantyExpired) {
-                            $diff = $now->diff($warrantyEnd);
-                            $remainingMonths = $diff->y * 12 + $diff->m + ($diff->d > 0 ? 1 : 0);
-                        }
-                    ?>
                     <tr>
-                        <th class="text-muted">Gwarancja do</th>
+                        <th class="text-muted">Data sprzedaży</th>
                         <td>
-                            <?= h($warrantyEnd->format('d.m.Y')) ?>
-                            <?php if ($warrantyExpired): ?>
-                            <span class="badge bg-secondary ms-1">Wygasła</span>
-                            <?php else: ?>
-                            <span class="badge bg-success ms-1">Aktywna (<?= $remainingMonths ?> mies.)</span>
+                            <?= !empty($device['sale_date']) ? formatDate($device['sale_date']) : '<span class="text-muted">—</span>' ?>
+                            <?php if (!empty($device['sale_date'])): ?>
+                            <?php
+                                $saleDateTime = new DateTime($device['sale_date']);
+                                $warrantyEnd  = (clone $saleDateTime)->modify('+24 months');
+                                $now          = new DateTime();
+                                $warrantyExpired = $warrantyEnd < $now;
+                                $remainingMonths = 0;
+                                if (!$warrantyExpired) {
+                                    $diff = $now->diff($warrantyEnd);
+                                    $remainingMonths = $diff->y * 12 + $diff->m + ($diff->d > 0 ? 1 : 0);
+                                }
+                            ?>
+                            <br><small class="text-muted">
+                                Gwarancja do <?= h($warrantyEnd->format('d.m.Y')) ?>
+                                <?php if ($warrantyExpired): ?>
+                                <span class="badge bg-secondary">Wygasła</span>
+                                <?php else: ?>
+                                <span class="badge bg-success">Aktywna (<?= $remainingMonths ?> mies.)</span>
+                                <?php endif; ?>
+                            </small>
                             <?php endif; ?>
                         </td>
                     </tr>
-                    <?php endif; ?>
-                    <?php elseif ($device['status'] === 'dzierżawa'): ?>
+                    <?php if ($device['status'] === 'dzierżawa'): ?>
                     <tr><th class="text-muted">Dzierżawa do</th>
                         <td>
                             <?= formatDate($device['lease_end_date'] ?? '') ?>
@@ -1382,84 +1397,155 @@ function openSimEdit(deviceId, currentSim) {
         </div>
     </div>
     <div class="col-md-8">
-        <div class="card mb-3">
-            <div class="card-header"><i class="fas fa-car me-2 text-success"></i>Historia montaży</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <thead><tr><th>Pojazd</th><th>Klient</th><th>Montaż</th><th>Demontaż</th><th>Status</th><th></th></tr></thead>
-                    <tbody>
-                        <?php foreach ($deviceInstallations as $inst): ?>
-                        <tr>
-                            <td><?= h($inst['registration'] . ' ' . $inst['make']) ?></td>
-                            <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
-                            <td><?= formatDate($inst['installation_date']) ?></td>
-                            <td><?= formatDate($inst['uninstallation_date']) ?></td>
-                            <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
-                            <td><a href="installations.php?action=view&id=<?= $inst['id'] ?>" class="btn btn-xs btn-link p-0"><i class="fas fa-eye"></i></a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                        <?php if (empty($deviceInstallations)): ?>
-                        <tr><td colspan="6" class="text-muted text-center">Brak montaży</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+        <?php
+        // Build unified timeline from all sources
+        $timeline = [];
+
+        // 1. Device added (purchase_date)
+        $timeline[] = [
+            'date'    => $device['purchase_date'] ?? date('Y-m-d'),
+            'sort'    => $device['purchase_date'] ?? '0000-00-00',
+            'type'    => 'dodanie',
+            'icon'    => 'fas fa-plus-circle text-primary',
+            'label'   => 'Urządzenie dodane do magazynu',
+            'detail'  => $device['purchase_price'] ? 'Cena zakupu: ' . formatMoney($device['purchase_price']) : '',
+            'link'    => '',
+            'badge'   => '<span class="badge bg-primary">Dodanie</span>',
+        ];
+
+        // 2. Installations
+        foreach ($deviceInstallations as $inst) {
+            $client = h($inst['company_name'] ?: ($inst['contact_name'] ?? ''));
+            $vehicle = h(trim($inst['registration'] . ' ' . $inst['make']));
+            // Mount event
+            $timeline[] = [
+                'date'   => $inst['installation_date'],
+                'sort'   => $inst['installation_date'],
+                'type'   => 'montaz',
+                'icon'   => 'fas fa-tools text-success',
+                'label'  => 'Montaż na pojazd ' . $vehicle,
+                'detail' => $client ? 'Klient: ' . $client : '',
+                'link'   => 'installations.php?action=view&id=' . $inst['id'],
+                'badge'  => '<span class="badge bg-success">Montaż</span>',
+            ];
+            // Unmount event (if applicable)
+            if (!empty($inst['uninstallation_date'])) {
+                $timeline[] = [
+                    'date'   => $inst['uninstallation_date'],
+                    'sort'   => $inst['uninstallation_date'],
+                    'type'   => 'demontaz',
+                    'icon'   => 'fas fa-minus-circle text-warning',
+                    'label'  => 'Demontaż z pojazdu ' . $vehicle,
+                    'detail' => getStatusBadge($inst['status'], 'installation'),
+                    'link'   => 'installations.php?action=view&id=' . $inst['id'],
+                    'badge'  => '<span class="badge bg-warning text-dark">Demontaż</span>',
+                ];
+            }
+        }
+
+        // 3. Services
+        foreach ($deviceServices as $svc) {
+            $dateToUse = $svc['completed_date'] ?: $svc['planned_date'];
+            $timeline[] = [
+                'date'   => $dateToUse,
+                'sort'   => $dateToUse,
+                'type'   => 'serwis',
+                'icon'   => 'fas fa-wrench text-danger',
+                'label'  => 'Serwis: ' . h(ucfirst($svc['type'])),
+                'detail' => ($svc['cost'] > 0 ? 'Koszt: ' . formatMoney($svc['cost']) . ' | ' : '') . getStatusBadge($svc['status'], 'service'),
+                'link'   => 'services.php?action=view&id=' . $svc['id'],
+                'badge'  => '<span class="badge bg-danger">Serwis</span>',
+            ];
+        }
+
+        // 4. Device history (replacements/transfers from protocols)
+        $histLabels = [
+            'wymieniono_na' => 'Wymieniono na inne urządzenie',
+            'wymieniono_z'  => 'Wymieniono z innego urządzenia',
+            'serwis'        => 'Protokół serwisowy',
+        ];
+        foreach ($deviceHistory as $h_row) {
+            $detail = '';
+            if ($h_row['related_serial']) {
+                $detail = 'Powiązane: ' . h(trim(($h_row['related_manufacturer'] ?? '') . ' ' . ($h_row['related_model'] ?? ''))) . ' – ' . h($h_row['related_serial']);
+            }
+            if ($h_row['protocol_number']) {
+                $detail .= ($detail ? ' | ' : '') . 'Protokół: <a href="protocols.php?action=view&id=' . (int)$h_row['protocol_id'] . '">' . h($h_row['protocol_number']) . '</a>';
+            }
+            $dateToUse = $h_row['protocol_date'] ?? substr($h_row['created_at'], 0, 10);
+            $timeline[] = [
+                'date'   => $dateToUse,
+                'sort'   => $dateToUse,
+                'type'   => 'wymiana',
+                'icon'   => 'fas fa-exchange-alt text-info',
+                'label'  => $histLabels[$h_row['event_type']] ?? h($h_row['event_type']),
+                'detail' => $detail,
+                'link'   => '',
+                'badge'  => '<span class="badge bg-info">Wymiana</span>',
+            ];
+        }
+
+        // 5. Sale event
+        if (!empty($device['sale_date'])) {
+            $timeline[] = [
+                'date'   => $device['sale_date'],
+                'sort'   => $device['sale_date'],
+                'type'   => 'sprzedaz',
+                'icon'   => 'fas fa-tag text-dark',
+                'label'  => 'Urządzenie sprzedane',
+                'detail' => '',
+                'link'   => '',
+                'badge'  => '<span class="badge bg-dark">Sprzedaż</span>',
+            ];
+        }
+
+        // Sort by date descending (newest first)
+        usort($timeline, fn($a, $b) => strcmp($b['sort'], $a['sort']));
+        ?>
         <div class="card">
-            <div class="card-header"><i class="fas fa-wrench me-2 text-warning"></i>Historia serwisów</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <thead><tr><th>Typ</th><th>Zaplanowany</th><th>Zrealizowany</th><th>Status</th><th>Koszt</th><th></th></tr></thead>
-                    <tbody>
-                        <?php foreach ($deviceServices as $svc): ?>
-                        <tr>
-                            <td><?= h(ucfirst($svc['type'])) ?></td>
-                            <td><?= formatDate($svc['planned_date']) ?></td>
-                            <td><?= formatDate($svc['completed_date']) ?></td>
-                            <td><?= getStatusBadge($svc['status'], 'service') ?></td>
-                            <td><?= $svc['cost'] > 0 ? formatMoney($svc['cost']) : '—' ?></td>
-                            <td><a href="services.php?action=view&id=<?= $svc['id'] ?>" class="btn btn-xs btn-link p-0"><i class="fas fa-eye"></i></a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                        <?php if (empty($deviceServices)): ?>
-                        <tr><td colspan="6" class="text-muted text-center">Brak serwisów</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+            <div class="card-header d-flex align-items-center gap-2">
+                <i class="fas fa-history text-secondary"></i>
+                <strong>Historia ruchów urządzenia</strong>
+                <span class="badge bg-secondary ms-auto"><?= count($timeline) ?> zdarzeń</span>
             </div>
-        </div>
-        <?php if (!empty($deviceHistory)): ?>
-        <div class="card mt-3">
-            <div class="card-header"><i class="fas fa-exchange-alt me-2 text-danger"></i>Historia wymian</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <thead><tr><th>Zdarzenie</th><th>Powiązane urządzenie</th><th>Protokół</th><th>Data</th></tr></thead>
-                    <tbody>
-                        <?php
-                        $histLabels = ['wymieniono_na' => '🔄 Wymieniono na', 'wymieniono_z' => '🔄 Wymieniono z', 'serwis' => '🔧 Serwis'];
-                        foreach ($deviceHistory as $h_row):
-                        ?>
+            <div class="card-body p-0">
+                <?php if (empty($timeline)): ?>
+                <p class="text-muted text-center p-3 mb-0">Brak historii dla tego urządzenia.</p>
+                <?php else: ?>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:95px">Data</th>
+                                <th style="width:80px">Typ</th>
+                                <th>Opis zdarzenia</th>
+                                <th style="width:30px"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($timeline as $ev): ?>
                         <tr>
-                            <td><?= h($histLabels[$h_row['event_type']] ?? $h_row['event_type']) ?></td>
+                            <td class="text-nowrap text-muted small"><?= $ev['date'] ? formatDate($ev['date']) : '—' ?></td>
+                            <td class="text-nowrap"><?= $ev['badge'] ?></td>
                             <td>
-                                <?php if ($h_row['related_serial']): ?>
-                                <?= h(trim(($h_row['related_manufacturer'] ?? '') . ' ' . ($h_row['related_model'] ?? ''))) ?><br>
-                                <small class="text-muted"><?= h($h_row['related_serial']) ?><?= $h_row['related_imei'] ? ' [' . h($h_row['related_imei']) . ']' : '' ?></small>
-                                <?php else: ?>—<?php endif; ?>
+                                <span><i class="<?= $ev['icon'] ?> me-1 small"></i><?= $ev['label'] ?></span>
+                                <?php if ($ev['detail']): ?>
+                                <br><small class="text-muted"><?= $ev['detail'] ?></small>
+                                <?php endif; ?>
                             </td>
                             <td>
-                                <?php if ($h_row['protocol_number']): ?>
-                                <a href="protocols.php?action=view&id=<?= (int)$h_row['protocol_id'] ?>"><?= h($h_row['protocol_number']) ?></a>
-                                <?php else: ?>—<?php endif; ?>
+                                <?php if ($ev['link']): ?>
+                                <a href="<?= $ev['link'] ?>" class="btn btn-xs btn-link p-0" title="Podgląd"><i class="fas fa-eye"></i></a>
+                                <?php endif; ?>
                             </td>
-                            <td><?= formatDate($h_row['protocol_date'] ?? $h_row['created_at']) ?></td>
                         </tr>
                         <?php endforeach; ?>
-                    </tbody>
-                </table>
+                        </tbody>
+                    </table>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
-        <?php endif; ?>
     </div>
 </div>
 
@@ -1530,11 +1616,11 @@ function openSimEdit(deviceId, currentSim) {
                     </div>
                 </div>
 
-                <!-- Sale date – shown when status = sprzedany -->
-                <div class="col-md-6" id="fieldSaleDate" style="display:none">
+                <!-- Sale date – always shown -->
+                <div class="col-md-6" id="fieldSaleDate">
                     <label class="form-label">Data sprzedaży</label>
                     <input type="date" name="sale_date" class="form-control" value="<?= h($device['sale_date'] ?? '') ?>">
-                    <div class="form-text">Gwarancja naliczana 24 miesiące od tej daty.</div>
+                    <div class="form-text">Jeśli urządzenie zostało sprzedane – gwarancja naliczana 24 miesiące od tej daty.</div>
                 </div>
 
                 <!-- Lease end date – shown when status = dzierżawa -->
@@ -1558,7 +1644,6 @@ function openSimEdit(deviceId, currentSim) {
 <script>
 function toggleStatusFields() {
     var status = document.getElementById('deviceStatus').value;
-    document.getElementById('fieldSaleDate').style.display  = (status === 'sprzedany')  ? '' : 'none';
     document.getElementById('fieldLeaseEnd').style.display  = (status === 'dzierżawa')  ? '' : 'none';
 }
 document.getElementById('deviceStatus').addEventListener('change', toggleStatusFields);
