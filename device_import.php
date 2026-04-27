@@ -413,7 +413,7 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ($vehicleId) {
                             $db->prepare("INSERT INTO installations
                                 (device_id, vehicle_id, client_id, technician_id, installation_date, status)
-                                VALUES (?, ?, ?, ?, CURDATE(), 'zakonczona')")
+                                VALUES (?, ?, ?, ?, CURDATE(), 'aktywna')")
                                ->execute([$deviceId, $vehicleId, $assignClientId, $currentUser['id']]);
                             $importedInstallationIds[] = (int)$db->lastInsertId();
                         }
@@ -517,9 +517,9 @@ if ($importStats !== null):
             <i class="fas fa-wrench me-1"></i>
             Utworzono <strong><?= (int)$importStats['installationCount'] ?></strong>
             <?php if (($importStats['installationCount'] ?? 0) > 1): ?>
-            montaży zgrupowanych w 1 partię (batch). Status: <strong>Zakończona</strong>.
+            montaży zgrupowanych w 1 partię (batch). Status: <strong>Aktywna</strong>.
             <?php else: ?>
-            montaż. Status: <strong>Zakończona</strong>.
+            montaż. Status: <strong>Aktywna</strong>.
             <?php endif; ?>
         </div>
         <?php endif; ?>
@@ -637,7 +637,7 @@ elseif ($step === 2 && !empty($sessionHeaders)):
                 </select>
                 <div class="form-text">
                     Gdy wybierzesz klienta, status każdego urządzenia zostanie automatycznie ustawiony na
-                    <strong>zamontowany</strong>. Zostanie utworzony montaż o statusie <strong>Zakończona</strong>
+                    <strong>zamontowany</strong>. Zostanie utworzony montaż o statusie <strong>Aktywna</strong>
                     (Technik: aktualnie zalogowany użytkownik). Przy imporcie wielu urządzeń montaże zostaną zgrupowane
                     w jedną partię (batch).
                 </div>
@@ -758,7 +758,7 @@ elseif ($step === 3 && !empty($sessionRows) && !empty($sessionMapping)):
 <div class="alert alert-success mb-3">
     <i class="fas fa-user-tie me-2"></i>Klient: <strong><?= h($assignClientLabel) ?></strong>
     — status urządzeń zostanie ustawiony na <strong>zamontowany</strong>;
-    zostanie utworzony montaż (status: <strong>Zakończona</strong>)<?= count($sessionRows) > 1 ? ' — wszystkie urządzenia w 1 partii (batch)' : '' ?>.
+    zostanie utworzony montaż (status: <strong>Aktywna</strong>)<?= count($sessionRows) > 1 ? ' — wszystkie urządzenia w 1 partii (batch)' : '' ?>.
     Technik: <strong><?= h(getCurrentUser()['name'] ?? '—') ?></strong>.
 </div>
 <?php endif; ?>
