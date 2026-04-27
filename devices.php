@@ -334,6 +334,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $imeis     = $_POST['imeis'] ?? [];
         $sims      = $_POST['sim_numbers'] ?? [];
         $notesList = $_POST['notes_list'] ?? [];
+        $bleIds    = $_POST['ble_ids'] ?? [];
+        $majors    = $_POST['majors'] ?? [];
+        $minors    = $_POST['minors'] ?? [];
+        $macs      = $_POST['mac_addresses'] ?? [];
 
         $added  = 0;
         $errors = [];
@@ -343,9 +347,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $imei   = sanitize($imeis[$i]   ?? '');
             $sim    = sanitize($sims[$i]    ?? '');
             $notes  = sanitize($notesList[$i] ?? '');
+            $bleId  = sanitize($bleIds[$i]  ?? '');
+            $major  = isset($majors[$i]) && $majors[$i] !== '' ? (int)$majors[$i] : null;
+            $minor  = isset($minors[$i]) && $minors[$i] !== '' ? (int)$minors[$i] : null;
+            $mac    = sanitize($macs[$i]    ?? '');
             try {
-                $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, status, purchase_date, purchase_price, notes) VALUES (?,?,?,?,?,?,?,?)");
-                $stmt->execute([$sharedModelId, $serial, $imei ?: null, $sim ?: null, $sharedStatus, $sharedPurchDate ?: null, (float)$sharedPurchPrice, $notes ?: null]);
+                $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, ble_id, major, minor, mac_address, status, purchase_date, purchase_price, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+                $stmt->execute([$sharedModelId, $serial, $imei ?: null, $sim ?: null, $bleId ?: null, $major, $minor, $mac ?: null, $sharedStatus, $sharedPurchDate ?: null, (float)$sharedPurchPrice, $notes ?: null]);
                 $newId = (int)$db->lastInsertId();
                 adjustInventoryForStatusChange($db, $sharedModelId, '', $sharedStatus);
                 if (!empty($sim)) {
@@ -523,7 +531,13 @@ $models = $db->query("
     ORDER BY mf.name, m.name
 ")->fetchAll();
 
-// List with filters
+// JS map: model_id -> model_name (used for BTS detection in both add modal and add/edit form)
+$modelNameMap = [];
+foreach ($models as $m) {
+    $modelNameMap[(int)$m['id']] = $m['name'];
+}
+
+
 $devices = [];
 if ($action === 'list') {
     $search = sanitize($_GET['search'] ?? '');
@@ -965,6 +979,10 @@ function openMoveDeviceModalFromPreview() {
                                     <th>Nr seryjny <span class="text-danger">*</span></th>
                                     <th>IMEI</th>
                                     <th>Nr telefonu SIM</th>
+                                    <th class="add-ble-col" style="display:none">ID BLE</th>
+                                    <th class="add-ble-col" style="display:none">Major</th>
+                                    <th class="add-ble-col" style="display:none">Minor</th>
+                                    <th class="add-ble-col" style="display:none">MAC</th>
                                     <th>Uwagi</th>
                                     <th style="width:42px"></th>
                                 </tr>
@@ -986,6 +1004,26 @@ function openMoveDeviceModalFromPreview() {
 </div>
 <script>
 var addDeviceRowCount = 0;
+var _addModelNames = <?= json_encode($modelNameMap) ?>;
+
+function isAddBtsModel() {
+    var sel = document.getElementById('addModel');
+    if (!sel) return false;
+    var mid = parseInt(sel.value, 10);
+    if (!mid) return false;
+    var name = _addModelNames[mid] || '';
+    return name.toUpperCase().startsWith('BTS');
+}
+
+function toggleAddBleColumns() {
+    var show = isAddBtsModel();
+    document.querySelectorAll('.add-ble-col').forEach(function(el) {
+        el.style.display = show ? '' : 'none';
+    });
+    document.querySelectorAll('.add-ble-cell').forEach(function(el) {
+        el.style.display = show ? '' : 'none';
+    });
+}
 
 function openAddDeviceModal() {
     addDeviceRowCount = 0;
@@ -994,6 +1032,7 @@ function openAddDeviceModal() {
     document.getElementById('addStatus').value = 'nowy';
     document.getElementById('addPurchaseDate').value = '';
     document.getElementById('addPurchasePrice').value = '0';
+    toggleAddBleColumns();
     addDeviceRow();
     updateAddCount();
     new bootstrap.Modal(document.getElementById('addDevicesModal')).show();
@@ -1005,11 +1044,16 @@ function addDeviceRow() {
     var tbody = document.getElementById('addDevicesBody');
     var tr = document.createElement('tr');
     tr.id = 'add-dev-row-' + n;
+    var bleCellDisplay = isAddBtsModel() ? '' : 'none';
     tr.innerHTML =
         '<td class="text-muted text-center align-middle">' + n + '</td>' +
         '<td><input type="text" name="serial_numbers[]" class="form-control form-control-sm" placeholder="np. SN123456" required></td>' +
         '<td><input type="text" name="imeis[]" class="form-control form-control-sm" placeholder="15 cyfr" maxlength="20"></td>' +
         '<td><input type="text" name="sim_numbers[]" class="form-control form-control-sm" placeholder="np. +48 600 000 000" list="addSimList"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="text" name="ble_ids[]" class="form-control form-control-sm font-monospace" placeholder="UUID"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="number" name="majors[]" class="form-control form-control-sm" min="0" max="65535" placeholder="0-65535"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="number" name="minors[]" class="form-control form-control-sm" min="0" max="65535" placeholder="0-65535"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="text" name="mac_addresses[]" class="form-control form-control-sm font-monospace" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17"></td>' +
         '<td><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
         '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeDeviceRow(' + n + ')" title="Usuń wiersz"><i class="fas fa-times"></i></button></td>';
     tbody.appendChild(tr);
@@ -1034,11 +1078,21 @@ function updateAddCount() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Listen for row additions to keep count updated
     var body = document.getElementById('addDevicesBody');
     if (body) {
         var obs = new MutationObserver(updateAddCount);
         obs.observe(body, { childList: true });
+    }
+    var addModelSel = document.getElementById('addModel');
+    if (addModelSel) {
+        addModelSel.addEventListener('change', function() {
+            toggleAddBleColumns();
+            // Update existing rows too
+            var bleCellDisplay = isAddBtsModel() ? '' : 'none';
+            document.querySelectorAll('#addDevicesBody .add-ble-cell').forEach(function(el) {
+                el.style.display = bleCellDisplay;
+            });
+        });
     }
 });
 </script>
@@ -1342,21 +1396,13 @@ function openSimEdit(deviceId, currentSim) {
                     <tr><th class="text-muted">Nr seryjny</th><td class="fw-bold"><?= h($device['serial_number']) ?></td></tr>
                     <tr><th class="text-muted">IMEI</th><td><?= h($device['imei'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Nr telefonu SIM</th><td><?= h($device['sim_number'] ?? '—') ?></td></tr>
-                    <?php if (!empty($device['ble_id']) || $device['major'] !== null || $device['minor'] !== null || !empty($device['mac_address'])): ?>
+                    <?php if (stripos($device['model_name'], 'BTS') === 0): ?>
                     <tr><td colspan="2"><hr class="my-1"></td></tr>
                     <tr><th colspan="2" class="text-muted small pb-0"><i class="fas fa-broadcast-tower me-1"></i>BLE (iBeacon / iSensor)</th></tr>
-                    <?php if (!empty($device['ble_id'])): ?>
-                    <tr><th class="text-muted">BLE ID</th><td><code><?= h($device['ble_id']) ?></code></td></tr>
-                    <?php endif; ?>
-                    <?php if ($device['major'] !== null): ?>
-                    <tr><th class="text-muted">Major</th><td><?= (int)$device['major'] ?></td></tr>
-                    <?php endif; ?>
-                    <?php if ($device['minor'] !== null): ?>
-                    <tr><th class="text-muted">Minor</th><td><?= (int)$device['minor'] ?></td></tr>
-                    <?php endif; ?>
-                    <?php if (!empty($device['mac_address'])): ?>
-                    <tr><th class="text-muted">MAC</th><td><code><?= h($device['mac_address']) ?></code></td></tr>
-                    <?php endif; ?>
+                    <tr><th class="text-muted">ID BLE</th><td><?= !empty($device['ble_id']) ? '<code>' . h($device['ble_id']) . '</code>' : '<span class="text-muted">—</span>' ?></td></tr>
+                    <tr><th class="text-muted">Major</th><td><?= $device['major'] !== null ? (int)$device['major'] : '<span class="text-muted">—</span>' ?></td></tr>
+                    <tr><th class="text-muted">Minor</th><td><?= $device['minor'] !== null ? (int)$device['minor'] : '<span class="text-muted">—</span>' ?></td></tr>
+                    <tr><th class="text-muted">MAC</th><td><?= !empty($device['mac_address']) ? '<code>' . h($device['mac_address']) . '</code>' : '<span class="text-muted">—</span>' ?></td></tr>
                     <tr><td colspan="2"><hr class="my-1"></td></tr>
                     <?php endif; ?>
                     <tr><th class="text-muted">Status</th><td><?= getStatusBadge($device['status'], 'device') ?></td></tr>
@@ -1634,30 +1680,30 @@ function openSimEdit(deviceId, currentSim) {
                     <div class="form-text">Po zapisaniu urządzenia z wypełnionym numerem SIM, karta pojawi się automatycznie w zakładce <a href="sim_cards.php" target="_blank">Karty SIM</a>.</div>
                 </div>
 
-                <!-- BLE fields (iBeacon / iSensor) -->
-                <div class="col-12">
+                <!-- BLE fields (iBeacon / iSensor) – shown only for BTS models -->
+                <div class="col-12 ble-section" id="editBleSection" style="display:none">
                     <hr class="my-1">
-                    <label class="form-label text-muted small mb-1"><i class="fas fa-broadcast-tower me-1"></i>Pola BLE (iBeacon / iSensor) – opcjonalne</label>
+                    <label class="form-label text-muted small mb-1"><i class="fas fa-broadcast-tower me-1"></i>Pola BLE (iBeacon / iSensor)</label>
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label">BLE ID</label>
+                <div class="col-md-6 ble-section" id="editBleId" style="display:none">
+                    <label class="form-label">ID – urządzenia BLE (iBeacon, iSensor)</label>
                     <input type="text" name="ble_id" class="form-control font-monospace" value="<?= h($device['ble_id'] ?? '') ?>" placeholder="np. E2C56DB5-DFFB-48D2-B060-D0F5A71096E0">
-                    <div class="form-text">Unikalny identyfikator urządzenia BLE (UUID / identyfikator iBeacon).</div>
+                    <div class="form-text">Unikalny identyfikator urządzenia BLE (UUID).</div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-3 ble-section" id="editBleMajor" style="display:none">
                     <label class="form-label">Major</label>
                     <input type="number" name="major" class="form-control" value="<?= h($device['major'] ?? '') ?>" min="0" max="65535" placeholder="0–65535">
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-3 ble-section" id="editBleMinor" style="display:none">
                     <label class="form-label">Minor</label>
                     <input type="number" name="minor" class="form-control" value="<?= h($device['minor'] ?? '') ?>" min="0" max="65535" placeholder="0–65535">
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label">Adres MAC</label>
+                <div class="col-md-6 ble-section" id="editBleMac" style="display:none">
+                    <label class="form-label">MAC</label>
                     <input type="text" name="mac_address" class="form-control font-monospace" value="<?= h($device['mac_address'] ?? '') ?>" placeholder="np. AA:BB:CC:DD:EE:FF" maxlength="17">
                     <div class="form-text">Format: XX:XX:XX:XX:XX:XX (wielkie litery uzupełniane automatycznie).</div>
                 </div>
-                <div class="col-12"><hr class="my-1"></div>
+                <div class="col-12 ble-section" id="editBleSeparator" style="display:none"><hr class="my-1"></div>
                 <div class="col-md-6">
                     <label class="form-label">Status</label>
                     <select name="status" id="deviceStatus" class="form-select">
@@ -1706,12 +1752,39 @@ function openSimEdit(deviceId, currentSim) {
     </div>
 </div>
 <script>
+<?php
+?>
+var _editModelNames = <?= json_encode($modelNameMap) ?>;
+
+function isBtsModel(selectEl) {
+    var mid = parseInt(selectEl.value, 10);
+    if (!mid) return false;
+    var name = _editModelNames[mid] || '';
+    return name.toUpperCase().startsWith('BTS');
+}
+
+function toggleBleFields() {
+    var sel = document.querySelector('select[name="model_id"]');
+    if (!sel) return;
+    var show = isBtsModel(sel);
+    document.querySelectorAll('.ble-section').forEach(function(el) {
+        el.style.display = show ? '' : 'none';
+    });
+}
+
 function toggleStatusFields() {
     var status = document.getElementById('deviceStatus').value;
     document.getElementById('fieldLeaseEnd').style.display  = (status === 'dzierżawa')  ? '' : 'none';
 }
 document.getElementById('deviceStatus').addEventListener('change', toggleStatusFields);
 toggleStatusFields(); // run on page load
+
+// BLE toggle wired to model select
+var _editModelSel = document.querySelector('select[name="model_id"]');
+if (_editModelSel) {
+    _editModelSel.addEventListener('change', toggleBleFields);
+    toggleBleFields(); // run on page load (important for edit mode)
+}
 </script>
 <?php endif; ?>
 
