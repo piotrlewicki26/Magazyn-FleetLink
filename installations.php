@@ -15,6 +15,14 @@ $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
 
+// One-time migration: add 'archiwum' to installations.status ENUM if not already present
+try {
+    $colInfo = $db->query("SHOW COLUMNS FROM installations LIKE 'status'")->fetch();
+    if ($colInfo && strpos($colInfo['Type'], 'archiwum') === false) {
+        $db->exec("ALTER TABLE installations MODIFY COLUMN status ENUM('aktywna','zakonczona','anulowana','archiwum') NOT NULL DEFAULT 'aktywna'");
+    }
+} catch (Exception $e) { /* ignore – may fail if no DB access during setup */ }
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) { flashError('Błąd bezpieczeństwa.'); redirect(getBaseUrl() . 'installations.php'); }
     $postAction         = sanitize($_POST['action'] ?? '');
@@ -226,6 +234,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
            ->execute([$vehicleId, $clientId, $technicianId, $installationDate, $uninstallationDate, $status, $locationInVehicle, $installationAddress, $notes, $editId]);
         flashSuccess('Montaż zaktualizowany.');
         redirect(getBaseUrl() . 'installations.php?action=view&id=' . $editId);
+
+    } elseif ($postAction === 'set_archive') {
+        $archId = (int)($_POST['id'] ?? 0);
+        if (!$archId) { flashError('Nieprawidłowy identyfikator montażu.'); redirect(getBaseUrl() . 'installations.php'); }
+        // Only change status to 'archiwum' – do NOT touch device, vehicle, or client
+        $chkStmt = $db->prepare("SELECT status FROM installations WHERE id=?");
+        $chkStmt->execute([$archId]);
+        $chkRow = $chkStmt->fetch();
+        if (!$chkRow) { flashError('Montaż nie istnieje.'); redirect(getBaseUrl() . 'installations.php'); }
+        if ($chkRow['status'] === 'aktywna') {
+            flashError('Nie można zarchiwizować aktywnej instalacji. Najpierw zarejestruj demontaż.');
+        } else {
+            $db->prepare("UPDATE installations SET status='archiwum' WHERE id=?")->execute([$archId]);
+            flashSuccess('Montaż przeniesiony do archiwum.');
+        }
+        redirect(getBaseUrl() . 'installations.php');
 
     } elseif ($postAction === 'delete') {
         if (!isAdmin()) { flashError('Kasowanie zleceń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'installations.php'); }
@@ -817,6 +841,7 @@ include __DIR__ . '/includes/header.php';
                     <option value="aktywna" <?= ($_GET['status'] ?? '') === 'aktywna' ? 'selected' : '' ?>>Aktywna</option>
                     <option value="zakonczona" <?= ($_GET['status'] ?? '') === 'zakonczona' ? 'selected' : '' ?>>Zakończona</option>
                     <option value="anulowana" <?= ($_GET['status'] ?? '') === 'anulowana' ? 'selected' : '' ?>>Anulowana</option>
+                    <option value="archiwum" <?= ($_GET['status'] ?? '') === 'archiwum' ? 'selected' : '' ?>>Archiwum</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -911,6 +936,15 @@ include __DIR__ . '/includes/header.php';
                             <i class="fas fa-minus-circle"></i>
                         </button>
                         <?php endif; ?>
+                        <?php if (in_array($inst['status'], ['zakonczona','anulowana'])): ?>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="set_archive">
+                            <input type="hidden" name="id" value="<?= $inst['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary btn-action" title="Przenieś do archiwum"
+                                    data-confirm="Przenieść montaż #<?= $inst['id'] ?> do archiwum?"><i class="fas fa-archive"></i></button>
+                        </form>
+                        <?php endif; ?>
                         <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
@@ -961,6 +995,15 @@ include __DIR__ . '/includes/header.php';
                             <i class="fas fa-minus-circle"></i>
                         </button>
                         <?php endif; ?>
+                        <?php if (in_array($inst['status'], ['zakonczona','anulowana'])): ?>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="set_archive">
+                            <input type="hidden" name="id" value="<?= $inst['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary btn-action" title="Przenieś do archiwum"
+                                    data-confirm="Przenieść montaż #<?= $inst['id'] ?> do archiwum?"><i class="fas fa-archive"></i></button>
+                        </form>
+                        <?php endif; ?>
                         <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline">
                             <?= csrfField() ?>
@@ -995,7 +1038,8 @@ function showInstPreview(data) {
     var statusMap = {
         'aktywna':    '<span class="badge bg-success">Aktywna</span>',
         'zakonczona': '<span class="badge bg-secondary">Zakończona</span>',
-        'anulowana':  '<span class="badge bg-danger">Anulowana</span>'
+        'anulowana':  '<span class="badge bg-danger">Anulowana</span>',
+        'archiwum':   '<span class="badge bg-dark">Archiwum</span>'
     };
     var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
     var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
@@ -1095,6 +1139,7 @@ function showInstPreview(data) {
                     <option value="aktywna" <?= ($_GET['status'] ?? '') === 'aktywna' ? 'selected' : '' ?>>Aktywna</option>
                     <option value="zakonczona" <?= ($_GET['status'] ?? '') === 'zakonczona' ? 'selected' : '' ?>>Zakończona</option>
                     <option value="anulowana" <?= ($_GET['status'] ?? '') === 'anulowana' ? 'selected' : '' ?>>Anulowana</option>
+                    <option value="archiwum" <?= ($_GET['status'] ?? '') === 'archiwum' ? 'selected' : '' ?>>Archiwum</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -1223,7 +1268,8 @@ function showInstPreview(data) {
     var statusMap = {
         'aktywna':    '<span class="badge bg-success">Aktywna</span>',
         'zakonczona': '<span class="badge bg-secondary">Zakończona</span>',
-        'anulowana':  '<span class="badge bg-danger">Anulowana</span>'
+        'anulowana':  '<span class="badge bg-danger">Anulowana</span>',
+        'archiwum':   '<span class="badge bg-dark">Archiwum</span>'
     };
     var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
     var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };

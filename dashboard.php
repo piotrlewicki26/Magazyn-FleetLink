@@ -80,7 +80,7 @@ foreach ($recentInstallationRows as $row) {
         $row['device_count'] = 1;
         $recentInstallations[] = $row;
     }
-    if (count($recentInstallations) >= 5) break;
+    if (count($recentInstallations) >= 3) break;
 }
 
 // Upcoming services
@@ -97,7 +97,7 @@ $upcomingServices = $db->query("
     LEFT JOIN users u ON u.id = s.technician_id
     WHERE s.status IN ('zaplanowany', 'w_trakcie')
     ORDER BY s.planned_date ASC
-    LIMIT 5
+    LIMIT 3
 ")->fetchAll();
 
 // Low stock

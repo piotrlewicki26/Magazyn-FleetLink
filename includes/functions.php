@@ -104,6 +104,7 @@ function getStatusBadge($status, $type = 'device') {
             'aktywna'    => ['success', 'Aktywna'],
             'zakonczona' => ['secondary', 'Zakończona'],
             'anulowana'  => ['danger', 'Anulowana'],
+            'archiwum'   => ['dark', 'Archiwum'],
         ],
         'service' => [
             'zaplanowany' => ['info', 'Zaplanowany'],
