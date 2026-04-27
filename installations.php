@@ -1409,6 +1409,7 @@ function showCompleteDisassemblyModal(deviceId, serial, installationId) {
 }
 </script>
 
+<?php elseif ($action === 'view'): ?>
 
 <div class="row g-3">
     <div class="col-md-4">

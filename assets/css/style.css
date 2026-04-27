@@ -654,3 +654,8 @@ footer, .table, .form-control, .form-select, .input-group-text,
     touch-action: pan-y;
     overscroll-behavior: contain;
 }
+/* When dropdownParent:'body' is used, the dropdown is appended to <body>
+   and must have a z-index above Bootstrap 5 modals (z-index: 1055). */
+body > .ts-dropdown {
+    z-index: 1060;
+}
