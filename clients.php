@@ -59,6 +59,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Nie można usunąć klienta — ma powiązane rekordy.');
         }
         redirect(getBaseUrl() . 'clients.php');
+
+    } elseif ($postAction === 'delete_vehicle') {
+        if (isTechnician()) { flashError('Rola Technik nie może usuwać pojazdów.'); redirect(getBaseUrl() . 'clients.php'); }
+        $vehId    = (int)($_POST['vehicle_id'] ?? 0);
+        $clientId = (int)($_POST['client_id'] ?? 0);
+        if (!$vehId || !$clientId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId); }
+        // Check for active installations
+        $chk = $db->prepare("SELECT COUNT(*) FROM installations WHERE vehicle_id=? AND status='aktywna'");
+        $chk->execute([$vehId]);
+        if ($chk->fetchColumn() > 0) {
+            flashError('Nie można usunąć pojazdu — ma aktywne instalacje GPS. Najpierw zakończ instalacje.');
+        } else {
+            $db->prepare("UPDATE vehicles SET active=0 WHERE id=? AND client_id=?")->execute([$vehId, $clientId]);
+            flashSuccess('Pojazd usunięty z listy klienta.');
+        }
+        redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId);
     }
 }
 
@@ -93,6 +109,7 @@ if ($action === 'list') {
 
 // For view - get installed devices instead of vehicles
 $clientInstalledDevices = [];
+$clientVehicles = [];
 $clientInstallations = [];
 if ($action === 'view' && $client) {
     // Fetch installed devices (active installations) for this client
@@ -113,6 +130,23 @@ if ($action === 'view' && $client) {
         $stmt->execute([$id]);
         $clientInstalledDevices = $stmt->fetchAll();
     } catch (Exception $e) { $clientInstalledDevices = []; }
+
+    // Fetch vehicles assigned to this client with GPS status from active installation
+    try {
+        $vstmt = $db->prepare("
+            SELECT v.id, v.registration, v.make, v.model_name as vehicle_model, v.year,
+                   d.status as device_status,
+                   d.serial_number as device_serial,
+                   i.id as installation_id
+            FROM vehicles v
+            LEFT JOIN installations i ON i.vehicle_id = v.id AND i.status = 'aktywna'
+            LEFT JOIN devices d ON d.id = i.device_id
+            WHERE v.client_id = ? AND v.active = 1
+            ORDER BY v.registration
+        ");
+        $vstmt->execute([$id]);
+        $clientVehicles = $vstmt->fetchAll();
+    } catch (Exception $e) { $clientVehicles = []; }
 }
 
 $activePage = 'clients';
@@ -289,6 +323,50 @@ function showClientPreview(data) {
                         </tr>
                         <?php endforeach; ?>
                         <?php if (empty($clientInstalledDevices)): ?><tr><td colspan="6" class="text-muted text-center">Brak zamontowanych urządzeń</td></tr><?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-car me-2 text-secondary"></i>Pojazdy klienta</span>
+                <?php if (!isTechnician()): ?>
+                <a href="vehicles.php?action=add&client=<?= $client['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-plus me-1"></i>Dodaj pojazd</a>
+                <?php endif; ?>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Nr rejestracyjny</th><th>Marka / Model</th><th>Rok</th><th>Status GPS</th><?php if (!isTechnician()): ?><th></th><?php endif; ?></tr></thead>
+                    <tbody>
+                        <?php foreach ($clientVehicles as $v): ?>
+                        <tr>
+                            <td class="fw-semibold"><?= h($v['registration']) ?></td>
+                            <td><?= h(trim(($v['make'] ?? '') . ' ' . ($v['vehicle_model'] ?? ''))) ?: '<span class="text-muted">—</span>' ?></td>
+                            <td><?= $v['year'] ? h($v['year']) : '<span class="text-muted">—</span>' ?></td>
+                            <td>
+                                <?php if ($v['device_status']): ?>
+                                    <?= getStatusBadge($v['device_status'], 'device') ?>
+                                    <?php if ($v['device_serial']): ?>
+                                    <small class="text-muted ms-1"><?= h($v['device_serial']) ?></small>
+                                    <?php endif; ?>
+                                <?php else: ?>
+                                    <span class="badge bg-light text-secondary">Brak GPS</span>
+                                <?php endif; ?>
+                            </td>
+                            <?php if (!isTechnician()): ?>
+                            <td class="text-end">
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć pojazd <?= h(addslashes($v['registration'])) ?> z listy klienta?');">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="delete_vehicle">
+                                    <input type="hidden" name="vehicle_id" value="<?= $v['id'] ?>">
+                                    <input type="hidden" name="client_id" value="<?= $client['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </td>
+                            <?php endif; ?>
+                        </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($clientVehicles)): ?><tr><td colspan="<?= isTechnician() ? 4 : 5 ?>" class="text-muted text-center">Brak pojazdów</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>
