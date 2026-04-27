@@ -1001,14 +1001,22 @@ function dimInitTomSelect(row) {
     row.querySelectorAll('select.ts-device-dash').forEach(function(sel) {
         if (sel.tomselect) return;
         if (typeof TomSelect === 'undefined') return;
-        new TomSelect(sel, {
+        var ts = new TomSelect(sel, {
             placeholder: '— szukaj urządzenia —',
             allowEmptyOption: true,
             maxOptions: null,
             searchField: ['text', 'value'],
-            dropdownParent: 'body',
-            render: { option: function(data, escape) { return '<div>' + escape(data.text) + '</div>'; } }
+            render: { option: function(data, escape) { return '<div>' + escape(data.text) + '</div>'; } },
+            onDropdownOpen: function() {
+                var mb = document.querySelector('#dashInstallModal .modal-body');
+                if (mb) mb.style.overflow = 'visible';
+            },
+            onDropdownClose: function() {
+                var mb = document.querySelector('#dashInstallModal .modal-body');
+                if (mb) mb.style.overflow = '';
+            }
         });
+        void ts;
     });
 }
 
