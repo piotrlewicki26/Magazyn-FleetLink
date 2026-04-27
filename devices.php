@@ -26,6 +26,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $serialNumber  = sanitize($_POST['serial_number'] ?? '');
     $imei          = sanitize($_POST['imei'] ?? '');
     $simNumber     = sanitize($_POST['sim_number'] ?? '');
+    $bleId         = sanitize($_POST['ble_id'] ?? '');
+    $major         = isset($_POST['major']) && $_POST['major'] !== '' ? (int)$_POST['major'] : null;
+    $minor         = isset($_POST['minor']) && $_POST['minor'] !== '' ? (int)$_POST['minor'] : null;
+    $macAddress    = strtoupper(trim(sanitize($_POST['mac_address'] ?? '')));
     $status        = sanitize($_POST['status'] ?? 'nowy');
     $purchaseDate  = sanitize($_POST['purchase_date'] ?? '');
     $purchasePrice = str_replace(',', '.', $_POST['purchase_price'] ?? '0');
@@ -83,8 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'devices.php?action=add');
         }
         try {
-            $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, status, purchase_date, purchase_price, sale_date, lease_end_date, notes) VALUES (?,?,?,?,?,?,?,?,?,?)");
-            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes]);
+            $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, ble_id, major, minor, mac_address, status, purchase_date, purchase_price, sale_date, lease_end_date, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes]);
             $newDeviceId = (int)$db->lastInsertId();
             // Auto-adjust inventory: new device with status 'nowy' enters stock
             adjustInventoryForStatusChange($db, $modelId, '', $status);
@@ -121,8 +125,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $oldRow->execute([$editId]);
         $oldDevice = $oldRow->fetch();
         try {
-            $stmt = $db->prepare("UPDATE devices SET model_id=?, serial_number=?, imei=?, sim_number=?, status=?, purchase_date=?, purchase_price=?, sale_date=?, lease_end_date=?, notes=? WHERE id=?");
-            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes, $editId]);
+            $stmt = $db->prepare("UPDATE devices SET model_id=?, serial_number=?, imei=?, sim_number=?, ble_id=?, major=?, minor=?, mac_address=?, status=?, purchase_date=?, purchase_price=?, sale_date=?, lease_end_date=?, notes=? WHERE id=?");
+            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes, $editId]);
             // Auto-adjust inventory on status change
             if ($oldDevice) {
                 adjustInventoryForStatusChange($db, $modelId, $oldDevice['status'], $status);
@@ -527,7 +531,9 @@ if ($action === 'list') {
     $filterStatus = sanitize($_GET['status'] ?? '');
 
     $sql = "
-        SELECT d.id, d.serial_number, d.imei, d.sim_number, d.status, d.purchase_date,
+        SELECT d.id, d.serial_number, d.imei, d.sim_number,
+               d.ble_id, d.major, d.minor, d.mac_address,
+               d.status, d.purchase_date,
                d.sale_date, d.notes,
                d.purchase_price,
                m.name as model_name, mf.name as manufacturer_name,
@@ -730,6 +736,10 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'serial_number'        => $d['serial_number'],
                             'imei'                 => $d['imei'] ?? '',
                             'sim_number'           => $d['sim_number'] ?? '',
+                            'ble_id'               => $d['ble_id'] ?? '',
+                            'major'                => $d['major'] ?? null,
+                            'minor'                => $d['minor'] ?? null,
+                            'mac_address'          => $d['mac_address'] ?? '',
                             'status'               => $d['status'],
                             'manufacturer_name'    => $d['manufacturer_name'],
                             'model_name'           => $d['model_name'],
@@ -763,6 +773,10 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                     'serial_number'        => $d['serial_number'],
                                     'imei'                 => $d['imei'] ?? '',
                                     'sim_number'           => $d['sim_number'] ?? '',
+                                    'ble_id'               => $d['ble_id'] ?? '',
+                                    'major'                => $d['major'] ?? null,
+                                    'minor'                => $d['minor'] ?? null,
+                                    'mac_address'          => $d['mac_address'] ?? '',
                                     'status'               => $d['status'],
                                     'manufacturer_name'    => $d['manufacturer_name'],
                                     'model_name'           => $d['model_name'],
@@ -853,6 +867,11 @@ function showDevicePreview(data) {
         '<tr><th class="text-muted" style="width:40%">Nr seryjny</th><td class="fw-bold">' + data.serial_number + '</td></tr>' +
         '<tr><th class="text-muted">IMEI</th><td>' + (data.imei || '—') + '</td></tr>' +
         '<tr><th class="text-muted">Nr SIM</th><td>' + (data.sim_number || '—') + '</td></tr>' +
+        (data.ble_id || data.major != null || data.minor != null || data.mac_address ? '<tr><td colspan="2"><hr class="my-1"></td></tr>' : '') +
+        (data.ble_id ? '<tr><th class="text-muted">BLE ID</th><td><code>' + data.ble_id + '</code></td></tr>' : '') +
+        (data.major != null ? '<tr><th class="text-muted">Major</th><td>' + data.major + '</td></tr>' : '') +
+        (data.minor != null ? '<tr><th class="text-muted">Minor</th><td>' + data.minor + '</td></tr>' : '') +
+        (data.mac_address ? '<tr><th class="text-muted">MAC</th><td><code>' + data.mac_address + '</code></td></tr>' : '') +
         '<tr><th class="text-muted">Status</th><td>' + statusBadge + '</td></tr>' +
         '<tr><th class="text-muted">Producent / Model</th><td>' + data.manufacturer_name + ' ' + data.model_name + '</td></tr>' +
         '<tr><th class="text-muted">Rejestracja</th><td>' + (data.vehicle_registration || '—') + '</td></tr>' +
@@ -1323,6 +1342,23 @@ function openSimEdit(deviceId, currentSim) {
                     <tr><th class="text-muted">Nr seryjny</th><td class="fw-bold"><?= h($device['serial_number']) ?></td></tr>
                     <tr><th class="text-muted">IMEI</th><td><?= h($device['imei'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Nr telefonu SIM</th><td><?= h($device['sim_number'] ?? '—') ?></td></tr>
+                    <?php if (!empty($device['ble_id']) || $device['major'] !== null || $device['minor'] !== null || !empty($device['mac_address'])): ?>
+                    <tr><td colspan="2"><hr class="my-1"></td></tr>
+                    <tr><th colspan="2" class="text-muted small pb-0"><i class="fas fa-broadcast-tower me-1"></i>BLE (iBeacon / iSensor)</th></tr>
+                    <?php if (!empty($device['ble_id'])): ?>
+                    <tr><th class="text-muted">BLE ID</th><td><code><?= h($device['ble_id']) ?></code></td></tr>
+                    <?php endif; ?>
+                    <?php if ($device['major'] !== null): ?>
+                    <tr><th class="text-muted">Major</th><td><?= (int)$device['major'] ?></td></tr>
+                    <?php endif; ?>
+                    <?php if ($device['minor'] !== null): ?>
+                    <tr><th class="text-muted">Minor</th><td><?= (int)$device['minor'] ?></td></tr>
+                    <?php endif; ?>
+                    <?php if (!empty($device['mac_address'])): ?>
+                    <tr><th class="text-muted">MAC</th><td><code><?= h($device['mac_address']) ?></code></td></tr>
+                    <?php endif; ?>
+                    <tr><td colspan="2"><hr class="my-1"></td></tr>
+                    <?php endif; ?>
                     <tr><th class="text-muted">Status</th><td><?= getStatusBadge($device['status'], 'device') ?></td></tr>
                     <?php
                         $activeInst = null;
@@ -1597,6 +1633,31 @@ function openSimEdit(deviceId, currentSim) {
                     <input type="text" name="sim_number" class="form-control" value="<?= h($device['sim_number'] ?? '') ?>" placeholder="np. +48 600 000 000">
                     <div class="form-text">Po zapisaniu urządzenia z wypełnionym numerem SIM, karta pojawi się automatycznie w zakładce <a href="sim_cards.php" target="_blank">Karty SIM</a>.</div>
                 </div>
+
+                <!-- BLE fields (iBeacon / iSensor) -->
+                <div class="col-12">
+                    <hr class="my-1">
+                    <label class="form-label text-muted small mb-1"><i class="fas fa-broadcast-tower me-1"></i>Pola BLE (iBeacon / iSensor) – opcjonalne</label>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">BLE ID</label>
+                    <input type="text" name="ble_id" class="form-control font-monospace" value="<?= h($device['ble_id'] ?? '') ?>" placeholder="np. E2C56DB5-DFFB-48D2-B060-D0F5A71096E0">
+                    <div class="form-text">Unikalny identyfikator urządzenia BLE (UUID / identyfikator iBeacon).</div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Major</label>
+                    <input type="number" name="major" class="form-control" value="<?= h($device['major'] ?? '') ?>" min="0" max="65535" placeholder="0–65535">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Minor</label>
+                    <input type="number" name="minor" class="form-control" value="<?= h($device['minor'] ?? '') ?>" min="0" max="65535" placeholder="0–65535">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Adres MAC</label>
+                    <input type="text" name="mac_address" class="form-control font-monospace" value="<?= h($device['mac_address'] ?? '') ?>" placeholder="np. AA:BB:CC:DD:EE:FF" maxlength="17">
+                    <div class="form-text">Format: XX:XX:XX:XX:XX:XX (wielkie litery uzupełniane automatycznie).</div>
+                </div>
+                <div class="col-12"><hr class="my-1"></div>
                 <div class="col-md-6">
                     <label class="form-label">Status</label>
                     <select name="status" id="deviceStatus" class="form-select">

@@ -131,6 +131,10 @@ $targetFields = [
     'manufacturer'        => 'Producent (nazwa)',
     'imei'                => 'IMEI',
     'sim_number'          => 'Nr karty SIM',
+    'ble_id'              => 'BLE ID (iBeacon UUID)',
+    'major'               => 'Major (BLE)',
+    'minor'               => 'Minor (BLE)',
+    'mac_address'         => 'Adres MAC',
     'status'              => 'Status',
     'purchase_date'       => 'Data zakupu (RRRR-MM-DD)',
     'purchase_price'      => 'Cena zakupu',
@@ -331,7 +335,7 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         return $newModelId ?: null;
     };
 
-    $stmtInsert = $db->prepare("INSERT IGNORE INTO devices (model_id, serial_number, imei, sim_number, status, purchase_date, purchase_price, notes) VALUES (?,?,?,?,?,?,?,?)");
+    $stmtInsert = $db->prepare("INSERT IGNORE INTO devices (model_id, serial_number, imei, sim_number, ble_id, major, minor, mac_address, status, purchase_date, purchase_price, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
 
     foreach ($rows as $rowIdx => $row) {
         $get = function (string $field) use ($row, $mapping): string {
@@ -376,6 +380,10 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $purchaseDate  = $get('purchase_date') ?: null;
         $purchasePrice = str_replace(',', '.', $get('purchase_price')) ?: null;
+        $bleId         = $get('ble_id') ?: null;
+        $majorVal      = $get('major') !== '' ? (int)$get('major') : null;
+        $minorVal      = $get('minor') !== '' ? (int)$get('minor') : null;
+        $macAddress    = $get('mac_address') !== '' ? strtoupper($get('mac_address')) : null;
 
         try {
             $stmtInsert->execute([
@@ -383,6 +391,10 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $serialNumber,
                 $get('imei') ?: null,
                 $get('sim_number') ?: null,
+                $bleId,
+                $majorVal,
+                $minorVal,
+                $macAddress,
                 $status,
                 $purchaseDate,
                 $purchasePrice,
