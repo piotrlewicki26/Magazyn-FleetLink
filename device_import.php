@@ -126,15 +126,16 @@ function parseXlsx(string $path): array {
 // Target fields (device table columns the user can map to)
 // ──────────────────────────────────────────────────────────────
 $targetFields = [
-    'serial_number'  => 'Numer seryjny *',
-    'model'          => 'Model (nazwa)',
-    'manufacturer'   => 'Producent (nazwa)',
-    'imei'           => 'IMEI',
-    'sim_number'     => 'Nr karty SIM',
-    'status'         => 'Status',
-    'purchase_date'  => 'Data zakupu (RRRR-MM-DD)',
-    'purchase_price' => 'Cena zakupu',
-    'notes'          => 'Uwagi',
+    'serial_number'       => 'Numer seryjny *',
+    'model'               => 'Model (nazwa)',
+    'manufacturer'        => 'Producent (nazwa)',
+    'imei'                => 'IMEI',
+    'sim_number'          => 'Nr karty SIM',
+    'status'              => 'Status',
+    'purchase_date'       => 'Data zakupu (RRRR-MM-DD)',
+    'purchase_price'      => 'Cena zakupu',
+    'notes'               => 'Uwagi',
+    'vehicle_registration'=> 'Nr rejestracyjny pojazdu',
 ];
 
 // Load available models for manual override selector
@@ -144,6 +145,14 @@ $allModels = $db->query("
     JOIN manufacturers mf ON mf.id = m.manufacturer_id
     WHERE m.active = 1
     ORDER BY mf.name, m.name
+")->fetchAll();
+
+// Load active clients for client assignment selector
+$allClients = $db->query("
+    SELECT id, company_name, contact_name
+    FROM clients
+    WHERE active = 1
+    ORDER BY company_name, contact_name
 ")->fetchAll();
 
 // ──────────────────────────────────────────────────────────────
@@ -225,6 +234,10 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $overrideModelId = (int)($_POST['override_model_id'] ?? 0);
     $_SESSION['import_override_model_id'] = $overrideModelId > 0 ? $overrideModelId : 0;
 
+    // Client assignment (0 = no assignment)
+    $overrideClientId = (int)($_POST['override_client_id'] ?? 0);
+    $_SESSION['import_client_id'] = $overrideClientId > 0 ? $overrideClientId : 0;
+
     // serial_number column is always required as the unique device identifier
     if (!isset($mapping['serial_number'])) {
         $error = 'Kolumna "Numer seryjny" jest wymagana.';
@@ -249,6 +262,7 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $rows            = $_SESSION['import_rows']              ?? [];
     $mapping         = $_SESSION['import_mapping']           ?? [];
     $overrideModelId = (int)($_SESSION['import_override_model_id'] ?? 0);
+    $assignClientId  = (int)($_SESSION['import_client_id']   ?? 0);
 
     if (empty($rows) || !isset($mapping['serial_number'])) {
         flashError('Brak danych sesji. Zacznij od nowa.');
@@ -351,7 +365,12 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $status = $get('status');
-        if (!in_array($status, $validStatuses)) $status = 'nowy';
+        // If a client is assigned, force status to 'zamontowany' regardless of file value
+        if ($assignClientId > 0) {
+            $status = 'zamontowany';
+        } elseif (!in_array($status, $validStatuses)) {
+            $status = 'nowy';
+        }
 
         $purchaseDate  = $get('purchase_date') ?: null;
         $purchasePrice = str_replace(',', '.', $get('purchase_price')) ?: null;
@@ -368,7 +387,35 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $get('notes') ?: null,
             ]);
             if ($stmtInsert->rowCount() > 0) {
+                $deviceId = (int)$db->lastInsertId();
                 $imported++;
+
+                // If a client is assigned, create a vehicle + installation record
+                if ($assignClientId > 0 && $deviceId > 0) {
+                    $registration = strtoupper(preg_replace('/\s+/', '', $get('vehicle_registration')));
+                    if ($registration !== '') {
+                        // Find or create vehicle by registration
+                        $stmtFindVeh = $db->prepare("SELECT id FROM vehicles WHERE registration = ? LIMIT 1");
+                        $stmtFindVeh->execute([$registration]);
+                        $vehicleId = (int)($stmtFindVeh->fetchColumn() ?: 0);
+                        if (!$vehicleId) {
+                            $db->prepare("INSERT INTO vehicles (client_id, registration) VALUES (?, ?)")
+                               ->execute([$assignClientId, $registration]);
+                            $vehicleId = (int)$db->lastInsertId();
+                        } else {
+                            // Ensure vehicle is linked to this client if it has none
+                            $db->prepare("UPDATE vehicles SET client_id = ? WHERE id = ? AND client_id IS NULL")
+                               ->execute([$assignClientId, $vehicleId]);
+                        }
+
+                        if ($vehicleId) {
+                            $db->prepare("INSERT INTO installations
+                                (device_id, vehicle_id, client_id, installation_date, status)
+                                VALUES (?, ?, ?, CURDATE(), 'aktywna')")
+                               ->execute([$deviceId, $vehicleId, $assignClientId]);
+                        }
+                    }
+                }
             } else {
                 $errors[] = "Wiersz " . ($rowIdx + 2) . ": duplikat nr seryjnego '$serialNumber' — pominięto.";
                 $skipped++;
@@ -381,7 +428,8 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Clean up session
     @unlink($_SESSION['import_file'] ?? '');
-    unset($_SESSION['import_file'], $_SESSION['import_headers'], $_SESSION['import_rows'], $_SESSION['import_mapping'], $_SESSION['import_override_model_id']);
+    unset($_SESSION['import_file'], $_SESSION['import_headers'], $_SESSION['import_rows'],
+          $_SESSION['import_mapping'], $_SESSION['import_override_model_id'], $_SESSION['import_client_id']);
 
     $importStats = compact('imported', 'skipped', 'errors');
 }
@@ -397,6 +445,7 @@ $sessionHeaders      = $_SESSION['import_headers']          ?? [];
 $sessionRows         = $_SESSION['import_rows']              ?? [];
 $sessionMapping      = $_SESSION['import_mapping']           ?? [];
 $sessionOverrideId   = (int)($_SESSION['import_override_model_id'] ?? 0);
+$sessionClientId     = (int)($_SESSION['import_client_id']   ?? 0);
 ?>
 
 <div class="page-header">
@@ -524,7 +573,7 @@ elseif ($step === 2 && !empty($sessionHeaders)):
             <input type="hidden" name="step" value="2">
 
             <!-- Manual model override -->
-            <div class="mb-4 p-3 rounded border" style="background:rgba(13,110,253,.05)">
+            <div class="mb-3 p-3 rounded border" style="background:rgba(13,110,253,.05)">
                 <label class="form-label fw-semibold">
                     <i class="fas fa-tag me-1 text-primary"></i>Przypisz model dla wszystkich urządzeń (opcjonalne)
                 </label>
@@ -550,10 +599,35 @@ elseif ($step === 2 && !empty($sessionHeaders)):
                 </div>
             </div>
 
+            <!-- Client assignment -->
+            <div class="mb-4 p-3 rounded border" style="background:rgba(25,135,84,.05)">
+                <label class="form-label fw-semibold">
+                    <i class="fas fa-user-tie me-1 text-success"></i>Przypisz do klienta (opcjonalne)
+                </label>
+                <select name="override_client_id" id="overrideClientSelect" class="form-select form-select-sm">
+                    <option value="0">— nie przypisuj do klienta —</option>
+                    <?php foreach ($allClients as $cl): ?>
+                    <option value="<?= $cl['id'] ?>" <?= $sessionClientId === (int)$cl['id'] ? 'selected' : '' ?>>
+                        <?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text">
+                    Gdy wybierzesz klienta, status każdego urządzenia zostanie automatycznie ustawiony na
+                    <strong>zamontowany</strong> i zostanie utworzony montaż na pojazd z kolumny
+                    <em>Nr rejestracyjny pojazdu</em> (jeśli zmapowana).
+                </div>
+            </div>
+
             <div class="row g-3">
                 <?php foreach ($targetFields as $field => $label):
                     $dimWhenOverride = in_array($field, ['model', 'manufacturer']);
-                    $colClass = $dimWhenOverride ? 'col-md-6 model-col' : 'col-md-6';
+                    $dimWhenNoClient = ($field === 'vehicle_registration');
+                    $dimWhenClient   = ($field === 'status');
+                    $colClass = 'col-md-6';
+                    if ($dimWhenOverride)  $colClass .= ' model-col';
+                    if ($dimWhenNoClient)  $colClass .= ' reg-col';
+                    if ($dimWhenClient)    $colClass .= ' status-col';
                 ?>
                 <div class="<?= $colClass ?>">
                     <label class="form-label small fw-semibold <?= $field === 'serial_number' ? 'required-star' : '' ?>">
@@ -603,6 +677,25 @@ elseif ($step === 2 && !empty($sessionHeaders)):
     sel.addEventListener('change', toggle);
     toggle();
 })();
+// Dim vehicle_registration column when no client is selected;
+// dim status column when client IS selected (status forced to zamontowany)
+(function(){
+    const cliSel = document.getElementById('overrideClientSelect');
+    const regCols    = document.querySelectorAll('.reg-col');
+    const statusCols = document.querySelectorAll('.status-col');
+    function toggle(){
+        const hasClient = cliSel.value !== '0';
+        regCols.forEach(function(el){
+            el.style.opacity = hasClient ? '1' : '0.4';
+        });
+        statusCols.forEach(function(el){
+            el.style.opacity = hasClient ? '0.4' : '1';
+            el.querySelectorAll('select').forEach(function(s){ s.disabled = hasClient; });
+        });
+    }
+    cliSel.addEventListener('change', toggle);
+    toggle();
+})();
 </script>
 
 <?php
@@ -621,10 +714,26 @@ elseif ($step === 3 && !empty($sessionRows) && !empty($sessionMapping)):
             }
         }
     }
+    // Resolve client name for display
+    $assignClientLabel = null;
+    if ($sessionClientId > 0) {
+        foreach ($allClients as $cl) {
+            if ((int)$cl['id'] === $sessionClientId) {
+                $assignClientLabel = ($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name'];
+                break;
+            }
+        }
+    }
 ?>
 <?php if ($overrideModelLabel): ?>
 <div class="alert alert-info mb-3">
     <i class="fas fa-tag me-2"></i>Model dla wszystkich urządzeń: <strong><?= h($overrideModelLabel) ?></strong>
+</div>
+<?php endif; ?>
+<?php if ($assignClientLabel): ?>
+<div class="alert alert-success mb-3">
+    <i class="fas fa-user-tie me-2"></i>Klient: <strong><?= h($assignClientLabel) ?></strong>
+    — status urządzeń zostanie ustawiony na <strong>zamontowany</strong>, zostaną utworzone rekordy montażu.
 </div>
 <?php endif; ?>
 <div class="card mb-3">
