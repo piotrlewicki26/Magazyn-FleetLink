@@ -251,6 +251,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(getBaseUrl() . 'installations.php');
 
+    } elseif ($postAction === 'change_status') {
+        $csId     = (int)($_POST['id'] ?? 0);
+        $newStatus = sanitize($_POST['new_status'] ?? '');
+        $allowed   = ['aktywna', 'zakonczona', 'anulowana', 'archiwum'];
+        if (!$csId || !in_array($newStatus, $allowed)) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'installations.php'); }
+        if ($newStatus === 'aktywna') {
+            // Check if device already has another active installation
+            $devIdForCheck = (int)$db->query("SELECT device_id FROM installations WHERE id=$csId")->fetchColumn();
+            $conflict = $db->prepare("SELECT id FROM installations WHERE device_id=? AND status='aktywna' AND id<>?");
+            $conflict->execute([$devIdForCheck, $csId]);
+            if ($conflict->fetch()) { flashError('Urządzenie ma już aktywną instalację.'); redirect(getBaseUrl() . 'installations.php'); }
+        }
+        $db->prepare("UPDATE installations SET status=? WHERE id=?")->execute([$newStatus, $csId]);
+        flashSuccess('Status montażu zmieniony.');
+        redirect(getBaseUrl() . 'installations.php');
+
+    } elseif ($postAction === 'change_batch_status') {
+        $cbBatchId  = (int)($_POST['batch_id'] ?? 0);
+        $cbNewStatus = sanitize($_POST['new_status'] ?? '');
+        $cbAllowed   = ['zakonczona', 'anulowana', 'archiwum'];
+        if (!$cbBatchId || !in_array($cbNewStatus, $cbAllowed)) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'installations.php'); }
+        // Update all installations sharing this batch_id
+        $db->prepare("UPDATE installations SET status=? WHERE batch_id=?")->execute([$cbNewStatus, $cbBatchId]);
+        flashSuccess('Status grupy montaży zmieniony.');
+        redirect(getBaseUrl() . 'installations.php');
+
+    } elseif ($postAction === 'edit_batch') {
+        $ebBatchId   = (int)($_POST['batch_id'] ?? 0);
+        $ebDate      = sanitize($_POST['installation_date'] ?? '');
+        $ebTechId    = (int)($_POST['technician_id'] ?? 0) ?: null;
+        $ebClientId  = (int)($_POST['client_id'] ?? 0) ?: null;
+        $ebNotes     = sanitize($_POST['notes'] ?? '');
+        if (!$ebBatchId || !$ebDate) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'installations.php'); }
+        $db->prepare("UPDATE installations SET installation_date=?, technician_id=?, client_id=?, notes=? WHERE batch_id=?")
+           ->execute([$ebDate, $ebTechId, $ebClientId, $ebNotes ?: null, $ebBatchId]);
+        flashSuccess('Zlecenie grupowe zaktualizowane.');
+        redirect(getBaseUrl() . 'installations.php');
+
     } elseif ($postAction === 'delete') {
         if (!isAdmin()) { flashError('Kasowanie zleceń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'installations.php'); }
         $delId = (int)($_POST['id'] ?? 0);
@@ -537,6 +575,7 @@ if ($action === 'list') {
     $search = sanitize($_GET['search'] ?? '');
     $sql = "
         SELECT i.id, i.device_id, i.batch_id, i.installation_date, i.uninstallation_date, i.status,
+               i.client_id, i.technician_id,
                d.serial_number, m.name as model_name, mf.name as manufacturer_name,
                v.registration, v.make,
                c.contact_name, c.company_name,
@@ -856,30 +895,62 @@ include __DIR__ . '/includes/header.php';
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
-                <tr><th>Data montażu</th><th>Urządzenie / Zlecenie</th><th>Pojazd</th><th>Klient</th><th>Technik</th><th>Status</th><th>Akcje</th></tr>
+                <tr>
+                    <th style="width:90px">Data montażu</th>
+                    <th style="width:80px">Nr zlecenia</th>
+                    <th>Urządzenie / Zlecenie</th>
+                    <th style="max-width:120px">Pojazd</th>
+                    <th>Klient</th>
+                    <th>Technik</th>
+                    <th>Status</th>
+                    <th class="text-nowrap">Akcje</th>
+                </tr>
             </thead>
             <tbody>
                 <?php foreach ($installationGroups as $gi => $group): ?>
                 <?php $first = $group['items'][0]; ?>
+                <?php $batchId = $first['batch_id']; ?>
                 <?php if ($group['is_batch'] && count($group['items']) > 1): ?>
                 <!-- Batch row -->
                 <tr class="table-info batch-header-row" data-batch-toggle="batch-<?= $gi ?>">
                     <td><?= formatDate($first['installation_date']) ?></td>
+                    <td class="fw-bold text-primary">ZL-G<?= $batchId ?></td>
                     <td>
                         <span class="badge bg-primary me-1"><?= count($group['items']) ?> urządzeń</span>
                         <span class="text-muted small">Zlecenie grupowe</span>
-                        <div class="small text-muted mt-1">
+                        <div class="small text-muted mt-1" style="max-width:200px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
                             <?= h(implode(', ', array_column($group['items'], 'serial_number'))) ?>
                         </div>
                     </td>
-                    <td>
+                    <td style="max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
                         <?php $regs = array_unique(array_column($group['items'], 'registration')); ?>
-                        <?= h(implode(', ', $regs)) ?>
+                        <span title="<?= h(implode(', ', $regs)) ?>"><?= h(implode(', ', $regs)) ?></span>
                     </td>
                     <td><?= h($first['company_name'] ?: $first['contact_name'] ?? '—') ?></td>
                     <td><?= h($first['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($first['status'], 'installation') ?></td>
-                    <td>
+                    <td class="text-nowrap">
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showBatchPreview(<?= htmlspecialchars(json_encode([
+                                    'batch_id'   => $batchId,
+                                    'date'       => $first['installation_date'],
+                                    'client'     => $first['company_name'] ?: $first['contact_name'] ?? '',
+                                    'technician' => $first['technician_name'] ?? '',
+                                    'status'     => $first['status'],
+                                    'items'      => array_map(fn($it) => [
+                                        'id'           => $it['id'],
+                                        'serial_number'=> $it['serial_number'],
+                                        'model'        => $it['manufacturer_name'].' '.$it['model_name'],
+                                        'registration' => $it['registration'],
+                                    ], $group['items']),
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd zlecenia grupowego"><i class="fas fa-eye"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action"
+                                onclick="showBatchEditModal(<?= (int)$batchId ?>, '<?= h($first['installation_date']) ?>', <?= (int)($first['client_id'] ?? 0) ?>, <?= (int)($first['technician_id'] ?? 0) ?>)"
+                                title="Edytuj zlecenie grupowe"><i class="fas fa-edit"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
+                                onclick="showBatchStatusModal(<?= (int)$batchId ?>)"
+                                title="Zmień status grupy"><i class="fas fa-exchange-alt"></i></button>
                         <a href="installations.php?action=print_batch&ids=<?= implode(',', $group['ids']) ?>"
                            class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie montażu"><i class="fas fa-print"></i></a>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
@@ -904,15 +975,16 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($group['items'] as $inst): ?>
                 <tr class="batch-child-row d-none" data-batch-group="batch-<?= $gi ?>">
                     <td class="ps-4 text-muted small"><?= formatDate($inst['installation_date']) ?></td>
-                    <td class="ps-4">
+                    <td class="text-muted small">#<?= $inst['id'] ?></td>
+                    <td class="ps-4" style="max-width:160px;overflow:hidden">
                         <a href="devices.php?action=view&id=<?= $inst['device_id'] ?? '' ?>"><?= h($inst['serial_number']) ?></a>
                         <br><small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?></small>
                     </td>
-                    <td><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
+                    <td style="max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
                     <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
                     <td><?= h($inst['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
-                    <td>
+                    <td class="text-nowrap">
                         <button type="button" class="btn btn-sm btn-outline-info btn-action"
                                 onclick="showInstPreview(<?= htmlspecialchars(json_encode([
                                     'id'                 => $inst['id'],
@@ -930,6 +1002,10 @@ include __DIR__ . '/includes/header.php';
                                 title="Podgląd montażu">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <a href="installations.php?action=edit&id=<?= $inst['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
+                                onclick="showStatusModal(<?= $inst['id'] ?>, '<?= $inst['status'] ?>')"
+                                title="Zmień status"><i class="fas fa-exchange-alt"></i></button>
                         <?php if ($inst['status'] === 'aktywna'): ?>
                         <button type="button" class="btn btn-sm btn-outline-warning btn-action"
                                 onclick="showUninstallModal(<?= $inst['id'] ?>, <?= $inst['device_id'] ?? 0 ?>, '<?= h($inst['serial_number']) ?>')">
@@ -963,15 +1039,16 @@ include __DIR__ . '/includes/header.php';
                 <?php $inst = $first; ?>
                 <tr>
                     <td><?= formatDate($inst['installation_date']) ?></td>
-                    <td>
+                    <td class="fw-bold text-secondary">ZL-<?= $inst['id'] ?></td>
+                    <td style="max-width:160px;overflow:hidden">
                         <a href="devices.php?action=view&id=<?= $inst['device_id'] ?? '' ?>"><?= h($inst['serial_number']) ?></a>
                         <br><small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?></small>
                     </td>
-                    <td><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
+                    <td style="max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
                     <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
                     <td><?= h($inst['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
-                    <td>
+                    <td class="text-nowrap">
                         <button type="button" class="btn btn-sm btn-outline-info btn-action"
                                 onclick="showInstPreview(<?= htmlspecialchars(json_encode([
                                     'id'                 => $inst['id'],
@@ -989,6 +1066,10 @@ include __DIR__ . '/includes/header.php';
                                 title="Podgląd montażu">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <a href="installations.php?action=edit&id=<?= $inst['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
+                                onclick="showStatusModal(<?= $inst['id'] ?>, '<?= $inst['status'] ?>')"
+                                title="Zmień status"><i class="fas fa-exchange-alt"></i></button>
                         <?php if ($inst['status'] === 'aktywna'): ?>
                         <button type="button" class="btn btn-sm btn-outline-warning btn-action"
                                 onclick="showUninstallModal(<?= $inst['id'] ?>, <?= $inst['device_id'] ?? 0 ?>, '<?= h($inst['serial_number']) ?>')">
@@ -1018,7 +1099,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endif; ?>
                 <?php endforeach; ?>
-                <?php if (empty($installationGroups)): ?><tr><td colspan="7" class="text-center text-muted p-3">Brak montaży.</td></tr><?php endif; ?>
+                <?php if (empty($installationGroups)): ?><tr><td colspan="8" class="text-center text-muted p-3">Brak montaży.</td></tr><?php endif; ?>
             </tbody>
         </table>
     </div>
@@ -1081,6 +1162,154 @@ function showInstPreview(data) {
         </div>
     </div>
 </div>
+
+<!-- Modal: Zmień status pojedynczego montażu -->
+<div class="modal fade" id="statusModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title"><i class="fas fa-exchange-alt me-2 text-secondary"></i>Zmień status montażu</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="change_status">
+                <input type="hidden" name="id" id="statusModalId">
+                <div class="modal-body">
+                    <label class="form-label">Nowy status</label>
+                    <select name="new_status" id="statusModalSelect" class="form-select">
+                        <option value="aktywna">Aktywna</option>
+                        <option value="zakonczona">Zakończona</option>
+                        <option value="anulowana">Anulowana</option>
+                        <option value="archiwum">Archiwum</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Zapisz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Zmień status zlecenia grupowego -->
+<div class="modal fade" id="batchStatusModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title"><i class="fas fa-exchange-alt me-2 text-secondary"></i>Zmień status grupy</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="change_batch_status">
+                <input type="hidden" name="batch_id" id="batchStatusModalBatchId">
+                <div class="modal-body">
+                    <label class="form-label">Nowy status (dla wszystkich w grupie)</label>
+                    <select name="new_status" class="form-select">
+                        <option value="zakonczona">Zakończona</option>
+                        <option value="anulowana">Anulowana</option>
+                        <option value="archiwum">Archiwum</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Zapisz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Podgląd zlecenia grupowego -->
+<div class="modal fade" id="batchPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title"><i class="fas fa-layer-group me-2 text-primary"></i>Podgląd zlecenia grupowego</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body" id="batchPreviewBody"></div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button></div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Edytuj zlecenie grupowe -->
+<div class="modal fade" id="batchEditModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title"><i class="fas fa-edit me-2 text-primary"></i>Edytuj zlecenie grupowe</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="edit_batch">
+                <input type="hidden" name="batch_id" id="batchEditBatchId">
+                <div class="modal-body row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label required-star">Data montażu</label>
+                        <input type="date" name="installation_date" id="batchEditDate" class="form-control" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Technik</label>
+                        <select name="technician_id" id="batchEditTechnician" class="form-select">
+                            <option value="">— aktualny użytkownik —</option>
+                            <?php foreach ($users as $u): ?>
+                            <option value="<?= $u['id'] ?>"><?= h($u['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Klient</label>
+                        <select name="client_id" id="batchEditClient" class="form-select">
+                            <option value="">— brak przypisania —</option>
+                            <?php foreach ($clients as $c): ?>
+                            <option value="<?= $c['id'] ?>"><?= h(($c['company_name'] ? $c['company_name'] . ' — ' : '') . $c['contact_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Uwagi</label>
+                        <textarea name="notes" id="batchEditNotes" class="form-control" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Zapisz zmiany</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function showStatusModal(id, currentStatus) {
+    document.getElementById('statusModalId').value = id;
+    document.getElementById('statusModalSelect').value = currentStatus;
+    new bootstrap.Modal(document.getElementById('statusModal')).show();
+}
+function showBatchStatusModal(batchId) {
+    document.getElementById('batchStatusModalBatchId').value = batchId;
+    new bootstrap.Modal(document.getElementById('batchStatusModal')).show();
+}
+function showBatchPreview(data) {
+    var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
+    var rows = data.items.map(function(it) {
+        return '<tr><td><strong>' + it.serial_number + '</strong></td><td class="text-muted">' + it.model + '</td><td>' + it.registration + '</td></tr>';
+    }).join('');
+    document.getElementById('batchPreviewBody').innerHTML =
+        '<table class="table table-sm table-borderless mb-2">' +
+        '<tr><th class="text-muted" style="width:35%">Nr zlecenia grupowego</th><td class="fw-bold text-primary">ZL-G' + data.batch_id + '</td></tr>' +
+        '<tr><th class="text-muted">Data montażu</th><td>' + formatDate(data.date) + '</td></tr>' +
+        '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
+        '<tr><th class="text-muted">Technik</th><td>' + (data.technician || '—') + '</td></tr>' +
+        '</table>' +
+        '<hr><strong>Urządzenia (' + data.items.length + '):</strong>' +
+        '<table class="table table-sm mt-2"><thead><tr><th>Nr seryjny</th><th>Model</th><th>Rejestracja</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    new bootstrap.Modal(document.getElementById('batchPreviewModal')).show();
+}
+function showBatchEditModal(batchId, date, clientId, technicianId) {
+    document.getElementById('batchEditBatchId').value = batchId;
+    document.getElementById('batchEditDate').value = date;
+    var cSel = document.getElementById('batchEditClient');
+    for (var i=0; i<cSel.options.length; i++) { if (cSel.options[i].value == clientId) { cSel.selectedIndex = i; break; } }
+    var tSel = document.getElementById('batchEditTechnician');
+    for (var i=0; i<tSel.options.length; i++) { if (tSel.options[i].value == technicianId) { tSel.selectedIndex = i; break; } }
+    document.getElementById('batchEditNotes').value = '';
+    new bootstrap.Modal(document.getElementById('batchEditModal')).show();
+}
+</script>
 
 </div><!-- /pane-montaze -->
 <div class="tab-pane fade" id="pane-protokoly" role="tabpanel">
@@ -1154,24 +1383,45 @@ function showInstPreview(data) {
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
-                <tr><th>Data montażu</th><th>Urządzenie / Zlecenie</th><th>Pojazd</th><th>Klient</th><th>Technik</th><th>Status</th><th>Akcje</th></tr>
+                <tr>
+                    <th style="width:90px">Data montażu</th>
+                    <th style="width:80px">Nr zlecenia</th>
+                    <th>Urządzenie / Zlecenie</th>
+                    <th style="max-width:120px">Pojazd</th>
+                    <th>Klient</th>
+                    <th>Technik</th>
+                    <th>Status</th>
+                    <th class="text-nowrap">Akcje</th>
+                </tr>
             </thead>
             <tbody>
                 <?php foreach ($myInstallationGroups as $gi => $group): ?>
                 <?php $first = $group['items'][0]; ?>
+                <?php $batchId = $first['batch_id']; ?>
                 <?php if ($group['is_batch'] && count($group['items']) > 1): ?>
                 <tr class="table-info batch-header-row" data-batch-toggle="mybatch-<?= $gi ?>">
                     <td><?= formatDate($first['installation_date']) ?></td>
+                    <td class="fw-bold text-primary">ZL-G<?= $batchId ?></td>
                     <td>
                         <span class="badge bg-primary me-1"><?= count($group['items']) ?> urządzeń</span>
                         <span class="text-muted small">Zlecenie grupowe</span>
-                        <div class="small text-muted mt-1"><?= h(implode(', ', array_column($group['items'], 'serial_number'))) ?></div>
+                        <div class="small text-muted mt-1" style="max-width:200px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"><?= h(implode(', ', array_column($group['items'], 'serial_number'))) ?></div>
                     </td>
-                    <td><?= h(implode(', ', array_unique(array_column($group['items'], 'registration')))) ?></td>
+                    <td style="max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"><?= h(implode(', ', array_unique(array_column($group['items'], 'registration')))) ?></td>
                     <td><?= h($first['company_name'] ?: $first['contact_name'] ?? '—') ?></td>
                     <td><?= h($first['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($first['status'], 'installation') ?></td>
-                    <td>
+                    <td class="text-nowrap">
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="showBatchPreview(<?= htmlspecialchars(json_encode([
+                                    'batch_id'   => $batchId,
+                                    'date'       => $first['installation_date'],
+                                    'client'     => $first['company_name'] ?: $first['contact_name'] ?? '',
+                                    'technician' => $first['technician_name'] ?? '',
+                                    'status'     => $first['status'],
+                                    'items'      => array_map(fn($it) => ['id'=>$it['id'],'serial_number'=>$it['serial_number'],'model'=>$it['manufacturer_name'].' '.$it['model_name'],'registration'=>$it['registration']], $group['items']),
+                                ]), ENT_QUOTES) ?>)"
+                                title="Podgląd grupowy"><i class="fas fa-eye"></i></button>
                         <a href="installations.php?action=print_batch&ids=<?= implode(',', $group['ids']) ?>"
                            class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie"><i class="fas fa-print"></i></a>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
@@ -1183,15 +1433,16 @@ function showInstPreview(data) {
                 <?php foreach ($group['items'] as $inst): ?>
                 <tr class="batch-child-row d-none" data-batch-group="mybatch-<?= $gi ?>">
                     <td class="ps-4 text-muted small"><?= formatDate($inst['installation_date']) ?></td>
-                    <td class="ps-4">
+                    <td class="text-muted small">#<?= $inst['id'] ?></td>
+                    <td class="ps-4" style="max-width:160px;overflow:hidden">
                         <a href="devices.php?action=view&id=<?= $inst['device_id'] ?? '' ?>"><?= h($inst['serial_number']) ?></a>
                         <br><small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?></small>
                     </td>
-                    <td><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
+                    <td style="max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
                     <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
                     <td><?= h($inst['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
-                    <td>
+                    <td class="text-nowrap">
                         <button type="button" class="btn btn-sm btn-outline-info btn-action"
                                 onclick="showInstPreview(<?= htmlspecialchars(json_encode(['id'=>$inst['id'],'status'=>$inst['status'],'installation_date'=>$inst['installation_date'],'uninstallation_date'=>$inst['uninstallation_date']??null,'serial_number'=>$inst['serial_number'],'manufacturer_name'=>$inst['manufacturer_name'],'model_name'=>$inst['model_name'],'registration'=>$inst['registration'],'make'=>$inst['make'],'client'=>$inst['company_name']?:$inst['contact_name']??'','technician_name'=>$inst['technician_name']??'']),ENT_QUOTES) ?>)"
                                 title="Podgląd"><i class="fas fa-eye"></i></button>
@@ -1209,15 +1460,16 @@ function showInstPreview(data) {
                 <?php $inst = $first; ?>
                 <tr>
                     <td><?= formatDate($inst['installation_date']) ?></td>
-                    <td>
+                    <td class="fw-bold text-secondary">ZL-<?= $inst['id'] ?></td>
+                    <td style="max-width:160px;overflow:hidden">
                         <a href="devices.php?action=view&id=<?= $inst['device_id'] ?? '' ?>"><?= h($inst['serial_number']) ?></a>
                         <br><small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?></small>
                     </td>
-                    <td><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
+                    <td style="max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"><?= h($inst['registration']) ?><br><small class="text-muted"><?= h($inst['make']) ?></small></td>
                     <td><?= h($inst['company_name'] ?: $inst['contact_name'] ?? '—') ?></td>
                     <td><?= h($inst['technician_name'] ?? '—') ?></td>
                     <td><?= getStatusBadge($inst['status'], 'installation') ?></td>
-                    <td>
+                    <td class="text-nowrap">
                         <button type="button" class="btn btn-sm btn-outline-info btn-action"
                                 onclick="showInstPreview(<?= htmlspecialchars(json_encode(['id'=>$inst['id'],'status'=>$inst['status'],'installation_date'=>$inst['installation_date'],'uninstallation_date'=>$inst['uninstallation_date']??null,'serial_number'=>$inst['serial_number'],'manufacturer_name'=>$inst['manufacturer_name'],'model_name'=>$inst['model_name'],'registration'=>$inst['registration'],'make'=>$inst['make'],'client'=>$inst['company_name']?:$inst['contact_name']??'','technician_name'=>$inst['technician_name']??'']),ENT_QUOTES) ?>)"
                                 title="Podgląd"><i class="fas fa-eye"></i></button>
@@ -1232,7 +1484,7 @@ function showInstPreview(data) {
                 </tr>
                 <?php endif; ?>
                 <?php endforeach; ?>
-                <?php if (empty($myInstallationGroups)): ?><tr><td colspan="7" class="text-center text-muted p-3">Brak montaży przypisanych do Ciebie.</td></tr><?php endif; ?>
+                <?php if (empty($myInstallationGroups)): ?><tr><td colspan="8" class="text-center text-muted p-3">Brak montaży przypisanych do Ciebie.</td></tr><?php endif; ?>
             </tbody>
         </table>
     </div>

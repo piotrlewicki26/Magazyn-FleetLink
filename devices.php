@@ -528,6 +528,7 @@ if ($action === 'list') {
 
     $sql = "
         SELECT d.id, d.serial_number, d.imei, d.sim_number, d.status, d.purchase_date,
+               d.sale_date, d.notes,
                d.purchase_price,
                m.name as model_name, mf.name as manufacturer_name,
                v.registration as vehicle_registration,
@@ -721,6 +722,8 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'client'               => $d['company_name'] ?: ($d['contact_name'] ?? ''),
                             'installation_date'    => $d['installation_date'] ?? '',
                             'purchase_date'        => $d['purchase_date'] ?? '',
+                            'sale_date'            => $d['sale_date'] ?? '',
+                            'notes'                => $d['notes'] ?? '',
                         ]), ENT_QUOTES) ?>); return false;"><?= h($d['serial_number']) ?></a>
                     </td>
                     <td><?= h($d['imei'] ?? '—') ?></td>
@@ -752,6 +755,8 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                     'client'               => $d['company_name'] ?: ($d['contact_name'] ?? ''),
                                     'installation_date'    => $d['installation_date'] ?? '',
                                     'purchase_date'        => $d['purchase_date'] ?? '',
+                                    'sale_date'            => $d['sale_date'] ?? '',
+                                    'notes'                => $d['notes'] ?? '',
                                 ]), ENT_QUOTES) ?>)"
                                 title="Podgląd"><i class="fas fa-eye"></i></button>
                         <?php if (isAdmin()): ?>
@@ -839,6 +844,8 @@ function showDevicePreview(data) {
         '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
         '<tr><th class="text-muted">Data montażu</th><td>' + formatDate(data.installation_date) + '</td></tr>' +
         '<tr><th class="text-muted">Data zakupu</th><td>' + formatDate(data.purchase_date) + '</td></tr>' +
+        '<tr><th class="text-muted">Data sprzedaży</th><td>' + formatDate(data.sale_date) + '</td></tr>' +
+        (data.notes ? '<tr><th class="text-muted">Uwagi</th><td style="white-space:pre-wrap">' + data.notes + '</td></tr>' : '') +
         '</table>';
 
     document.getElementById('devicePreviewViewBtn').href = 'devices.php?action=view&id=' + data.id;
