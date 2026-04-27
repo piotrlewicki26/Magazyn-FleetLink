@@ -282,6 +282,8 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa'];
     $imported = 0; $skipped = 0; $errors = [];
+    $importedInstallationIds = []; // track IDs for batch grouping
+    $currentUser = getCurrentUser();
 
     /**
      * Resolve (or auto-create) a manufacturer+model pair, caching results
@@ -410,9 +412,10 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         if ($vehicleId) {
                             $db->prepare("INSERT INTO installations
-                                (device_id, vehicle_id, client_id, installation_date, status)
-                                VALUES (?, ?, ?, CURDATE(), 'aktywna')")
-                               ->execute([$deviceId, $vehicleId, $assignClientId]);
+                                (device_id, vehicle_id, client_id, technician_id, installation_date, status)
+                                VALUES (?, ?, ?, ?, CURDATE(), 'zakonczona')")
+                               ->execute([$deviceId, $vehicleId, $assignClientId, $currentUser['id']]);
+                            $importedInstallationIds[] = (int)$db->lastInsertId();
                         }
                     }
                 }
@@ -426,12 +429,21 @@ if ($step === 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // If multiple installations were created for this client import, group them as a batch
+    if (count($importedInstallationIds) > 1) {
+        $batchId = $importedInstallationIds[0];
+        $ph = implode(',', array_fill(0, count($importedInstallationIds), '?'));
+        $db->prepare("UPDATE installations SET batch_id=? WHERE id IN ($ph)")
+           ->execute(array_merge([$batchId], $importedInstallationIds));
+    }
+
     // Clean up session
     @unlink($_SESSION['import_file'] ?? '');
     unset($_SESSION['import_file'], $_SESSION['import_headers'], $_SESSION['import_rows'],
           $_SESSION['import_mapping'], $_SESSION['import_override_model_id'], $_SESSION['import_client_id']);
 
-    $importStats = compact('imported', 'skipped', 'errors');
+    $installationCount = count($importedInstallationIds);
+    $importStats = compact('imported', 'skipped', 'errors', 'installationCount');
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -500,6 +512,17 @@ if ($importStats !== null):
                 </div>
             </div>
         </div>
+        <?php if (($importStats['installationCount'] ?? 0) > 0): ?>
+        <div class="alert alert-success py-2 small">
+            <i class="fas fa-wrench me-1"></i>
+            Utworzono <strong><?= (int)$importStats['installationCount'] ?></strong>
+            <?php if (($importStats['installationCount'] ?? 0) > 1): ?>
+            montaży zgrupowanych w 1 partię (batch). Status: <strong>Zakończona</strong>.
+            <?php else: ?>
+            montaż. Status: <strong>Zakończona</strong>.
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
         <?php if (!empty($importStats['errors'])): ?>
         <details>
             <summary class="text-danger fw-semibold mb-2">Szczegóły błędów (<?= count($importStats['errors']) ?>)</summary>
@@ -614,8 +637,9 @@ elseif ($step === 2 && !empty($sessionHeaders)):
                 </select>
                 <div class="form-text">
                     Gdy wybierzesz klienta, status każdego urządzenia zostanie automatycznie ustawiony na
-                    <strong>zamontowany</strong> i zostanie utworzony montaż na pojazd z kolumny
-                    <em>Nr rejestracyjny pojazdu</em> (jeśli zmapowana).
+                    <strong>zamontowany</strong>. Zostanie utworzony montaż o statusie <strong>Zakończona</strong>
+                    (Technik: aktualnie zalogowany użytkownik). Przy imporcie wielu urządzeń montaże zostaną zgrupowane
+                    w jedną partię (batch).
                 </div>
             </div>
 
@@ -733,7 +757,9 @@ elseif ($step === 3 && !empty($sessionRows) && !empty($sessionMapping)):
 <?php if ($assignClientLabel): ?>
 <div class="alert alert-success mb-3">
     <i class="fas fa-user-tie me-2"></i>Klient: <strong><?= h($assignClientLabel) ?></strong>
-    — status urządzeń zostanie ustawiony na <strong>zamontowany</strong>, zostaną utworzone rekordy montażu.
+    — status urządzeń zostanie ustawiony na <strong>zamontowany</strong>;
+    zostanie utworzony montaż (status: <strong>Zakończona</strong>)<?= count($sessionRows) > 1 ? ' — wszystkie urządzenia w 1 partii (batch)' : '' ?>.
+    Technik: <strong><?= h(getCurrentUser()['name'] ?? '—') ?></strong>.
 </div>
 <?php endif; ?>
 <div class="card mb-3">
