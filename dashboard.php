@@ -52,6 +52,7 @@ $recentInstallationRows = $db->query("
     JOIN manufacturers mf ON mf.id = m.manufacturer_id
     JOIN vehicles v ON v.id = i.vehicle_id
     LEFT JOIN clients c ON c.id = i.client_id
+    WHERE i.status = 'aktywna'
     ORDER BY i.created_at DESC
     LIMIT $dashInstallationsFetchLimit
 ")->fetchAll();
