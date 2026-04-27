@@ -1402,9 +1402,10 @@ function openSimEdit(deviceId, currentSim) {
         $timeline = [];
 
         // 1. Device added (purchase_date)
+        $addedDate = !empty($device['purchase_date']) ? $device['purchase_date'] : date('Y-m-d');
         $timeline[] = [
-            'date'    => $device['purchase_date'] ?? date('Y-m-d'),
-            'sort'    => $device['purchase_date'] ?? '0000-00-00',
+            'date'    => $addedDate,
+            'sort'    => $addedDate,
             'type'    => 'dodanie',
             'icon'    => 'fas fa-plus-circle text-primary',
             'label'   => 'Urządzenie dodane do magazynu',
@@ -1443,15 +1444,17 @@ function openSimEdit(deviceId, currentSim) {
             }
         }
 
-        // 3. Services
+        // 3. Services – include all (completed shown with actual date, planned shown with indicator)
         foreach ($deviceServices as $svc) {
-            $dateToUse = $svc['completed_date'] ?: $svc['planned_date'];
+            $isCompleted  = !empty($svc['completed_date']);
+            $dateToUse    = $isCompleted ? $svc['completed_date'] : $svc['planned_date'];
+            $planBadge    = !$isCompleted ? ' <span class="badge bg-warning text-dark small">Zaplanowany</span>' : '';
             $timeline[] = [
                 'date'   => $dateToUse,
-                'sort'   => $dateToUse,
+                'sort'   => $dateToUse ?? '9999-12-31', // planned future services sort last
                 'type'   => 'serwis',
-                'icon'   => 'fas fa-wrench text-danger',
-                'label'  => 'Serwis: ' . h(ucfirst($svc['type'])),
+                'icon'   => 'fas fa-wrench ' . ($isCompleted ? 'text-danger' : 'text-warning'),
+                'label'  => 'Serwis: ' . h(ucfirst($svc['type'])) . $planBadge,
                 'detail' => ($svc['cost'] > 0 ? 'Koszt: ' . formatMoney($svc['cost']) . ' | ' : '') . getStatusBadge($svc['status'], 'service'),
                 'link'   => 'services.php?action=view&id=' . $svc['id'],
                 'badge'  => '<span class="badge bg-danger">Serwis</span>',
@@ -1472,7 +1475,7 @@ function openSimEdit(deviceId, currentSim) {
             if ($h_row['protocol_number']) {
                 $detail .= ($detail ? ' | ' : '') . 'Protokół: <a href="protocols.php?action=view&id=' . (int)$h_row['protocol_id'] . '">' . h($h_row['protocol_number']) . '</a>';
             }
-            $dateToUse = $h_row['protocol_date'] ?? substr($h_row['created_at'], 0, 10);
+            $dateToUse = !empty($h_row['protocol_date']) ? $h_row['protocol_date'] : date('Y-m-d', strtotime($h_row['created_at']));
             $timeline[] = [
                 'date'   => $dateToUse,
                 'sort'   => $dateToUse,
