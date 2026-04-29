@@ -767,10 +767,12 @@ include __DIR__ . '/includes/header.php';
                         $firstOrd = $groupOrders[0];
                         $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
+                        $groupRowId = 'group-rows-' . md5($gKey);
                 ?>
-                <tr class="table-light fw-semibold">
+                <tr class="table-light fw-semibold" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')" data-group-id="<?= h($groupRowId) ?>">
                     <td colspan="2" class="text-muted small">
                         <i class="fas fa-layer-group me-1"></i>Grupa: <?= formatDate($firstOrd['date']) ?>
+                        <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($groupRowId) ?>" style="font-size:.75rem"></i>
                     </td>
                     <td><?= h($clientLabel) ?></td>
                     <td colspan="2" class="text-muted small"><?= count($groupOrders) ?> zlecenia</td>
@@ -782,7 +784,7 @@ include __DIR__ . '/includes/header.php';
                     endif;
                     foreach ($groupOrders as $ord):
                 ?>
-                <tr class="<?= $isGroup ? 'ps-3' : '' ?>">
+                <tr class="<?= $isGroup ? 'ps-3 group-child-row d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($groupRowId) . '"' : '' ?>>
                     <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
                         <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
@@ -1818,6 +1820,19 @@ function openOrderModal(orderId, orderNumber) {
         .then(function(r) { return r.text(); })
         .then(function(html) { document.getElementById('orderPreviewBody').innerHTML = html; })
         .catch(function() { document.getElementById('orderPreviewBody').innerHTML = '<p class="text-danger p-3">Błąd ładowania danych zlecenia.</p>'; });
+}
+
+function toggleGroupRows(groupId) {
+    var rows = document.querySelectorAll('tr[data-group="' + groupId + '"]');
+    var icon = document.getElementById('icon-' + groupId);
+    var isHidden = rows.length > 0 && rows[0].classList.contains('d-none');
+    rows.forEach(function(row) {
+        if (isHidden) { row.classList.remove('d-none'); } else { row.classList.add('d-none'); }
+    });
+    if (icon) {
+        if (isHidden) { icon.classList.remove('fa-chevron-down'); icon.classList.add('fa-chevron-up'); }
+        else          { icon.classList.remove('fa-chevron-up');   icon.classList.add('fa-chevron-down'); }
+    }
 }
 </script>
 

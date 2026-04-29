@@ -60,6 +60,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(getBaseUrl() . 'clients.php');
 
+    } elseif ($postAction === 'remove_device_from_client') {
+        if (!isAdmin()) { flashError('Brak uprawnień. Tylko Administrator może odłączać urządzenia.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . (int)($_POST['client_id'] ?? 0)); }
+        $installationId = (int)($_POST['installation_id'] ?? 0);
+        $clientId       = (int)($_POST['client_id'] ?? 0);
+        if (!$installationId || !$clientId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId); }
+        $instChk = $db->prepare("SELECT * FROM installations WHERE id=? AND client_id=?");
+        $instChk->execute([$installationId, $clientId]);
+        $instRow = $instChk->fetch();
+        if (!$instRow) { flashError('Instalacja nie istnieje lub nie należy do tego klienta.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId); }
+        $currentUser = getCurrentUser();
+        $removalNote = '[Odłączono od klienta przez: ' . $currentUser['name'] . ' dnia ' . date('d.m.Y H:i') . ']';
+        $db->beginTransaction();
+        try {
+            // Mark installation as inactive
+            $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=CURDATE(), notes=CONCAT(COALESCE(notes,''), IF(notes IS NULL OR notes='', '', '\n'), ?) WHERE id=?")
+               ->execute([$removalNote, $installationId]);
+            // Update device status back to sprawny
+            $db->prepare("UPDATE devices SET status='sprawny' WHERE id=? AND status='zamontowany'")->execute([$instRow['device_id']]);
+            // Record in device_history
+            $db->prepare("INSERT INTO device_history (device_id, event_type) VALUES (?, 'odlaczono_od_klienta')")
+               ->execute([$instRow['device_id']]);
+            $db->commit();
+            flashSuccess('Urządzenie zostało odłączone od klienta.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd podczas odłączania urządzenia: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId);
+
     } elseif ($postAction === 'delete_vehicle') {
         if (isTechnician()) { flashError('Rola Technik nie może usuwać pojazdów.'); redirect(getBaseUrl() . 'clients.php'); }
         $vehId    = (int)($_POST['vehicle_id'] ?? 0);
@@ -310,7 +339,7 @@ function showClientPreview(data) {
             </div>
             <div class="table-responsive">
                 <table class="table table-sm mb-0">
-                    <thead><tr><th>L.p</th><th>Model</th><th>Numer seryjny</th><th>IMEI</th><th>Nr rejestracyjny</th><th>Status</th></tr></thead>
+                    <thead><tr><th>L.p</th><th>Model</th><th>Numer seryjny</th><th>IMEI</th><th>Nr rejestracyjny</th><th>Status</th><?php if (isAdmin()): ?><th></th><?php endif; ?></tr></thead>
                     <tbody>
                         <?php foreach ($clientInstalledDevices as $lp => $dev): ?>
                         <tr>
@@ -320,9 +349,22 @@ function showClientPreview(data) {
                             <td class="text-muted small"><?= h($dev['imei'] ?? '—') ?></td>
                             <td><?= h($dev['registration']) ?></td>
                             <td><?= getStatusBadge($dev['status'], 'installation') ?></td>
+                            <?php if (isAdmin()): ?>
+                            <td class="text-end">
+                                <?php if ($dev['status'] === 'aktywna'): ?>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Odłączyć urządzenie <?= h(addslashes($dev['serial_number'])) ?> od klienta?');">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="remove_device_from_client">
+                                    <input type="hidden" name="installation_id" value="<?= $dev['installation_id'] ?>">
+                                    <input type="hidden" name="client_id" value="<?= $client['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Odłącz urządzenie od klienta"><i class="fas fa-unlink"></i></button>
+                                </form>
+                                <?php endif; ?>
+                            </td>
+                            <?php endif; ?>
                         </tr>
                         <?php endforeach; ?>
-                        <?php if (empty($clientInstalledDevices)): ?><tr><td colspan="6" class="text-muted text-center">Brak zamontowanych urządzeń</td></tr><?php endif; ?>
+                        <?php if (empty($clientInstalledDevices)): ?><tr><td colspan="<?= isAdmin() ? 7 : 6 ?>" class="text-muted text-center">Brak zamontowanych urządzeń</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>

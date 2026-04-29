@@ -96,6 +96,7 @@ try {
         FROM work_orders wo
         LEFT JOIN clients c ON c.id=wo.client_id
         LEFT JOIN users u ON u.id=wo.technician_id
+        WHERE wo.status NOT IN ('zakonczone', 'archiwum')
         ORDER BY wo.date DESC, wo.id DESC
         LIMIT 5
     ")->fetchAll();

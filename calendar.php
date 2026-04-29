@@ -103,8 +103,8 @@ if (isset($_GET['json'])) {
             'start' => $grp['date'],
             'color' => '#0d6efd',
             'url'   => $grp['count'] >= 2
-                ? 'installations.php?search=' . urlencode($grp['client'])
-                : 'installations.php?action=view&id=' . $grp['first_id'],
+                ? 'orders.php?action=list'
+                : 'orders.php?action=view&id=' . $grp['first_id'],
             'extendedProps' => ['type' => 'installation'],
         ];
     }
@@ -159,7 +159,7 @@ if (isset($_GET['json'])) {
             'title' => '📤 Demontaż: ' . $inst['registration'] . ' (' . $inst['model_name'] . ')',
             'start' => $inst['uninstallation_date'],
             'color' => '#6f42c1',
-            'url'   => 'installations.php?action=view&id=' . $inst['id'],
+            'url'   => 'orders.php?action=demontaze',
             'extendedProps' => ['type' => 'uninstall'],
         ];
     }

@@ -340,9 +340,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             adjustInventoryForStatusChange($db, $devRow['model_id'], $prevStatus, 'zamontowany');
             $db->commit();
             if ($instWorkOrderId) {
-                flashSuccess('Montaż zarejestrowany i przypisany do zlecenia.');
+                flashSuccess('Urządzenie prawidłowo przypisano do zlecenia oraz do klienta.');
             } else {
-                flashSuccess('Montaż został zarejestrowany.');
+                flashSuccess('Montaż został zarejestrowany i urządzenie przypisano do klienta.');
             }
         } catch (Exception $e) {
             $db->rollBack();
@@ -1329,9 +1329,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             <input type="date" name="installation_date" id="installDate" class="form-control" required>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Nr telefonu SIM</label>
+                            <label class="form-label required-star">Nr telefonu SIM</label>
                             <input type="text" name="sim_number" id="installSim" class="form-control"
-                                   list="installSimList" placeholder="np. +48 600 000 000" autocomplete="off">
+                                   list="installSimList" placeholder="np. +48 600 000 000" autocomplete="off" required>
                             <datalist id="installSimList">
                                 <?php foreach ($simCardOptions as $sc): ?>
                                 <option value="<?= h($sc) ?>">
@@ -1462,6 +1462,7 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
 </div>
 
+<script>
 var _woDataMap = <?= json_encode($woJsMap ?? []) ?>;
 
 function openInstallModal(deviceId, serial, currentSim) {
@@ -1681,7 +1682,7 @@ function openSimEdit(deviceId, currentSim) {
     <div>
         <strong>Urządzenie zaplanowane do demontażu.</strong>
         Urządzenie jest aktualnie oznaczone jako <em>Do demontażu</em>.
-        Po wykonaniu demontażu użyj opcji <a href="installations.php?action=demontaze"><strong>Demontaże</strong></a>, aby zakończyć proces.
+        Po wykonaniu demontażu użyj opcji <a href="orders.php?action=demontaze"><strong>Demontaże</strong></a>, aby zakończyć proces.
     </div>
 </div>
 <?php endif; ?>
@@ -1808,7 +1809,7 @@ function openSimEdit(deviceId, currentSim) {
                 'icon'   => 'fas fa-tools text-success',
                 'label'  => 'Montaż na pojazd ' . $vehicle,
                 'detail' => $client ? 'Klient: ' . $client : '',
-                'link'   => 'installations.php?action=view&id=' . $inst['id'],
+                'link'   => 'orders.php?action=list',
                 'badge'  => '<span class="badge bg-success">Montaż</span>',
             ];
             // Unmount event (if applicable)
@@ -1820,7 +1821,7 @@ function openSimEdit(deviceId, currentSim) {
                     'icon'   => 'fas fa-minus-circle text-warning',
                     'label'  => 'Demontaż z pojazdu ' . $vehicle,
                     'detail' => getStatusBadge($inst['status'], 'installation'),
-                    'link'   => 'installations.php?action=view&id=' . $inst['id'],
+                    'link'   => 'orders.php?action=demontaze',
                     'badge'  => '<span class="badge bg-warning text-dark">Demontaż</span>',
                 ];
             }
@@ -1845,9 +1846,10 @@ function openSimEdit(deviceId, currentSim) {
 
         // 4. Device history (replacements/transfers from protocols)
         $histLabels = [
-            'wymieniono_na' => 'Wymieniono na inne urządzenie',
-            'wymieniono_z'  => 'Wymieniono z innego urządzenia',
-            'serwis'        => 'Protokół serwisowy',
+            'wymieniono_na'       => 'Wymieniono na inne urządzenie',
+            'wymieniono_z'        => 'Wymieniono z innego urządzenia',
+            'serwis'              => 'Protokół serwisowy',
+            'odlaczono_od_klienta'=> 'Odłączono od klienta',
         ];
         foreach ($deviceHistory as $h_row) {
             $detail = '';

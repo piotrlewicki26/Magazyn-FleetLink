@@ -516,13 +516,14 @@ function showServicePreview(data) {
                            autocomplete="off">
                     <select name="device_id" id="deviceSelect" class="form-select" required size="4" style="height:auto">
                         <option value="">— wybierz urządzenie —</option>
-                        <?php
-                        $currentMf = '';
+                    <?php
+                        $currentGroup = '';
                         foreach ($allDevices as $d):
-                            if ($d['manufacturer_name'] !== $currentMf) {
-                                if ($currentMf) echo '</optgroup>';
-                                echo '<optgroup label="' . h($d['manufacturer_name'] . ' ' . $d['model_name']) . '">';
-                                $currentMf = $d['manufacturer_name'];
+                            $groupKey = $d['manufacturer_name'] . ' ' . $d['model_name'];
+                            if ($groupKey !== $currentGroup) {
+                                if ($currentGroup) echo '</optgroup>';
+                                echo '<optgroup label="' . h($groupKey) . '">';
+                                $currentGroup = $groupKey;
                             }
                         ?>
                         <option value="<?= $d['id'] ?>"
@@ -530,7 +531,7 @@ function showServicePreview(data) {
                                 <?= ($service['device_id'] ?? (int)($_GET['device'] ?? 0)) == $d['id'] ? 'selected' : '' ?>>
                             <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?>
                         </option>
-                        <?php endforeach; if ($currentMf) echo '</optgroup>'; ?>
+                        <?php endforeach; if ($currentGroup) echo '</optgroup>'; ?>
                     </select>
                     <div class="form-text">Wpisz fragment numeru seryjnego, modelu lub producenta aby przefiltrować listę.</div>
                 </div>
