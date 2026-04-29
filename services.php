@@ -170,13 +170,17 @@ if (in_array($action, ['view','edit','print']) && $id) {
 }
 
 $allDevices = $db->query("
-    SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name
+    SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
+           COALESCE(i.client_id, 0) as client_id
     FROM devices d
     JOIN models m ON m.id=d.model_id
     JOIN manufacturers mf ON mf.id=m.manufacturer_id
+    LEFT JOIN installations i ON i.device_id=d.id AND i.status='aktywna'
     WHERE d.status != 'wycofany'
     ORDER BY mf.name, m.name, d.serial_number
 ")->fetchAll();
+
+$svcClients = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 
 $users = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
 $activeInstallations = $db->query("
@@ -925,6 +929,15 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
                 </div>
                 <div class="modal-body">
                     <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Klient (filtr urządzeń GPS)</label>
+                            <select id="svcListClientFilter" class="form-select">
+                                <option value="">— wszystkie urządzenia —</option>
+                                <?php foreach ($svcClients as $cl): ?>
+                                <option value="<?= $cl['id'] ?>"><?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                         <div class="col-md-6">
                             <label class="form-label required-star">Urządzenie GPS</label>
                             <input type="text" id="svcListDevSearch" class="form-control form-control-sm mb-1"
@@ -942,6 +955,7 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
                                     }
                                 ?>
                                 <option value="<?= $d['id'] ?>"
+                                        data-client="<?= (int)$d['client_id'] ?>"
                                         data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'])) ?>">
                                     <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?>
                                 </option>
@@ -1009,22 +1023,27 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
 (function () {
     var modal = document.getElementById('svcListAddModal');
     if (!modal) return;
+    function filterSvcDevices() {
+        var q = (document.getElementById('svcListDevSearch').value || '').toLowerCase().trim();
+        var clientId = document.getElementById('svcListClientFilter').value;
+        document.querySelectorAll('#svcListDevSelect option').forEach(function (o) {
+            if (!o.value) { o.style.display = ''; return; }
+            var matchSearch = !q || (o.dataset.search || '').includes(q);
+            var matchClient = !clientId || String(o.dataset.client || '0') === clientId;
+            o.style.display = (matchSearch && matchClient) ? '' : 'none';
+        });
+    }
     modal.addEventListener('show.bs.modal', function () {
         document.getElementById('svcListDevSearch').value = '';
         document.getElementById('svcListDevSelect').value = '';
+        document.getElementById('svcListClientFilter').value = '';
         document.querySelectorAll('#svcListDevSelect option').forEach(function (o) { o.style.display = ''; });
         document.getElementById('svcListPlannedDate').value = new Date().toISOString().slice(0, 10);
     });
     var search = document.getElementById('svcListDevSearch');
-    if (search) {
-        search.addEventListener('input', function () {
-            var q = this.value.toLowerCase().trim();
-            document.querySelectorAll('#svcListDevSelect option').forEach(function (o) {
-                if (!o.value) { o.style.display = ''; return; }
-                o.style.display = (!q || (o.dataset.search || '').includes(q)) ? '' : 'none';
-            });
-        });
-    }
+    if (search) { search.addEventListener('input', filterSvcDevices); }
+    var clientFilter = document.getElementById('svcListClientFilter');
+    if (clientFilter) { clientFilter.addEventListener('change', filterSvcDevices); }
 }());
 </script>
 <?php endif; ?>

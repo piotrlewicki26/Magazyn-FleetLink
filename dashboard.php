@@ -1317,15 +1317,18 @@ function dashOpenNewOrder() {
                         </div>
                         <div class="col-md-12">
                             <label class="form-label">Klient</label>
-                            <select name="client_id" id="dashOrderClientSelect" class="form-select">
-                                <option value="">— brak przypisania —</option>
-                                <?php foreach ($dashClients as $cl): ?>
-                                <option value="<?= $cl['id'] ?>"
-                                        data-address="<?= h(trim(($cl['address'] ?? '') . ' ' . ($cl['city'] ?? ''))) ?>">
-                                    <?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
+                            <div class="input-group">
+                                <select name="client_id" id="dashOrderClientSelect" class="form-select">
+                                    <option value="">— brak przypisania —</option>
+                                    <?php foreach ($dashClients as $cl): ?>
+                                    <option value="<?= $cl['id'] ?>"
+                                            data-address="<?= h(trim(($cl['address'] ?? '') . ' ' . ($cl['city'] ?? ''))) ?>">
+                                        <?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-outline-success" id="dashOrderQuickClientBtn" title="Dodaj nowego klienta"><i class="fas fa-user-plus"></i></button>
+                            </div>
                         </div>
                         <div class="col-md-12">
                             <label class="form-label">Adres miejsca instalacji</label>
@@ -1345,6 +1348,28 @@ function dashOpenNewOrder() {
         </div>
     </div>
 </div>
+<!-- Quick-add klienta (dla modalu nowe zlecenie dashboard) -->
+<div class="modal fade" id="dashOrderQuickClientModal" tabindex="-1" style="z-index:1090">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="fas fa-user-plus me-2"></i>Szybko dodaj klienta</h6>
+                <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2 text-danger small d-none" id="dashOrdQCErr"></div>
+                <div class="mb-2"><label class="form-label form-label-sm required-star">Imię i nazwisko kontaktu</label><input type="text" id="dashOrdQCName" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Nazwa firmy</label><input type="text" id="dashOrdQCCompany" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Telefon</label><input type="text" id="dashOrdQCPhone" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">E-mail</label><input type="email" id="dashOrdQCEmail" class="form-control form-control-sm"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success btn-sm" id="dashOrdQCSaveBtn"><i class="fas fa-save me-1"></i>Dodaj</button>
+            </div>
+        </div>
+    </div>
+</div>
 <script>
 document.getElementById('dashOrderClientSelect').addEventListener('change', function() {
     var opt = this.options[this.selectedIndex];
@@ -1353,6 +1378,35 @@ document.getElementById('dashOrderClientSelect').addEventListener('change', func
     if (addrField && addr && !addrField.dataset.manuallyEdited) { addrField.value = addr; }
 });
 document.getElementById('dashOrderAddressField').addEventListener('input', function() { this.dataset.manuallyEdited = '1'; });
+
+document.getElementById('dashOrderQuickClientBtn').addEventListener('click', function() {
+    new bootstrap.Modal(document.getElementById('dashOrderQuickClientModal')).show();
+});
+document.getElementById('dashOrdQCSaveBtn').addEventListener('click', function() {
+    var name = document.getElementById('dashOrdQCName').value.trim();
+    var company = document.getElementById('dashOrdQCCompany').value.trim();
+    var phone = document.getElementById('dashOrdQCPhone').value.trim();
+    var email = document.getElementById('dashOrdQCEmail').value.trim();
+    var errEl = document.getElementById('dashOrdQCErr');
+    if (!name) { errEl.textContent = 'Imię i nazwisko jest wymagane.'; errEl.classList.remove('d-none'); return; }
+    errEl.classList.add('d-none');
+    var fd = new FormData();
+    fd.append('action', 'quick_add_client'); fd.append('contact_name', name);
+    fd.append('company_name', company); fd.append('phone', phone); fd.append('email', email);
+    fd.append('csrf_token', document.querySelector('#dashNewOrderForm [name=csrf_token]').value);
+    fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+        var sel = document.getElementById('dashOrderClientSelect');
+        var opt = new Option(data.label, data.id, true, true);
+        sel.add(opt); sel.dispatchEvent(new Event('change'));
+        bootstrap.Modal.getInstance(document.getElementById('dashOrderQuickClientModal')).hide();
+        document.getElementById('dashOrdQCName').value = '';
+        document.getElementById('dashOrdQCCompany').value = '';
+        document.getElementById('dashOrdQCPhone').value = '';
+        document.getElementById('dashOrdQCEmail').value = '';
+    }).catch(function() { errEl.textContent = 'Błąd połączenia.'; errEl.classList.remove('d-none'); });
+});
+
 document.getElementById('dashNewOrderSaveBtn').addEventListener('click', function() {
     var btn = this;
     var form = document.getElementById('dashNewOrderForm');

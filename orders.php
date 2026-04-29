@@ -29,7 +29,7 @@ try {
               `client_id` INT UNSIGNED DEFAULT NULL,
               `installation_address` VARCHAR(255) DEFAULT NULL,
               `technician_id` INT UNSIGNED DEFAULT NULL,
-              `status` ENUM('nowe','w_trakcie','zakonczone','anulowane') NOT NULL DEFAULT 'nowe',
+              `status` ENUM('nowe','w_trakcie','zakonczone','anulowane','archiwum') NOT NULL DEFAULT 'nowe',
               `notes` TEXT DEFAULT NULL,
               `created_by` INT UNSIGNED DEFAULT NULL,
               `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -45,6 +45,11 @@ try {
         } catch (PDOException $ex2) { /* column may already exist */ }
     } catch (PDOException $migEx) { /* ignore */ }
 }
+
+// Ensure 'archiwum' is a valid status value (add to ENUM if missing)
+try {
+    $db->exec("ALTER TABLE `work_orders` MODIFY COLUMN `status` ENUM('nowe','w_trakcie','zakonczone','anulowane','archiwum') NOT NULL DEFAULT 'nowe'");
+} catch (PDOException $e) { /* ignore if already correct or DB doesn't support */ }
 
 // Also ensure work_order_id column exists on installations
 try {
@@ -173,7 +178,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($isAjax) {
             header('Content-Type: application/json');
-            echo json_encode(['success' => true, 'order_number' => $orderNumber, 'redirect' => getBaseUrl() . 'orders.php?action=view&id=' . $newOrderId]);
+            echo json_encode([
+                'success'      => true,
+                'order_number' => $orderNumber,
+                'order_id'     => $newOrderId,
+                'client_id'    => $clientId,
+                'client_label' => $clientLabel !== '—' ? $clientLabel : '',
+                'date'         => $orderDate,
+                'technician'   => $techData['name'] ?? '',
+                'redirect'     => getBaseUrl() . 'orders.php?action=view&id=' . $newOrderId,
+            ]);
             exit;
         }
 
@@ -188,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $address   = sanitize($_POST['installation_address'] ?? '');
         $notes     = sanitize($_POST['notes'] ?? '');
         $status    = sanitize($_POST['status'] ?? 'nowe');
-        $allowed   = ['nowe','w_trakcie','zakonczone','anulowane'];
+        $allowed   = ['nowe','w_trakcie','zakonczone','anulowane','archiwum'];
         if (!in_array($status, $allowed)) $status = 'nowe';
 
         if (!$editId || empty($orderDate)) {
@@ -214,8 +228,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($postAction === 'change_status') {
         $csId     = (int)($_POST['id'] ?? 0);
         $newSt    = sanitize($_POST['new_status'] ?? '');
-        $allowed  = ['nowe','w_trakcie','zakonczone','anulowane'];
-        if (!$csId || !in_array($newSt, $allowed)) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'orders.php'); }
+        $isAjaxSt = !empty($_POST['ajax']);
+        $allowed  = ['nowe','w_trakcie','zakonczone','anulowane','archiwum'];
+        if (!$csId || !in_array($newSt, $allowed)) {
+            if ($isAjaxSt) { header('Content-Type: application/json'); echo json_encode(['error' => 'Nieprawidłowe dane.']); exit; }
+            flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'orders.php');
+        }
         $db->prepare("UPDATE work_orders SET status=? WHERE id=?")->execute([$newSt, $csId]);
         $flashMsg = 'Status zlecenia zmieniony.';
 
@@ -240,6 +258,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } catch (Exception $protoEx) { /* non-fatal */ }
         }
 
+        if ($isAjaxSt) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true]);
+            exit;
+        }
         flashSuccess($flashMsg);
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $csId);
 
@@ -338,7 +361,7 @@ if ($action === 'list') {
         LEFT JOIN clients c ON c.id=wo.client_id
         LEFT JOIN users u ON u.id=wo.technician_id
         WHERE 1=1";
-    $listSql = "SELECT wo.id, wo.order_number, wo.date, wo.status,
+    $listSql = "SELECT wo.id, wo.order_number, wo.date, wo.status, wo.client_id,
                wo.installation_address, wo.notes,
                c.contact_name, c.company_name, c.phone as client_phone,
                u.name as technician_name,
@@ -504,6 +527,7 @@ function orderStatusBadge($status) {
         'w_trakcie' => ['warning', 'W trakcie'],
         'zakonczone'=> ['success', 'Zakończone'],
         'anulowane' => ['danger', 'Anulowane'],
+        'archiwum'  => ['secondary', 'Archiwum'],
     ];
     $item = $map[$status] ?? ['secondary', ucfirst($status)];
     return '<span class="badge bg-' . $item[0] . '">' . h($item[1]) . '</span>';
@@ -687,6 +711,7 @@ include __DIR__ . '/includes/header.php';
                     <option value="w_trakcie"  <?= ($_GET['status'] ?? '') === 'w_trakcie'  ? 'selected' : '' ?>>W trakcie</option>
                     <option value="zakonczone" <?= ($_GET['status'] ?? '') === 'zakonczone' ? 'selected' : '' ?>>Zakończone</option>
                     <option value="anulowane"  <?= ($_GET['status'] ?? '') === 'anulowane'  ? 'selected' : '' ?>>Anulowane</option>
+                    <option value="archiwum"   <?= ($_GET['status'] ?? '') === 'archiwum'   ? 'selected' : '' ?>>Archiwum</option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -724,9 +749,42 @@ include __DIR__ . '/includes/header.php';
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($orders as $ord): ?>
-                <tr>
-                    <td class="fw-semibold">
+                <?php
+                // Group orders by client_id + date when multiple orders share the same client and date
+                $groupedOrders = [];
+                foreach ($orders as $ord) {
+                    $groupKey = ($ord['client_id'] ?? '0') . '_' . $ord['date'];
+                    if (!isset($groupedOrders[$groupKey])) {
+                        $groupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id'], 'date' => $ord['date']];
+                    }
+                    $groupedOrders[$groupKey]['orders'][] = $ord;
+                }
+                foreach ($groupedOrders as $gKey => $group):
+                    $groupOrders = $group['orders'];
+                    $isGroup = count($groupOrders) > 1;
+                    if ($isGroup):
+                        // Group header row
+                        $firstOrd = $groupOrders[0];
+                        $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
+                        $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
+                ?>
+                <tr class="table-light fw-semibold">
+                    <td colspan="2" class="text-muted small">
+                        <i class="fas fa-layer-group me-1"></i>Grupa: <?= formatDate($firstOrd['date']) ?>
+                    </td>
+                    <td><?= h($clientLabel) ?></td>
+                    <td colspan="2" class="text-muted small"><?= count($groupOrders) ?> zlecenia</td>
+                    <td><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+                <?php
+                    endif;
+                    foreach ($groupOrders as $ord):
+                ?>
+                <tr class="<?= $isGroup ? 'ps-3' : '' ?>">
+                    <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
+                        <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
                             <?= h($ord['order_number']) ?>
                         </a>
@@ -755,6 +813,18 @@ include __DIR__ . '/includes/header.php';
                                 onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <?php if (!in_array($ord['status'], ['zakonczone','archiwum','anulowane'])): ?>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action" title="Zakończ zlecenie"
+                                onclick="quickChangeStatus(<?= $ord['id'] ?>, 'zakonczone', <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <?php endif; ?>
+                        <?php if ($ord['status'] !== 'archiwum'): ?>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Przenieś do archiwum"
+                                onclick="quickChangeStatus(<?= $ord['id'] ?>, 'archiwum', <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
+                            <i class="fas fa-archive"></i>
+                        </button>
+                        <?php endif; ?>
                         <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć zlecenie <?= h($ord['order_number']) ?>?')">
                             <?= csrfField() ?>
@@ -765,7 +835,7 @@ include __DIR__ . '/includes/header.php';
                         <?php endif; ?>
                     </td>
                 </tr>
-                <?php endforeach; ?>
+                <?php endforeach; endforeach; ?>
                 <?php if (empty($orders)): ?>
                 <tr><td colspan="8" class="text-center text-muted py-4">Brak zleceń. <a href="#" data-bs-toggle="modal" data-bs-target="#newOrderModal">Utwórz pierwsze zlecenie</a>.</td></tr>
                 <?php endif; ?>
@@ -792,6 +862,7 @@ include __DIR__ . '/includes/header.php';
                     <option value="w_trakcie"  <?= ($_GET['status'] ?? '') === 'w_trakcie'  ? 'selected' : '' ?>>W trakcie</option>
                     <option value="zakonczone" <?= ($_GET['status'] ?? '') === 'zakonczone' ? 'selected' : '' ?>>Zakończone</option>
                     <option value="anulowane"  <?= ($_GET['status'] ?? '') === 'anulowane'  ? 'selected' : '' ?>>Anulowane</option>
+                    <option value="archiwum"   <?= ($_GET['status'] ?? '') === 'archiwum'   ? 'selected' : '' ?>>Archiwum</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -1199,6 +1270,7 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                                 <option value="w_trakcie"  <?= $order['status'] === 'w_trakcie'  ? 'selected' : '' ?>>W trakcie</option>
                                 <option value="zakonczone" <?= $order['status'] === 'zakonczone' ? 'selected' : '' ?>>Zakończone</option>
                                 <option value="anulowane"  <?= $order['status'] === 'anulowane'  ? 'selected' : '' ?>>Anulowane</option>
+                                <option value="archiwum"   <?= $order['status'] === 'archiwum'   ? 'selected' : '' ?>>Archiwum</option>
                             </select>
                         </div>
                         <div class="col-md-12">
@@ -1637,6 +1709,23 @@ function showCompleteDisassemblyModal(deviceId, serial, installationId) {
 </div>
 
 <script>
+// ── Quick status change from list ─────────────────────────────────────────
+function quickChangeStatus(orderId, newStatus, orderNumber) {
+    var label = newStatus === 'zakonczone' ? 'zakończyć' : 'przenieść do archiwum';
+    if (!confirm('Czy na pewno chcesz ' + label + ' zlecenie ' + orderNumber + '?')) return;
+    var csrf = document.querySelector('#newOrderForm [name=csrf_token]');
+    if (!csrf) { window.location.href = 'orders.php'; return; }
+    var fd = new FormData();
+    fd.append('action', 'change_status');
+    fd.append('id', orderId);
+    fd.append('new_status', newStatus);
+    fd.append('ajax', '1');
+    fd.append('csrf_token', csrf.value);
+    fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        window.location.reload();
+    }).catch(function() { window.location.reload(); });
+}
 // ── New Order Modal JS ─────────────────────────────────────────────────────
 document.getElementById('modalOrderClientSelect').addEventListener('change', function() {
     var opt = this.options[this.selectedIndex];

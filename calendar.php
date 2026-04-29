@@ -204,9 +204,8 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <h1><i class="fas fa-calendar-alt me-2 text-primary"></i>Kalendarz serwisów i zleceń</h1>
     <div>
-        <a href="orders.php?action=add" class="btn btn-sm btn-outline-success me-1"><i class="fas fa-plus me-1"></i>Nowe zlecenie</a>
+        <button type="button" class="btn btn-sm btn-outline-success me-1" data-bs-toggle="modal" data-bs-target="#calNewOrderModal"><i class="fas fa-plus me-1"></i>Nowe zlecenie</button>
         <button type="button" class="btn btn-sm btn-outline-warning me-1" data-bs-toggle="modal" data-bs-target="#calSvcAddModal"><i class="fas fa-plus me-1"></i>Nowy serwis</button>
-        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#calInstAddModal"><i class="fas fa-plus me-1"></i>Nowy montaż</button>
     </div>
 </div>
 
@@ -402,197 +401,89 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
 </div>
 
-<!-- Modal: Nowy montaż (kalendarz) — wielourządzeniowy -->
-<div class="modal fade" id="calInstAddModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
+
+<!-- Modal: Nowe zlecenie (Kalendarz) -->
+<div class="modal fade" id="calNewOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
-            <form method="POST" action="installations.php" id="calInstAddForm">
-                <?= csrfField() ?>
-                <input type="hidden" name="action" value="add">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-car me-2 text-success"></i>Nowy montaż</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus-circle me-2 text-success"></i>Nowe zlecenie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="calNewOrderErr" class="alert alert-danger d-none"></div>
+                <form id="calNewOrderForm">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="ajax" value="1">
                     <div class="row g-3">
-                        <div class="col-12">
-                            <label class="form-label required-star">Urządzenia GPS do montażu</label>
-                            <div id="calInstDevRowsContainer" class="d-flex flex-column gap-2 mb-2">
-                                <div class="device-row border rounded p-2 bg-light" data-row-idx="0">
-                                    <div class="row g-2 align-items-center">
-                                        <div class="col-auto"><span class="row-num badge bg-secondary">1</span></div>
-                                        <div class="col-auto">
-                                            <div class="btn-group btn-group-sm" role="group">
-                                                <input type="radio" class="btn-check" name="device_mode[0]" id="clm_auto_0" value="auto" checked>
-                                                <label class="btn btn-outline-secondary" for="clm_auto_0"><i class="fas fa-magic me-1"></i>Auto</label>
-                                                <input type="radio" class="btn-check" name="device_mode[0]" id="clm_manual_0" value="manual">
-                                                <label class="btn btn-outline-primary" for="clm_manual_0"><i class="fas fa-hand-pointer me-1"></i>Ręczny</label>
-                                            </div>
-                                        </div>
-                                        <div class="col col-mode-auto">
-                                            <select name="model_id[0]" class="form-select form-select-sm">
-                                                <option value="">— wybierz model —</option>
-                                                <?php foreach ($calAvailableModels as $m): ?>
-                                                <option value="<?= $m['model_id'] ?>"><?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)</option>
-                                                <?php endforeach; ?>
-                                            </select>
-                                        </div>
-                                        <div class="col col-mode-manual" style="display:none">
-                                            <select name="device_id_manual[0]" class="form-select form-select-sm ts-device-cal">
-                                                <option value="">— wybierz urządzenie —</option>
-                                                <?php
-                                                $clGrp0 = '';
-                                                foreach ($calAvailableDevices as $dev):
-                                                    $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
-                                                    if ($grp !== $clGrp0) { if ($clGrp0) echo '</optgroup>'; echo '<optgroup label="' . h($grp) . '">'; $clGrp0 = $grp; }
-                                                ?>
-                                                <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' ['.h($dev['imei']).']' : '' ?><?= $dev['sim_number'] ? ' ('.h($dev['sim_number']).')' : '' ?></option>
-                                                <?php endforeach; if ($clGrp0) echo '</optgroup>'; ?>
-                                            </select>
-                                        </div>
-                                        <div class="col-auto">
-                                            <input type="text" name="vehicle_registration[0]" class="form-control form-control-sm" required placeholder="Nr rej. pojazdu" style="text-transform:uppercase;min-width:130px">
-                                        </div>
-                                        <div class="col-auto">
-                                            <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" style="display:none" title="Usuń"><i class="fas fa-times"></i></button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <button type="button" id="calInstAddRowBtn" class="btn btn-sm btn-outline-success"><i class="fas fa-plus me-1"></i>Dodaj kolejne urządzenie</button>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data zlecenia</label>
+                            <input type="date" name="date" class="form-control" required value="<?= date('Y-m-d') ?>">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Klient</label>
-                            <div class="input-group">
-                                <select name="client_id" id="calInstClientSel" class="form-select">
-                                    <option value="">— brak przypisania —</option>
-                                    <?php foreach ($calClients as $cl): ?>
-                                    <option value="<?= $cl['id'] ?>"><?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <button type="button" class="btn btn-outline-success" id="calInstQCBtn" title="Dodaj nowego klienta"><i class="fas fa-user-plus"></i></button>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Adres instalacji</label>
-                            <input type="text" name="installation_address" id="calInstAddrFld" class="form-control" placeholder="Automatycznie z klienta lub wpisz ręcznie">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Technik</label>
-                            <select name="technician_id" class="form-select">
-                                <option value="">— aktualny użytkownik —</option>
+                            <label class="form-label required-star">Technik</label>
+                            <select name="technician_id" class="form-select" required>
+                                <option value="">— wybierz technika —</option>
                                 <?php foreach ($calUsers as $u): ?>
-                                <option value="<?= $u['id'] ?>"><?= h($u['name']) ?></option>
+                                <option value="<?= $u['id'] ?>" <?= $u['id'] == getCurrentUser()['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label required-star">Data montażu</label>
-                            <input type="date" name="installation_date" id="calInstDateFld" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        <div class="col-md-12">
+                            <label class="form-label">Klient</label>
+                            <div class="input-group">
+                                <select name="client_id" id="calOrderClientSelect" class="form-select">
+                                    <option value="">— brak przypisania —</option>
+                                    <?php foreach ($calClients as $cl): ?>
+                                    <option value="<?= $cl['id'] ?>"
+                                            data-address="<?= h(trim(($cl['address'] ?? '') . ' ' . ($cl['city'] ?? ''))) ?>">
+                                        <?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-outline-success" id="calOrderQuickClientBtn" title="Dodaj nowego klienta"><i class="fas fa-user-plus"></i></button>
+                            </div>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Status</label>
-                            <select name="status" class="form-select">
-                                <option value="aktywna" selected>Aktywna</option>
-                                <option value="zakonczona">Zakończona</option>
-                                <option value="anulowana">Anulowana</option>
-                            </select>
+                        <div class="col-md-12">
+                            <label class="form-label">Adres miejsca instalacji</label>
+                            <input type="text" name="installation_address" id="calOrderAddressField" class="form-control" placeholder="Automatycznie z danych klienta lub wpisz ręcznie">
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Miejsce montażu w pojeździe</label>
-                            <input type="text" name="location_in_vehicle" class="form-control" placeholder="np. pod deską rozdzielczą">
+                        <div class="col-12">
+                            <label class="form-label">Uwagi / opis zlecenia</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Dodatkowe informacje dla technika..."></textarea>
                         </div>
-                        <div class="col-12"><label class="form-label">Uwagi</label><textarea name="notes" class="form-control" rows="2"></textarea></div>
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
-                    <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
-                </div>
-            </form>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success" id="calNewOrderSaveBtn"><i class="fas fa-save me-2"></i>Utwórz zlecenie</button>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Quick-add klienta (kalendarz) -->
-<div class="modal fade" id="calInstQCModal" tabindex="-1" style="z-index:1090">
+<!-- Quick-add klienta (Kalendarz - Nowe zlecenie) -->
+<div class="modal fade" id="calOrderQuickClientModal" tabindex="-1" style="z-index:1090">
     <div class="modal-dialog modal-sm">
         <div class="modal-content">
-            <div class="modal-header py-2">
-                <h6 class="modal-title"><i class="fas fa-user-plus me-2"></i>Szybko dodaj klienta</h6>
-                <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
-            </div>
+            <div class="modal-header py-2"><h6 class="modal-title"><i class="fas fa-user-plus me-2"></i>Szybko dodaj klienta</h6><button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
-                <div class="mb-2 text-danger small d-none" id="calInstQCErr"></div>
-                <div class="mb-2"><label class="form-label form-label-sm required-star">Imię i nazwisko kontaktu</label><input type="text" id="calInstQCName" class="form-control form-control-sm"></div>
-                <div class="mb-2"><label class="form-label form-label-sm">Nazwa firmy</label><input type="text" id="calInstQCCompany" class="form-control form-control-sm"></div>
-                <div class="mb-2"><label class="form-label form-label-sm">Telefon</label><input type="text" id="calInstQCPhone" class="form-control form-control-sm"></div>
-                <div class="mb-2"><label class="form-label form-label-sm">E-mail</label><input type="email" id="calInstQCEmail" class="form-control form-control-sm"></div>
+                <div class="mb-2 text-danger small d-none" id="calOrdQCErr"></div>
+                <div class="mb-2"><label class="form-label form-label-sm required-star">Imię i nazwisko kontaktu</label><input type="text" id="calOrdQCName" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Nazwa firmy</label><input type="text" id="calOrdQCCompany" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Telefon</label><input type="text" id="calOrdQCPhone" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">E-mail</label><input type="email" id="calOrdQCEmail" class="form-control form-control-sm"></div>
             </div>
             <div class="modal-footer py-2">
                 <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
-                <button type="button" class="btn btn-success btn-sm" id="calInstQCSaveBtn"><i class="fas fa-save me-1"></i>Dodaj</button>
+                <button type="button" class="btn btn-success btn-sm" id="calOrdQCSaveBtn"><i class="fas fa-save me-1"></i>Dodaj</button>
             </div>
         </div>
     </div>
 </div>
 
-<template id="calInstDevRowTemplate">
-    <div class="device-row border rounded p-2 bg-light" data-row-idx="__IDX__">
-        <div class="row g-2 align-items-center">
-            <div class="col-auto"><span class="row-num badge bg-secondary">__NUM__</span></div>
-            <div class="col-auto">
-                <div class="btn-group btn-group-sm" role="group">
-                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="clm_auto___IDX__" value="auto" checked>
-                    <label class="btn btn-outline-secondary" for="clm_auto___IDX__"><i class="fas fa-magic me-1"></i>Auto</label>
-                    <input type="radio" class="btn-check" name="device_mode[__IDX__]" id="clm_manual___IDX__" value="manual">
-                    <label class="btn btn-outline-primary" for="clm_manual___IDX__"><i class="fas fa-hand-pointer me-1"></i>Ręczny</label>
-                </div>
-            </div>
-            <div class="col col-mode-auto">
-                <select name="model_id[__IDX__]" class="form-select form-select-sm">
-                    <option value="">— wybierz model —</option>
-                    <?php foreach ($calAvailableModels as $m): ?>
-                    <option value="<?= $m['model_id'] ?>"><?= h($m['manufacturer_name'] . ' ' . $m['model_name']) ?> (<?= (int)$m['available_count'] ?> dostępnych)</option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="col col-mode-manual" style="display:none">
-                <select name="device_id_manual[__IDX__]" class="form-select form-select-sm ts-device-cal">
-                    <option value="">— wybierz urządzenie —</option>
-                    <?php
-                    $clTplGrp = '';
-                    foreach ($calAvailableDevices as $dev):
-                        $grp = $dev['manufacturer_name'] . ' ' . $dev['model_name'];
-                        if ($grp !== $clTplGrp) { if ($clTplGrp) echo '</optgroup>'; echo '<optgroup label="' . h($grp) . '">'; $clTplGrp = $grp; }
-                    ?>
-                    <option value="<?= $dev['id'] ?>"><?= h($dev['serial_number']) ?><?= $dev['imei'] ? ' ['.h($dev['imei']).']' : '' ?><?= $dev['sim_number'] ? ' ('.h($dev['sim_number']).')' : '' ?></option>
-                    <?php endforeach; if ($clTplGrp) echo '</optgroup>'; ?>
-                </select>
-            </div>
-            <div class="col-auto">
-                <input type="text" name="vehicle_registration[__IDX__]" class="form-control form-control-sm" required placeholder="Nr rej. pojazdu" style="text-transform:uppercase;min-width:130px">
-            </div>
-            <div class="col-auto">
-                <button type="button" class="btn btn-sm btn-outline-danger remove-row-btn" title="Usuń"><i class="fas fa-times"></i></button>
-            </div>
-        </div>
-    </div>
-</template>
-
-<script>
-window.flCalDevices = <?= json_encode(array_values(array_map(function($d) {
-    $t = $d['serial_number'];
-    if ($d['imei'])       $t .= ' [' . $d['imei'] . ']';
-    if ($d['sim_number']) $t .= ' (' . $d['sim_number'] . ')';
-    return ['value' => (string)$d['id'], 'text' => $t];
-}, $calAvailableDevices))) ?>;
-window.flCalClientAddresses = <?= json_encode(array_reduce($calClients, function($c, $cl) {
-    $parts = array_filter([$cl['address'] ?? '', trim(($cl['postal_code'] ?? '') . ' ' . ($cl['city'] ?? ''))]);
-    $c[(string)$cl['id']] = implode(', ', $parts);
-    return $c;
-}, []), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-</script>
 <script>
 (function () {
     // Service modal search
@@ -613,94 +504,77 @@ window.flCalClientAddresses = <?= json_encode(array_reduce($calClients, function
         });
     });
 
-    // Install modal multi-device
-    var container  = document.getElementById('calInstDevRowsContainer');
-    var addBtn     = document.getElementById('calInstAddRowBtn');
-    var rowCounter = 1;
-    if (!container || !addBtn) return;
+    // New order modal
+    var calOrderClientSel = document.getElementById('calOrderClientSelect');
+    var calOrderAddrFld   = document.getElementById('calOrderAddressField');
+    if (calOrderClientSel) {
+        calOrderClientSel.addEventListener('change', function () {
+            var opt = this.options[this.selectedIndex];
+            var addr = opt ? (opt.getAttribute('data-address') || '') : '';
+            if (calOrderAddrFld && addr && !calOrderAddrFld.dataset.manuallyEdited) { calOrderAddrFld.value = addr; }
+        });
+    }
+    if (calOrderAddrFld) {
+        calOrderAddrFld.addEventListener('input', function () { this.dataset.manuallyEdited = '1'; });
+    }
 
-    function clSyncDropdowns() {
-        var rows = Array.from(container.querySelectorAll('.device-row'));
-        var rowVals = new Map();
-        rows.forEach(function (row) { var sel = row.querySelector('select.ts-device-cal'); if (!sel || !sel.tomselect) return; rowVals.set(row, sel.tomselect.getValue() || ''); });
-        rows.forEach(function (row) {
-            var sel = row.querySelector('select.ts-device-cal'); if (!sel || !sel.tomselect) return;
-            var ts = sel.tomselect, myVal = rowVals.get(row) || '';
-            var taken = new Set(); rowVals.forEach(function (v, r) { if (r !== row && v) taken.add(v); });
-            (window.flCalDevices || []).forEach(function (dev) {
-                if (taken.has(dev.value)) { if (ts.options[dev.value]) ts.removeOption(dev.value); }
-                else { if (!ts.options[dev.value]) ts.addOption({value:dev.value,text:dev.text}); }
-            });
-            ts.refreshOptions(false); if (myVal && ts.options[myVal]) ts.setValue(myVal, true);
-        });
-    }
-    function clInitTS(row) { row.querySelectorAll('select.ts-device-cal').forEach(function(sel){ if(sel.tomselect||typeof TomSelect==='undefined') return; new TomSelect(sel,{placeholder:'— szukaj —',allowEmptyOption:true,maxOptions:null,searchField:['text','value']}); }); }
-    function clDestroyTS(row) { row.querySelectorAll('select.ts-device-cal').forEach(function(sel){ if(sel.tomselect) sel.tomselect.destroy(); }); }
-    function clApplyMode(row, mode) {
-        var ac = row.querySelector('.col-mode-auto'), mc = row.querySelector('.col-mode-manual');
-        if (ac) ac.style.display = mode==='auto' ? '' : 'none';
-        if (mc) mc.style.display = mode==='manual' ? '' : 'none';
-        if (mode==='manual') { clInitTS(row); clSyncDropdowns(); }
-    }
-    function clUpdateNums() {
-        var rows = container.querySelectorAll('.device-row');
-        rows.forEach(function(row,i){ var n=row.querySelector('.row-num'); if(n) n.textContent=i+1; var b=row.querySelector('.remove-row-btn'); if(b) b.style.display=rows.length>1?'':'none'; });
-    }
-    container.addEventListener('change', function(e) {
-        if (e.target.type==='radio' && (e.target.name||'').startsWith('device_mode')) clApplyMode(e.target.closest('.device-row'),e.target.value);
-        if (e.target.classList.contains('ts-device-cal')||e.target.closest('select.ts-device-cal')) clSyncDropdowns();
+    var qcOrderBtn = document.getElementById('calOrderQuickClientBtn');
+    if (qcOrderBtn) qcOrderBtn.addEventListener('click', function () {
+        new bootstrap.Modal(document.getElementById('calOrderQuickClientModal')).show();
     });
-    container.addEventListener('click', function(e) {
-        var btn = e.target.closest('.remove-row-btn');
-        if (btn) { var row=btn.closest('.device-row'); clDestroyTS(row); row.remove(); clUpdateNums(); clSyncDropdowns(); }
-    });
-    addBtn.addEventListener('click', function () {
-        var tpl = document.getElementById('calInstDevRowTemplate'); if (!tpl) return;
-        var idx = rowCounter++, clone = tpl.content.cloneNode(true);
-        clone.querySelectorAll('[name]').forEach(function(el){el.name=el.name.replace(/__IDX__/g,idx);});
-        clone.querySelectorAll('[id]').forEach(function(el){el.id=el.id.replace(/__IDX__/g,idx);});
-        clone.querySelectorAll('[for]').forEach(function(el){el.htmlFor=el.htmlFor.replace(/__IDX__/g,idx);});
-        container.appendChild(clone); clUpdateNums();
-    });
-    var instModal = document.getElementById('calInstAddModal');
-    if (instModal) {
-        instModal.addEventListener('show.bs.modal', function () {
-            Array.from(container.querySelectorAll('.device-row')).forEach(function(row,i){ if(i>0){clDestroyTS(row);row.remove();} });
-            rowCounter=1;
-            var fr = container.querySelector('.device-row');
-            if (fr) { var reg=fr.querySelector('input[name="vehicle_registration[0]"]'); if(reg) reg.value=''; var ar=fr.querySelector('input[value="auto"]'); if(ar){ar.checked=true;clApplyMode(fr,'auto');} var ms=fr.querySelector('select[name="model_id[0]"]'); if(ms) ms.value=''; clDestroyTS(fr); }
-            document.getElementById('calInstClientSel').value='';
-            document.getElementById('calInstAddrFld').value='';
-            document.getElementById('calInstDateFld').value=new Date().toISOString().slice(0,10);
-            clUpdateNums();
-        });
-    }
-    var cliSel = document.getElementById('calInstClientSel');
-    if (cliSel) cliSel.addEventListener('change', function() {
-        var v=this.value, addr=document.getElementById('calInstAddrFld');
-        if(addr) addr.value=(v&&window.flCalClientAddresses&&window.flCalClientAddresses[v])?window.flCalClientAddresses[v]:'';
-    });
-    var qcBtn = document.getElementById('calInstQCBtn');
-    if (qcBtn) qcBtn.addEventListener('click', function() {
-        ['calInstQCName','calInstQCCompany','calInstQCPhone','calInstQCEmail'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
-        var err=document.getElementById('calInstQCErr'); if(err) err.classList.add('d-none');
-        new bootstrap.Modal(document.getElementById('calInstQCModal')).show();
-    });
-    var qcSave = document.getElementById('calInstQCSaveBtn');
-    if (qcSave) qcSave.addEventListener('click', function() {
-        var name=(document.getElementById('calInstQCName').value||'').trim();
-        var errEl=document.getElementById('calInstQCErr');
-        if (!name){errEl.textContent='Imię i nazwisko kontaktu jest wymagane.';errEl.classList.remove('d-none');return;}
+    var qcOrderSave = document.getElementById('calOrdQCSaveBtn');
+    if (qcOrderSave) qcOrderSave.addEventListener('click', function () {
+        var name = (document.getElementById('calOrdQCName').value || '').trim();
+        var company = document.getElementById('calOrdQCCompany').value.trim();
+        var phone = document.getElementById('calOrdQCPhone').value.trim();
+        var email = document.getElementById('calOrdQCEmail').value.trim();
+        var errEl = document.getElementById('calOrdQCErr');
+        if (!name) { errEl.textContent = 'Imię i nazwisko jest wymagane.'; errEl.classList.remove('d-none'); return; }
         errEl.classList.add('d-none');
-        var fd=new FormData(); fd.append('action','quick_add_client'); fd.append('csrf_token',document.querySelector('#calInstAddForm input[name="csrf_token"]').value); fd.append('contact_name',name); fd.append('company_name',document.getElementById('calInstQCCompany').value); fd.append('phone',document.getElementById('calInstQCPhone').value); fd.append('email',document.getElementById('calInstQCEmail').value);
-        fetch('installations.php',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(data){
-            if(data.error){errEl.textContent=data.error;errEl.classList.remove('d-none');return;}
-            var sel=document.getElementById('calInstClientSel'); var opt=document.createElement('option'); opt.value=data.id; opt.textContent=data.label; opt.selected=true; sel.appendChild(opt); sel.dispatchEvent(new Event('change'));
-            bootstrap.Modal.getInstance(document.getElementById('calInstQCModal')).hide();
-        }).catch(function(){errEl.textContent='Błąd połączenia z serwerem.';errEl.classList.remove('d-none');});
+        var fd = new FormData();
+        fd.append('action', 'quick_add_client'); fd.append('contact_name', name);
+        fd.append('company_name', company); fd.append('phone', phone); fd.append('email', email);
+        fd.append('csrf_token', document.querySelector('#calNewOrderForm [name=csrf_token]').value);
+        fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function (data) {
+            if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+            var sel = document.getElementById('calOrderClientSelect');
+            var opt = new Option(data.label, data.id, true, true);
+            sel.add(opt); sel.dispatchEvent(new Event('change'));
+            bootstrap.Modal.getInstance(document.getElementById('calOrderQuickClientModal')).hide();
+            ['calOrdQCName','calOrdQCCompany','calOrdQCPhone','calOrdQCEmail'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+        }).catch(function () { errEl.textContent = 'Błąd połączenia.'; errEl.classList.remove('d-none'); });
     });
-    container.querySelectorAll('.device-row').forEach(function(row){var c=row.querySelector('.btn-check:checked');if(c)clApplyMode(row,c.value);});
-    clUpdateNums();
+
+    var saveOrderBtn = document.getElementById('calNewOrderSaveBtn');
+    if (saveOrderBtn) saveOrderBtn.addEventListener('click', function () {
+        var btn = this;
+        var form = document.getElementById('calNewOrderForm');
+        var errEl = document.getElementById('calNewOrderErr');
+        var date = form.querySelector('[name=date]').value;
+        var tech = form.querySelector('[name=technician_id]').value;
+        if (!date) { errEl.textContent = 'Data zlecenia jest wymagana.'; errEl.classList.remove('d-none'); return; }
+        if (!tech)  { errEl.textContent = 'Wybierz technika.'; errEl.classList.remove('d-none'); return; }
+        errEl.classList.add('d-none');
+        btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Zapisywanie...';
+        var fd = new FormData(form);
+        fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function (data) {
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-2"></i>Utwórz zlecenie';
+            if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+            if (data.redirect) { window.location.href = data.redirect; }
+        }).catch(function () {
+            btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-2"></i>Utwórz zlecenie';
+            errEl.textContent = 'Błąd połączenia.'; errEl.classList.remove('d-none');
+        });
+    });
+
+    var calNOM = document.getElementById('calNewOrderModal');
+    if (calNOM) calNOM.addEventListener('hidden.bs.modal', function () {
+        document.getElementById('calNewOrderForm').reset();
+        document.getElementById('calNewOrderErr').classList.add('d-none');
+        if (calOrderAddrFld) calOrderAddrFld.dataset.manuallyEdited = '';
+        var di = document.querySelector('#calNewOrderForm [name=date]');
+        if (di) di.value = new Date().toISOString().split('T')[0];
+    });
 }());
 </script>
 

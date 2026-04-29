@@ -656,12 +656,14 @@ $simCardOptions = [];
 $clientsList    = [];
 $vehiclesList   = [];
 $openWorkOrders = [];
+$usersList      = [];
 if ($action === 'list') {
     try {
         $simCardOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN);
     } catch (Exception $e) { $simCardOptions = []; }
     $clientsList = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
     $vehiclesList = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
+    try { $usersList = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll(); } catch (Exception $e) {}
     // Load active work orders for the "related to order" dropdown
     try {
         $openWorkOrders = $db->query("
@@ -1293,34 +1295,33 @@ document.addEventListener('DOMContentLoaded', function() {
                             <label class="form-label fw-semibold">
                                 <i class="fas fa-clipboard-list me-1 text-primary"></i>Powiązane ze zleceniem
                             </label>
-                            <select name="work_order_id" id="installWorkOrderSelect" class="form-select">
-                                <option value="">— montaż bez zlecenia (samodzielny) —</option>
-                                <?php
-                                // Build JSON map of order data for JS auto-fill
-                                $woJsMap = [];
-                                foreach ($openWorkOrders as $wo):
-                                    $clientLabel = $wo['company_name'] ? $wo['company_name'] . ' — ' . ($wo['contact_name'] ?? '') : ($wo['contact_name'] ?? '');
-                                    $woJsMap[$wo['id']] = [
-                                        'client_id'   => (int)($wo['client_id'] ?? 0),
-                                        'client_label'=> $clientLabel,
-                                        'date'        => $wo['date'],
-                                        'technician'  => $wo['technician_name'] ?? '',
-                                    ];
-                                ?>
-                                <option value="<?= $wo['id'] ?>"
-                                        data-client-id="<?= (int)($wo['client_id'] ?? 0) ?>"
-                                        data-date="<?= h($wo['date']) ?>">
-                                    <?= h($wo['order_number']) ?> — <?= h($clientLabel ?: '(brak klienta)') ?>
-                                    <?php if ($wo['installation_address']): ?> | <?= h($wo['installation_address']) ?><?php endif; ?>
-                                    (<?= formatDate($wo['date']) ?>)
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <?php if (!empty($openWorkOrders)): ?>
-                            <div class="form-text">Wybierz zlecenie, aby automatycznie uzupełnić klienta i datę.</div>
-                            <?php else: ?>
-                            <div class="form-text text-muted">Brak aktywnych zleceń. <a href="orders.php?action=add" target="_blank">Utwórz zlecenie</a></div>
-                            <?php endif; ?>
+                            <div class="input-group">
+                                <select name="work_order_id" id="installWorkOrderSelect" class="form-select">
+                                    <option value="">— montaż bez zlecenia (samodzielny) —</option>
+                                    <?php
+                                    // Build JSON map of order data for JS auto-fill
+                                    $woJsMap = [];
+                                    foreach ($openWorkOrders as $wo):
+                                        $clientLabel = $wo['company_name'] ? $wo['company_name'] . ' — ' . ($wo['contact_name'] ?? '') : ($wo['contact_name'] ?? '');
+                                        $woJsMap[$wo['id']] = [
+                                            'client_id'   => (int)($wo['client_id'] ?? 0),
+                                            'client_label'=> $clientLabel,
+                                            'date'        => $wo['date'],
+                                            'technician'  => $wo['technician_name'] ?? '',
+                                        ];
+                                    ?>
+                                    <option value="<?= $wo['id'] ?>"
+                                            data-client-id="<?= (int)($wo['client_id'] ?? 0) ?>"
+                                            data-date="<?= h($wo['date']) ?>">
+                                        <?= h($wo['order_number']) ?> — <?= h($clientLabel ?: '(brak klienta)') ?>
+                                        <?php if ($wo['installation_address']): ?> | <?= h($wo['installation_address']) ?><?php endif; ?>
+                                        (<?= formatDate($wo['date']) ?>)
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-outline-success" id="installCreateOrderBtn" title="Utwórz nowe zlecenie"><i class="fas fa-plus"></i> Nowe zlecenie</button>
+                            </div>
+                            <div class="form-text">Wybierz zlecenie lub utwórz nowe, aby automatycznie uzupełnić klienta i datę.</div>
                         </div>
 
                         <div class="col-md-6">
@@ -1404,8 +1405,63 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
     </div>
 </div>
-<script>
-// Work order data map for auto-filling fields
+
+<!-- Sub-modal: Utwórz nowe zlecenie (wewnątrz modalu montażu) -->
+<div class="modal fade" id="instNewOrderModal" tabindex="-1" style="z-index:1090">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus-circle me-2 text-success"></i>Nowe zlecenie montażowe</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="instNewOrderErr" class="alert alert-danger d-none"></div>
+                <form id="instNewOrderForm">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="ajax" value="1">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data zlecenia</label>
+                            <input type="date" name="date" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Technik</label>
+                            <select name="technician_id" class="form-select" required>
+                                <option value="">— wybierz technika —</option>
+                                <?php foreach ($usersList as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= $u['id'] == getCurrentUser()['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Klient</label>
+                            <select name="client_id" id="instNewOrderClientSel" class="form-select">
+                                <option value="">— brak przypisania —</option>
+                                <?php foreach ($clientsList as $cl): ?>
+                                <option value="<?= $cl['id'] ?>"><?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Adres instalacji</label>
+                            <input type="text" name="installation_address" class="form-control" placeholder="Opcjonalnie">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success" id="instNewOrderSaveBtn"><i class="fas fa-save me-1"></i>Utwórz</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 var _woDataMap = <?= json_encode($woJsMap ?? []) ?>;
 
 function openInstallModal(deviceId, serial, currentSim) {
@@ -1488,6 +1544,57 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(function() { document.getElementById('addClientMsg').textContent = 'Błąd połączenia.'; });
     });
+
+    // "Utwórz nowe zlecenie" button inside install modal
+    var createOrderBtn = document.getElementById('installCreateOrderBtn');
+    if (createOrderBtn) {
+        createOrderBtn.addEventListener('click', function() {
+            document.getElementById('instNewOrderErr').classList.add('d-none');
+            document.getElementById('instNewOrderForm').reset();
+            var di = document.querySelector('#instNewOrderForm [name=date]');
+            if (di) di.value = new Date().toISOString().split('T')[0];
+            new bootstrap.Modal(document.getElementById('instNewOrderModal')).show();
+        });
+    }
+    var instNewOrderSaveBtn = document.getElementById('instNewOrderSaveBtn');
+    if (instNewOrderSaveBtn) {
+        instNewOrderSaveBtn.addEventListener('click', function() {
+            var btn = this;
+            var form = document.getElementById('instNewOrderForm');
+            var errEl = document.getElementById('instNewOrderErr');
+            var date = form.querySelector('[name=date]').value;
+            var tech = form.querySelector('[name=technician_id]').value;
+            if (!date) { errEl.textContent = 'Data zlecenia jest wymagana.'; errEl.classList.remove('d-none'); return; }
+            if (!tech)  { errEl.textContent = 'Wybierz technika.'; errEl.classList.remove('d-none'); return; }
+            errEl.classList.add('d-none');
+            btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Tworzenie...';
+            var fd = new FormData(form);
+            fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function(data) {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-1"></i>Utwórz';
+                if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+                // Add new order to the work order select and select it
+                if (data.order_id && data.order_number) {
+                    var sel = document.getElementById('installWorkOrderSelect');
+                    var opt = new Option(data.order_number + ' — (nowe zlecenie)', data.order_id, true, true);
+                    opt.dataset.clientId = data.client_id || '';
+                    opt.dataset.date = data.date || '';
+                    sel.add(opt);
+                    // Update the data map
+                    _woDataMap[data.order_id] = {
+                        client_id: data.client_id || 0,
+                        client_label: data.client_label || '',
+                        date: data.date || '',
+                        technician: data.technician || ''
+                    };
+                    sel.dispatchEvent(new Event('change'));
+                }
+                bootstrap.Modal.getInstance(document.getElementById('instNewOrderModal')).hide();
+            }).catch(function() {
+                btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-1"></i>Utwórz';
+                errEl.textContent = 'Błąd połączenia.'; errEl.classList.remove('d-none');
+            });
+        });
+    }
 });
 </script>
 <script>
