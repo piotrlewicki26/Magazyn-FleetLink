@@ -198,7 +198,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $protoCount++;
                 }
                 if ($protoCount > 0) {
-                    $flashMsg .= " Wygenerowano $protoCount protokół/protokoły przekazania (PP).";
+                    $protoLabel = $protoCount === 1 ? 'protokół' : ($protoCount <= 4 ? 'protokoły' : 'protokołów');
+                    $flashMsg .= " Wygenerowano $protoCount $protoLabel przekazania (PP).";
                 }
             } catch (Exception $protoEx) { /* non-fatal */ }
         }
@@ -287,11 +288,6 @@ try {
         GROUP BY i.batch_id ORDER BY MIN(i.installation_date) DESC LIMIT 30
     ")->fetchAll();
 } catch (PDOException $e) {}
-$modalAllDevices = $db->query("
-    SELECT d.id, d.serial_number, d.imei, m.name as model_name, mf.name as manufacturer_name
-    FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id
-    ORDER BY mf.name, m.name, d.serial_number
-")->fetchAll();
 
 $orders = [];
 $totalOrders = 0;
@@ -1526,7 +1522,7 @@ function showCompleteDisassemblyModal(deviceId, serial, installationId) {
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="fas fa-clipboard-check me-2 text-info"></i>Nowy protokół montaży</h5>
+                <h5 class="modal-title"><i class="fas fa-clipboard-check me-2 text-info"></i>Nowy protokół montażu</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST" action="protocols.php">
@@ -1610,7 +1606,7 @@ document.getElementById('modalOrderClientSelect').addEventListener('change', fun
     var opt = this.options[this.selectedIndex];
     var addr = opt ? (opt.getAttribute('data-address') || '') : '';
     var addrField = document.getElementById('modalOrderAddressField');
-    if (addr && !addrField.dataset.manuallyEdited) { addrField.value = addr; }
+    if (addrField && addr && !addrField.dataset.manuallyEdited) { addrField.value = addr; }
 });
 document.getElementById('modalOrderAddressField').addEventListener('input', function() { this.dataset.manuallyEdited = '1'; });
 

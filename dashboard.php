@@ -1350,7 +1350,7 @@ document.getElementById('dashOrderClientSelect').addEventListener('change', func
     var opt = this.options[this.selectedIndex];
     var addr = opt ? (opt.getAttribute('data-address') || '') : '';
     var addrField = document.getElementById('dashOrderAddressField');
-    if (addr && !addrField.dataset.manuallyEdited) { addrField.value = addr; }
+    if (addrField && addr && !addrField.dataset.manuallyEdited) { addrField.value = addr; }
 });
 document.getElementById('dashOrderAddressField').addEventListener('input', function() { this.dataset.manuallyEdited = '1'; });
 document.getElementById('dashNewOrderSaveBtn').addEventListener('click', function() {
