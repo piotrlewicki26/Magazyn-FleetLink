@@ -171,11 +171,10 @@ if (in_array($action, ['view','edit','print']) && $id) {
 
 $allDevices = $db->query("
     SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
-           COALESCE(i.client_id, 0) as client_id
+           COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id
     FROM devices d
     JOIN models m ON m.id=d.model_id
     JOIN manufacturers mf ON mf.id=m.manufacturer_id
-    LEFT JOIN installations i ON i.device_id=d.id AND i.status='aktywna'
     WHERE d.status != 'wycofany'
     ORDER BY mf.name, m.name, d.serial_number
 ")->fetchAll();

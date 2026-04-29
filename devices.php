@@ -1575,7 +1575,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Add new order to the work order select and select it
                 if (data.order_id && data.order_number) {
                     var sel = document.getElementById('installWorkOrderSelect');
-                    var opt = new Option(data.order_number + ' — (nowe zlecenie)', data.order_id, true, true);
+                    var optLabel = data.order_number + (data.client_label ? ' — ' + data.client_label : ' — (nowe zlecenie)');
+                    var opt = new Option(optLabel, data.order_id, true, true);
                     opt.dataset.clientId = data.client_id || '';
                     opt.dataset.date = data.date || '';
                     sel.add(opt);

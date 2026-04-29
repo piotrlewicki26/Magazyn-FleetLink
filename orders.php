@@ -753,7 +753,7 @@ include __DIR__ . '/includes/header.php';
                 // Group orders by client_id + date when multiple orders share the same client and date
                 $groupedOrders = [];
                 foreach ($orders as $ord) {
-                    $groupKey = ($ord['client_id'] ?? '0') . '_' . $ord['date'];
+                    $groupKey = ($ord['client_id'] ?? '0') . '|' . $ord['date'];
                     if (!isset($groupedOrders[$groupKey])) {
                         $groupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id'], 'date' => $ord['date']];
                     }
