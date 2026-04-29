@@ -221,7 +221,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="card-body p-0">
                 <?php if (empty($recentOrders)): ?>
-                <div class="p-3 text-muted text-center">Brak zleceń. <a href="orders.php?action=add">Utwórz pierwsze zlecenie</a>.</div>
+                <div class="p-3 text-muted text-center">Brak zleceń. <a href="#" onclick="dashOpenNewOrder(); return false;">Utwórz pierwsze zlecenie</a>.</div>
                 <?php else: ?>
                 <div class="list-group list-group-flush">
                     <?php foreach ($recentOrders as $ord): ?>
@@ -320,10 +320,10 @@ include __DIR__ . '/includes/header.php';
                         </button>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <a href="orders.php?action=add" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center py-3">
+                        <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center py-3" onclick="dashOpenNewOrder()">
                             <i class="fas fa-clipboard-list fa-lg mb-1"></i>
                             <span class="small">Nowe zlecenie</span>
-                        </a>
+                        </button>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
                         <a href="orders.php?action=my" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-3">
@@ -1272,6 +1272,107 @@ function dashOpenAddSim() {
     dashSimAddRow();
     new bootstrap.Modal(document.getElementById('dashAddSimModal')).show();
 }
+
+// ===== MODAL: Nowe zlecenie (Dashboard) =====
+function dashOpenNewOrder() {
+    var form = document.getElementById('dashNewOrderForm');
+    if (form) form.reset();
+    var dateInput = document.querySelector('#dashNewOrderForm [name=date]');
+    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    var addrField = document.getElementById('dashOrderAddressField');
+    if (addrField) addrField.dataset.manuallyEdited = '';
+    var errEl = document.getElementById('dashNewOrderErr');
+    if (errEl) errEl.classList.add('d-none');
+    new bootstrap.Modal(document.getElementById('dashNewOrderModal')).show();
+}
+</script>
+
+<!-- ── MODAL: Nowe zlecenie (Dashboard) ──────────────────────────── -->
+<div class="modal fade" id="dashNewOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus-circle me-2 text-success"></i>Nowe zlecenie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="dashNewOrderErr" class="alert alert-danger d-none"></div>
+                <form id="dashNewOrderForm">
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="ajax" value="1">
+                    <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data zlecenia</label>
+                            <input type="date" name="date" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Technik</label>
+                            <select name="technician_id" class="form-select" required>
+                                <option value="">— wybierz technika —</option>
+                                <?php foreach ($dashUsers as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= $u['id'] == getCurrentUser()['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Klient</label>
+                            <select name="client_id" id="dashOrderClientSelect" class="form-select">
+                                <option value="">— brak przypisania —</option>
+                                <?php foreach ($dashClients as $cl): ?>
+                                <option value="<?= $cl['id'] ?>"
+                                        data-address="<?= h(trim(($cl['address'] ?? '') . ' ' . ($cl['city'] ?? ''))) ?>">
+                                    <?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Adres miejsca instalacji</label>
+                            <input type="text" name="installation_address" id="dashOrderAddressField" class="form-control" placeholder="Automatycznie z danych klienta lub wpisz ręcznie">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi / opis zlecenia</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Dodatkowe informacje dla technika..."></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success" id="dashNewOrderSaveBtn"><i class="fas fa-save me-2"></i>Utwórz zlecenie</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+document.getElementById('dashOrderClientSelect').addEventListener('change', function() {
+    var opt = this.options[this.selectedIndex];
+    var addr = opt ? (opt.getAttribute('data-address') || '') : '';
+    var addrField = document.getElementById('dashOrderAddressField');
+    if (addr && !addrField.dataset.manuallyEdited) { addrField.value = addr; }
+});
+document.getElementById('dashOrderAddressField').addEventListener('input', function() { this.dataset.manuallyEdited = '1'; });
+document.getElementById('dashNewOrderSaveBtn').addEventListener('click', function() {
+    var btn = this;
+    var form = document.getElementById('dashNewOrderForm');
+    var errEl = document.getElementById('dashNewOrderErr');
+    var date = form.querySelector('[name=date]').value;
+    var tech = form.querySelector('[name=technician_id]').value;
+    if (!date) { errEl.textContent = 'Data zlecenia jest wymagana.'; errEl.classList.remove('d-none'); return; }
+    if (!tech) { errEl.textContent = 'Wybierz technika.'; errEl.classList.remove('d-none'); return; }
+    errEl.classList.add('d-none');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Zapisywanie...';
+    var fd = new FormData(form);
+    fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function(data) {
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-2"></i>Utwórz zlecenie';
+        if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+        if (data.redirect) { window.location.href = data.redirect; }
+    }).catch(function() {
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-2"></i>Utwórz zlecenie';
+        errEl.textContent = 'Błąd połączenia.'; errEl.classList.remove('d-none');
+    });
+});
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

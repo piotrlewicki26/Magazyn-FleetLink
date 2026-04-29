@@ -88,10 +88,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $techId      = (int)($_POST['technician_id'] ?? 0) ?: null;
         $address     = sanitize($_POST['installation_address'] ?? '');
         $notes       = sanitize($_POST['notes'] ?? '');
+        $isAjax      = !empty($_POST['ajax']);
 
         if (!$techId) $techId = (int)$currentUser['id'];
 
         if (empty($orderDate)) {
+            if ($isAjax) { header('Content-Type: application/json'); echo json_encode(['error' => 'Data zlecenia jest wymagana.']); exit; }
             flashError('Data zlecenia jest wymagana.');
             redirect(getBaseUrl() . 'orders.php?action=add');
         }
@@ -133,6 +135,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } catch (Exception $emailEx) { /* non-fatal */ }
 
+        if ($isAjax) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true, 'order_number' => $orderNumber, 'redirect' => getBaseUrl() . 'orders.php?action=view&id=' . $newOrderId]);
+            exit;
+        }
+
         flashSuccess('Zlecenie ' . $orderNumber . ' zostało utworzone.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $newOrderId);
 
@@ -173,7 +181,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $allowed  = ['nowe','w_trakcie','zakonczone','anulowane'];
         if (!$csId || !in_array($newSt, $allowed)) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'orders.php'); }
         $db->prepare("UPDATE work_orders SET status=? WHERE id=?")->execute([$newSt, $csId]);
-        flashSuccess('Status zlecenia zmieniony.');
+        $flashMsg = 'Status zlecenia zmieniony.';
+
+        // Auto-generate PP (Protokół Przekazania) for each linked installation when order is completed
+        if ($newSt === 'zakonczone') {
+            try {
+                $linkedInst = $db->prepare("SELECT id, device_id, technician_id FROM installations WHERE work_order_id=? AND status='aktywna'");
+                $linkedInst->execute([$csId]);
+                $instRows = $linkedInst->fetchAll();
+                $protoCount = 0;
+                foreach ($instRows as $ir) {
+                    $protocolNum = generateProtocolNumber('PP');
+                    $protoTech   = $ir['technician_id'] ?? (int)$currentUser['id'];
+                    $db->prepare("INSERT INTO protocols (installation_id, type, protocol_number, date, technician_id, notes) VALUES (?,?,?,?,?,?)")
+                       ->execute([$ir['id'], 'PP', $protocolNum, date('Y-m-d'), $protoTech, 'Automatycznie wygenerowany po zakończeniu zlecenia.']);
+                    $protoCount++;
+                }
+                if ($protoCount > 0) {
+                    $flashMsg .= " Wygenerowano $protoCount protokół/protokoły przekazania (PP).";
+                }
+            } catch (Exception $protoEx) { /* non-fatal */ }
+        }
+
+        flashSuccess($flashMsg);
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $csId);
 
     } elseif ($postAction === 'add_disassembly') {
@@ -236,6 +266,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $clients = $db->query("SELECT id, contact_name, company_name, address, city, postal_code, phone FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 $users   = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
+
+// Data needed for "Nowy protokół" modal (always loaded)
+$modalInstSingle = $db->query("
+    SELECT i.id, v.registration, d.serial_number, NULL as batch_id
+    FROM installations i
+    JOIN vehicles v ON v.id=i.vehicle_id
+    JOIN devices d ON d.id=i.device_id
+    WHERE i.status IN ('aktywna','zakonczona') AND (i.batch_id IS NULL)
+    ORDER BY i.installation_date DESC LIMIT 50
+")->fetchAll();
+$modalInstBatches = [];
+try {
+    $modalInstBatches = $db->query("
+        SELECT i.batch_id, MIN(i.id) as first_id, COUNT(i.id) as device_count,
+               GROUP_CONCAT(DISTINCT v.registration ORDER BY v.registration SEPARATOR ', ') as registrations,
+               MIN(i.installation_date) as installation_date
+        FROM installations i JOIN vehicles v ON v.id=i.vehicle_id
+        WHERE i.status IN ('aktywna','zakonczona') AND i.batch_id IS NOT NULL
+        GROUP BY i.batch_id ORDER BY MIN(i.installation_date) DESC LIMIT 30
+    ")->fetchAll();
+} catch (PDOException $e) {}
+$modalAllDevices = $db->query("
+    SELECT d.id, d.serial_number, d.imei, m.name as model_name, mf.name as manufacturer_name
+    FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id
+    ORDER BY mf.name, m.name, d.serial_number
+")->fetchAll();
 
 $orders = [];
 $totalOrders = 0;
@@ -535,11 +591,13 @@ include __DIR__ . '/includes/header.php';
     </h1>
     <div class="d-flex gap-2">
         <?php if (in_array($action, ['list','my','demontaze','protocols'])): ?>
-        <a href="orders.php?action=add" class="btn btn-success"><i class="fas fa-plus me-2"></i>Nowe zlecenie</a>
+        <?php if ($action === 'list'): ?>
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#newOrderModal"><i class="fas fa-plus me-2"></i>Nowe zlecenie</button>
+        <?php endif; ?>
         <?php if ($action === 'demontaze'): ?>
         <button type="button" class="btn btn-warning text-white" data-bs-toggle="modal" data-bs-target="#newDisassemblyModal"><i class="fas fa-plus me-2"></i>Nowy demontaż</button>
         <?php elseif ($action === 'protocols'): ?>
-        <a href="protocols.php" class="btn btn-outline-info"><i class="fas fa-plus me-2"></i>Nowy protokół</a>
+        <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#newProtocolFromOrderModal"><i class="fas fa-plus me-2"></i>Nowy protokół</button>
         <?php endif; ?>
         <?php elseif ($action === 'add'): ?>
         <a href="orders.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
@@ -677,7 +735,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($orders)): ?>
-                <tr><td colspan="8" class="text-center text-muted py-4">Brak zleceń. <a href="orders.php?action=add">Utwórz pierwsze zlecenie</a>.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">Brak zleceń. <a href="#" data-bs-toggle="modal" data-bs-target="#newOrderModal">Utwórz pierwsze zlecenie</a>.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -1381,7 +1439,235 @@ function showCompleteDisassemblyModal(deviceId, serial, installationId) {
 
 <?php endif; ?>
 
-<!-- ── MODAL PODGLĄDU ZLECENIA ─────────────────────────────────────── -->
+<!-- ── MODAL NOWE ZLECENIE ─────────────────────────────────────────── -->
+<div class="modal fade" id="newOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus-circle me-2 text-success"></i>Nowe zlecenie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="newOrderErr" class="alert alert-danger d-none"></div>
+                <form id="newOrderForm">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="ajax" value="1">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data zlecenia</label>
+                            <input type="date" name="date" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Technik</label>
+                            <select name="technician_id" class="form-select" required>
+                                <option value="">— wybierz technika —</option>
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= $u['id'] == $currentUser['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Klient</label>
+                            <div class="input-group">
+                                <select name="client_id" id="modalOrderClientSelect" class="form-select">
+                                    <option value="">— brak przypisania —</option>
+                                    <?php foreach ($clients as $cl): ?>
+                                    <option value="<?= $cl['id'] ?>"
+                                            data-address="<?= h(trim(($cl['address'] ?? '') . ' ' . ($cl['city'] ?? ''))) ?>">
+                                        <?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="button" class="btn btn-outline-success" id="modalOrderQuickClientBtn" title="Dodaj nowego klienta"><i class="fas fa-user-plus"></i></button>
+                            </div>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Adres miejsca instalacji</label>
+                            <input type="text" name="installation_address" id="modalOrderAddressField" class="form-control" placeholder="Automatycznie z danych klienta lub wpisz ręcznie">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi / opis zlecenia</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Dodatkowe informacje dla technika..."></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success" id="newOrderSaveBtn"><i class="fas fa-save me-2"></i>Utwórz zlecenie</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick-add client (modal) -->
+<div class="modal fade" id="modalOrderQuickClientModal" tabindex="-1" style="z-index:1090">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2"><h6 class="modal-title"><i class="fas fa-user-plus me-2"></i>Szybko dodaj klienta</h6><button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2 text-danger small d-none" id="modalQCErr"></div>
+                <div class="mb-2"><label class="form-label form-label-sm required-star">Imię i nazwisko kontaktu</label><input type="text" id="modalQCName" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Nazwa firmy</label><input type="text" id="modalQCCompany" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">Telefon</label><input type="text" id="modalQCPhone" class="form-control form-control-sm"></div>
+                <div class="mb-2"><label class="form-label form-label-sm">E-mail</label><input type="email" id="modalQCEmail" class="form-control form-control-sm"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                <button type="button" class="btn btn-success btn-sm" id="modalQCSaveBtn"><i class="fas fa-save me-1"></i>Dodaj</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── MODAL NOWY PROTOKÓŁ ─────────────────────────────────────────── -->
+<div class="modal fade" id="newProtocolFromOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-clipboard-check me-2 text-info"></i>Nowy protokół montaży</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="protocols.php">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <!-- Typ protokołu -->
+                        <div class="col-md-4">
+                            <label class="form-label required-star">Typ protokołu</label>
+                            <select name="type" id="npoType" class="form-select" required>
+                                <option value="PP">PP — Przekazania</option>
+                                <option value="PU">PU — Uruchomienia</option>
+                                <option value="PS">PS — Serwisowy</option>
+                            </select>
+                        </div>
+                        <!-- Data -->
+                        <div class="col-md-4">
+                            <label class="form-label required-star">Data</label>
+                            <input type="date" name="date" class="form-control" required value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <!-- Technik -->
+                        <div class="col-md-4">
+                            <label class="form-label required-star">Technik</label>
+                            <select name="technician_id" class="form-select" required>
+                                <option value="">— wybierz —</option>
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= $u['id'] == $currentUser['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <!-- Instalacja (PP/PU) -->
+                        <div class="col-12" id="npoInstBlock">
+                            <label class="form-label">Montaż / pojazd</label>
+                            <select name="batch_ref" class="form-select">
+                                <option value="">— brak przypisania —</option>
+                                <?php if (!empty($modalInstBatches)): ?>
+                                <optgroup label="Partie (wiele urządzeń)">
+                                    <?php foreach ($modalInstBatches as $b): ?>
+                                    <option value="batch:<?= $b['batch_id'] ?>">
+                                        Partia #<?= $b['batch_id'] ?> | <?= $b['device_count'] ?> urządzeń | <?= h($b['registrations']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <?php endif; ?>
+                                <?php if (!empty($modalInstSingle)): ?>
+                                <optgroup label="Pojedyncze instalacje">
+                                    <?php foreach ($modalInstSingle as $i): ?>
+                                    <option value="inst:<?= $i['id'] ?>">
+                                        <?= h($i['registration']) ?> | <?= h($i['serial_number']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <?php endif; ?>
+                            </select>
+                        </div>
+                        <!-- Podpis klienta -->
+                        <div class="col-12">
+                            <label class="form-label">Podpis / potwierdzenie klienta</label>
+                            <input type="text" name="client_signature" class="form-control" placeholder="Imię, nazwisko lub nr dokumentu">
+                        </div>
+                        <!-- Uwagi -->
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-info text-white"><i class="fas fa-save me-2"></i>Utwórz protokół</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── New Order Modal JS ─────────────────────────────────────────────────────
+document.getElementById('modalOrderClientSelect').addEventListener('change', function() {
+    var opt = this.options[this.selectedIndex];
+    var addr = opt ? (opt.getAttribute('data-address') || '') : '';
+    var addrField = document.getElementById('modalOrderAddressField');
+    if (addr && !addrField.dataset.manuallyEdited) { addrField.value = addr; }
+});
+document.getElementById('modalOrderAddressField').addEventListener('input', function() { this.dataset.manuallyEdited = '1'; });
+
+document.getElementById('modalOrderQuickClientBtn').addEventListener('click', function() {
+    new bootstrap.Modal(document.getElementById('modalOrderQuickClientModal')).show();
+});
+
+document.getElementById('modalQCSaveBtn').addEventListener('click', function() {
+    var name = document.getElementById('modalQCName').value.trim();
+    var company = document.getElementById('modalQCCompany').value.trim();
+    var phone = document.getElementById('modalQCPhone').value.trim();
+    var email = document.getElementById('modalQCEmail').value.trim();
+    var errEl = document.getElementById('modalQCErr');
+    if (!name) { errEl.textContent = 'Imię i nazwisko jest wymagane.'; errEl.classList.remove('d-none'); return; }
+    errEl.classList.add('d-none');
+    var fd = new FormData();
+    fd.append('action', 'quick_add_client'); fd.append('contact_name', name);
+    fd.append('company_name', company); fd.append('phone', phone); fd.append('email', email);
+    fd.append('csrf_token', document.querySelector('#newOrderForm [name=csrf_token]').value);
+    fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function(data) {
+        if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+        var sel = document.getElementById('modalOrderClientSelect');
+        var opt = new Option(data.label, data.id, true, true);
+        sel.add(opt);
+        bootstrap.Modal.getInstance(document.getElementById('modalOrderQuickClientModal')).hide();
+    }).catch(function() { errEl.textContent = 'Błąd połączenia.'; errEl.classList.remove('d-none'); });
+});
+
+document.getElementById('newOrderSaveBtn').addEventListener('click', function() {
+    var btn = this;
+    var form = document.getElementById('newOrderForm');
+    var errEl = document.getElementById('newOrderErr');
+    var date = form.querySelector('[name=date]').value;
+    var tech = form.querySelector('[name=technician_id]').value;
+    if (!date) { errEl.textContent = 'Data zlecenia jest wymagana.'; errEl.classList.remove('d-none'); return; }
+    if (!tech) { errEl.textContent = 'Wybierz technika.'; errEl.classList.remove('d-none'); return; }
+    errEl.classList.add('d-none');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Zapisywanie...';
+    var fd = new FormData(form);
+    fetch('orders.php', { method: 'POST', body: fd }).then(r => r.json()).then(function(data) {
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-2"></i>Utwórz zlecenie';
+        if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+        if (data.redirect) { window.location.href = data.redirect; }
+    }).catch(function() {
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-save me-2"></i>Utwórz zlecenie';
+        errEl.textContent = 'Błąd połączenia.'; errEl.classList.remove('d-none');
+    });
+});
+// Reset modal form on close
+document.getElementById('newOrderModal').addEventListener('hidden.bs.modal', function() {
+    document.getElementById('newOrderForm').reset();
+    document.getElementById('newOrderErr').classList.add('d-none');
+    document.getElementById('modalOrderAddressField').dataset.manuallyEdited = '';
+    var dateInput = document.querySelector('#newOrderForm [name=date]');
+    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+});
+</script>
 <div class="modal fade" id="orderPreviewModal" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">

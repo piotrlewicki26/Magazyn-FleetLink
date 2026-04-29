@@ -480,8 +480,13 @@ function getDashboardStats() {
     $stmt = $db->query("SELECT COUNT(*) FROM devices WHERE status != 'wycofany'");
     $stats['total_devices'] = (int)$stmt->fetchColumn();
 
-    $stmt = $db->query("SELECT COUNT(*) FROM installations WHERE status = 'aktywna'");
-    $stats['active_installations'] = (int)$stmt->fetchColumn();
+    try {
+        $stmt = $db->query("SELECT COUNT(*) FROM work_orders WHERE status IN ('nowe','w_trakcie')");
+        $stats['active_installations'] = (int)$stmt->fetchColumn();
+    } catch (PDOException $e) {
+        $stmt = $db->query("SELECT COUNT(*) FROM installations WHERE status = 'aktywna'");
+        $stats['active_installations'] = (int)$stmt->fetchColumn();
+    }
 
     $stmt = $db->query("SELECT COUNT(*) FROM services WHERE status IN ('zaplanowany','w_trakcie')");
     $stats['pending_services'] = (int)$stmt->fetchColumn();
