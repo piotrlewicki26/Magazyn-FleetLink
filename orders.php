@@ -21,8 +21,6 @@ try {
 } catch (PDOException $e) {
     // Run migration
     try {
-        $migSql = file_get_contents(__DIR__ . '/includes/migrate_v8.sql');
-        // Execute statement by statement (skip comments + SET @s blocks handled separately)
         $db->exec("
             CREATE TABLE IF NOT EXISTS `work_orders` (
               `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -106,15 +104,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Send email notification to assigned technician
         try {
-            $techRow = $db->prepare("SELECT name, email FROM users WHERE id=? LIMIT 1");
-            $techRow->execute([$techId]);
-            $techData = $techRow->fetch();
+            $techStmt = $db->prepare("SELECT name, email FROM users WHERE id=? LIMIT 1");
+            $techStmt->execute([$techId]);
+            $techData = $techStmt->fetch();
 
             $clientLabel = '—';
             if ($clientId) {
-                $cRow = $db->prepare("SELECT contact_name, company_name FROM clients WHERE id=? LIMIT 1");
-                $cRow->execute([$clientId]);
-                $cData = $cRow->fetch();
+                $clientStmt = $db->prepare("SELECT contact_name, company_name FROM clients WHERE id=? LIMIT 1");
+                $clientStmt->execute([$clientId]);
+                $cData = $clientStmt->fetch();
                 if ($cData) $clientLabel = $cData['company_name'] ? $cData['company_name'] . ' — ' . $cData['contact_name'] : $cData['contact_name'];
             }
 
