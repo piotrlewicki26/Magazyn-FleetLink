@@ -46,10 +46,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($postAction === 'delete') {
         $delId = (int)($_POST['id'] ?? 0);
         try {
+            $db->prepare("UPDATE installations SET vehicle_id=NULL WHERE vehicle_id=?")->execute([$delId]);
             $db->prepare("DELETE FROM vehicles WHERE id=?")->execute([$delId]);
             flashSuccess('Pojazd usunięty.');
         } catch (PDOException $e) {
-            flashError('Nie można usunąć pojazdu — posiada powiązane montaże.');
+            flashError('Nie można usunąć pojazdu.');
         }
         redirect(getBaseUrl() . 'vehicles.php');
     }

@@ -904,10 +904,12 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                     data-confirm="Usuń urządzenie <?= h($d['serial_number']) ?>?"><i class="fas fa-trash"></i></button>
                         </form>
                         <?php endif; ?>
+                        <?php if (in_array($d['status'], ['nowy', 'sprawny'])): ?>
                         <button type="button" class="btn btn-sm btn-outline-success btn-action" title="Montaż"
                                 onclick="openInstallModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
                             <i class="fas fa-car"></i>
                         </button>
+                        <?php endif; ?>
                         <?php if ($d['status'] === 'zamontowany' || $d['status'] === 'do_demontazu'): ?>
                         <button type="button" class="btn btn-sm btn-outline-warning btn-action" title="Przenieś do innej firmy"
                                 onclick="openMoveDeviceModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, 'list')">

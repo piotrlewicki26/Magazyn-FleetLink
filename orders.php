@@ -55,6 +55,43 @@ try {
     } catch (PDOException $ex) { /* ignore */ }
 }
 
+// ── One-time migration: create work_orders for completed/archived installations
+// that were created in the old "Montaże" list and have no work_order_id yet.
+try {
+    $orphanStmt = $db->query(
+        "SELECT i.id, i.installation_date, i.client_id, i.technician_id, i.installation_address, i.notes
+         FROM installations i
+         WHERE i.status IN ('zakonczona','archiwum')
+           AND (i.work_order_id IS NULL OR i.work_order_id = 0)
+         LIMIT 500"
+    );
+    $orphans = $orphanStmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($orphans as $inst) {
+        // Generate a unique order number
+        $orderNum = 'MIG-' . $inst['id'] . '-' . substr(md5($inst['id'] . $inst['installation_date']), 0, 6);
+        // Check it doesn't already exist
+        $exists = $db->prepare("SELECT id FROM work_orders WHERE order_number=?");
+        $exists->execute([$orderNum]);
+        if ($exists->fetchColumn()) { continue; }
+        $instDate = $inst['installation_date'] ?: date('Y-m-d');
+        $db->prepare(
+            "INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, created_by)
+             VALUES (?,?,?,?,?,'zakonczone',?,NULL)"
+        )->execute([
+            $orderNum,
+            $instDate,
+            $inst['client_id'] ?: null,
+            $inst['installation_address'] ?: null,
+            $inst['technician_id'] ?: null,
+            $inst['notes'] ?: null,
+        ]);
+        $newOrderId = (int)$db->lastInsertId();
+        if ($newOrderId) {
+            $db->prepare("UPDATE installations SET work_order_id=? WHERE id=?")->execute([$newOrderId, $inst['id']]);
+        }
+    }
+} catch (PDOException $e) { /* ignore migration errors */ }
+
 $action = sanitize($_GET['action'] ?? 'list');
 $id     = (int)($_GET['id'] ?? 0);
 $currentUser = getCurrentUser();
