@@ -759,15 +759,17 @@ include __DIR__ . '/includes/header.php';
                     }
                     $groupedOrders[$groupKey]['orders'][] = $ord;
                 }
+                $groupIdx = 0;
                 foreach ($groupedOrders as $gKey => $group):
                     $groupOrders = $group['orders'];
                     $isGroup = count($groupOrders) > 1;
                     if ($isGroup):
                         // Group header row
+                        $groupIdx++;
                         $firstOrd = $groupOrders[0];
                         $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
-                        $groupRowId = 'group-rows-' . md5($gKey);
+                        $groupRowId = 'grp' . $groupIdx;
                 ?>
                 <tr class="table-light fw-semibold" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')" data-group-id="<?= h($groupRowId) ?>">
                     <td colspan="2" class="text-muted small">
@@ -784,7 +786,7 @@ include __DIR__ . '/includes/header.php';
                     endif;
                     foreach ($groupOrders as $ord):
                 ?>
-                <tr class="<?= $isGroup ? 'ps-3 group-child-row d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($groupRowId) . '"' : '' ?>>
+                <tr class="<?= $isGroup ? 'ps-3 d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($groupRowId) . '"' : '' ?>>
                     <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
                         <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
