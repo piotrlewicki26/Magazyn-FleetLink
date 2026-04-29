@@ -98,27 +98,16 @@ try {
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['orders']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['orders','installations']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
                         <i class="fas fa-clipboard-list me-1"></i>Zlecenia
                     </a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php"><i class="fas fa-list me-2"></i>Lista zleceń</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=add"><i class="fas fa-plus me-2"></i>Nowe zlecenie</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=my"><i class="fas fa-user-check me-2"></i>Moje zlecenia</a></li>
-                    </ul>
-                </li>
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['installations']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
-                        <i class="fas fa-car me-1"></i>Instalacje
-                    </a>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php"><i class="fas fa-list me-2"></i>Lista montaży</a></li>
-                        <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#navInstAddModal"><i class="fas fa-plus me-2"></i>Nowy montaż</button></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php?action=my"><i class="fas fa-user-check me-2"></i>Moje montaże</a></li>
                         <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>installations.php?action=demontaze"><i class="fas fa-tools me-2"></i>Demontaże</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>protocols.php?filter=installation"><i class="fas fa-clipboard-check me-2"></i>Protokoły montaży</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=demontaze"><i class="fas fa-tools me-2"></i>Demontaże</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=protocols"><i class="fas fa-clipboard-check me-2"></i>Protokoły montaży</a></li>
                     </ul>
                 </li>
                 <li class="nav-item dropdown">

@@ -175,6 +175,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare("UPDATE work_orders SET status=? WHERE id=?")->execute([$newSt, $csId]);
         flashSuccess('Status zlecenia zmieniony.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $csId);
+
+    } elseif ($postAction === 'add_disassembly') {
+        $disDeviceId     = (int)($_POST['device_id'] ?? 0);
+        $disTechnicianId = (int)($_POST['technician_id'] ?? 0) ?: (int)$currentUser['id'];
+        $disDate         = sanitize($_POST['disassembly_date'] ?? date('Y-m-d'));
+        $disNotes        = sanitize($_POST['notes'] ?? '');
+        if (!$disDeviceId) { flashError('Nie wybrano urządzenia.'); redirect(getBaseUrl() . 'orders.php?action=demontaze'); }
+        $db->beginTransaction();
+        try {
+            $devCheck = $db->prepare("SELECT id, model_id, status FROM devices WHERE id=? LIMIT 1");
+            $devCheck->execute([$disDeviceId]);
+            $devRow = $devCheck->fetch();
+            if (!$devRow) { throw new Exception('Urządzenie nie istnieje.'); }
+            if ($devRow['status'] === 'do_demontazu') { throw new Exception('Urządzenie jest już oznaczone do demontażu.'); }
+            $oldStatus = $devRow['status'];
+            $db->prepare("UPDATE devices SET status='do_demontazu' WHERE id=?")->execute([$disDeviceId]);
+            adjustInventoryForStatusChange($db, $devRow['model_id'], $oldStatus, 'do_demontazu');
+            if ($disNotes || $disTechnicianId) {
+                $db->prepare("UPDATE installations SET technician_id=?, notes=CONCAT(COALESCE(notes,''), IF(notes IS NULL OR notes='', '', '\n'), ?) WHERE device_id=? AND status='aktywna'")
+                   ->execute([$disTechnicianId, $disNotes ? '[Demontaż zaplanowany: ' . $disNotes . ']' : '[Demontaż zaplanowany]', $disDeviceId]);
+            }
+            $db->commit();
+            flashSuccess('Urządzenie zostało oznaczone do demontażu.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'orders.php?action=demontaze');
+
+    } elseif ($postAction === 'complete_disassembly') {
+        $disDeviceId = (int)($_POST['device_id'] ?? 0);
+        $disInstId   = (int)($_POST['installation_id'] ?? 0);
+        $disDate     = sanitize($_POST['disassembly_date'] ?? date('Y-m-d'));
+        if (!$disDeviceId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'orders.php?action=demontaze'); }
+        $db->beginTransaction();
+        try {
+            $devInfo = $db->prepare("SELECT model_id, status FROM devices WHERE id=? FOR UPDATE");
+            $devInfo->execute([$disDeviceId]);
+            $devRow = $devInfo->fetch();
+            if (!$devRow) { throw new Exception('Urządzenie nie istnieje.'); }
+            if ($disInstId) {
+                $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE id=? AND status='aktywna'")->execute([$disDate, $disInstId]);
+            } else {
+                $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE device_id=? AND status='aktywna'")->execute([$disDate, $disDeviceId]);
+            }
+            $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$disDeviceId]);
+            adjustInventoryForStatusChange($db, $devRow['model_id'], $devRow['status'], 'sprawny');
+            $db->commit();
+            flashSuccess('Demontaż zakończony. Urządzenie jest teraz dostępne do ponownego montażu.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'orders.php?action=demontaze');
     }
 }
 
@@ -284,6 +338,75 @@ if ($action === 'list') {
 } elseif ($action === 'add') {
     // Pre-fill technician to current user
     $prefillTechId = (int)$currentUser['id'];
+
+} elseif ($action === 'demontaze') {
+    $disSearch = sanitize($_GET['search'] ?? '');
+    $disSql = "
+        SELECT d.id as device_id, d.serial_number, d.imei, d.sim_number, d.status as device_status,
+               m.name as model_name, mf.name as manufacturer_name,
+               i.id as installation_id, i.installation_date, i.status as inst_status,
+               v.registration, v.make,
+               c.contact_name, c.company_name,
+               u.name as technician_name
+        FROM devices d
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        LEFT JOIN installations i ON i.device_id=d.id AND i.status='aktywna'
+        LEFT JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN clients c ON c.id=i.client_id
+        LEFT JOIN users u ON u.id=i.technician_id
+        WHERE d.status='do_demontazu'
+    ";
+    $disParams = [];
+    if ($disSearch) {
+        $disSql .= " AND (d.serial_number LIKE ? OR v.registration LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ?)";
+        $disParams = ["%$disSearch%","%$disSearch%","%$disSearch%","%$disSearch%"];
+    }
+    $disSql .= " ORDER BY i.installation_date DESC, d.id";
+    $disStmt = $db->prepare($disSql);
+    $disStmt->execute($disParams);
+    $disassemblyDevices = $disStmt->fetchAll();
+    // For "Nowy demontaż" modal — list of active installations
+    $activeInstForDis = $db->query("
+        SELECT i.id, i.installation_date, d.id as device_id, d.serial_number, d.status as device_status,
+               m.name as model_name, mf.name as manufacturer_name,
+               v.registration, c.contact_name, c.company_name
+        FROM installations i
+        JOIN devices d ON d.id=i.device_id AND d.status NOT IN ('do_demontazu','wycofany','sprzedany')
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN clients c ON c.id=i.client_id
+        WHERE i.status='aktywna'
+        ORDER BY i.installation_date DESC
+    ")->fetchAll();
+
+} elseif ($action === 'protocols') {
+    $protoSearch = sanitize($_GET['search'] ?? '');
+    $protoType   = sanitize($_GET['type'] ?? '');
+    $protoSql    = "SELECT p.id, p.protocol_number, p.type, p.date, p.notes,
+               u.name as technician_name, v.registration, d.serial_number,
+               m.name as model_name, mf.name as manufacturer_name
+        FROM protocols p
+        LEFT JOIN users u ON u.id=p.technician_id
+        LEFT JOIN installations i ON i.id=p.installation_id
+        LEFT JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN devices d ON d.id=i.device_id
+        LEFT JOIN models m ON m.id=d.model_id
+        LEFT JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        WHERE p.installation_id IS NOT NULL";
+    $protoParams = [];
+    if ($protoType && in_array($protoType, ['PP','PU','PS'])) {
+        $protoSql .= " AND p.type=?"; $protoParams[] = $protoType;
+    }
+    if ($protoSearch) {
+        $protoSql .= " AND (p.protocol_number LIKE ? OR v.registration LIKE ? OR d.serial_number LIKE ?)";
+        $protoParams = array_merge($protoParams, ["%$protoSearch%","%$protoSearch%","%$protoSearch%"]);
+    }
+    $protoSql .= " ORDER BY p.date DESC, p.id DESC";
+    $protoStmt = $db->prepare($protoSql);
+    $protoStmt->execute($protoParams);
+    $protocols = $protoStmt->fetchAll();
 }
 
 // Status badge helper
@@ -299,7 +422,98 @@ function orderStatusBadge($status) {
 }
 
 $activePage = 'orders';
-$pageTitle = ($action === 'my') ? 'Moje Zlecenia' : 'Zlecenia montażowe';
+$pageTitleMap = [
+    'my'        => 'Moje Zlecenia',
+    'add'       => 'Nowe zlecenie',
+    'demontaze' => 'Demontaże',
+    'protocols' => 'Protokoły montaży',
+];
+$pageTitle = $pageTitleMap[$action] ?? 'Zlecenia montażowe';
+
+// ── AJAX view: return order details fragment for modal ──────────────────
+if ($action === 'view' && $id && !empty($_GET['ajax'])) {
+    header('Content-Type: text/html; charset=utf-8');
+    if (!isset($order)) {
+        echo '<p class="text-danger p-3">Zlecenie nie istnieje.</p>';
+        exit;
+    }
+    ?>
+    <div class="row g-3">
+        <div class="col-md-5">
+            <table class="table table-sm mb-0">
+                <tr><th class="text-muted ps-0" style="width:45%">Nr zlecenia</th><td class="fw-bold"><?= h($order['order_number']) ?></td></tr>
+                <tr><th class="text-muted ps-0">Data</th><td><?= formatDate($order['date']) ?></td></tr>
+                <tr><th class="text-muted ps-0">Status</th><td><?= orderStatusBadge($order['status']) ?></td></tr>
+                <tr><th class="text-muted ps-0">Technik</th><td><?= h($order['technician_name'] ?? '—') ?>
+                    <?php if ($order['technician_email']): ?><br><small class="text-muted"><?= h($order['technician_email']) ?></small><?php endif; ?>
+                </td></tr>
+                <tr><th class="text-muted ps-0">Adres instalacji</th><td><?= h($order['installation_address'] ?? '—') ?></td></tr>
+                <?php if ($order['notes']): ?><tr><th class="text-muted ps-0">Uwagi</th><td><?= nl2br(h($order['notes'])) ?></td></tr><?php endif; ?>
+            </table>
+            <?php if ($order['client_id']): ?>
+            <hr>
+            <p class="fw-semibold mb-1"><i class="fas fa-user me-1 text-muted"></i>Klient</p>
+            <table class="table table-sm mb-0">
+                <?php if ($order['company_name']): ?><tr><th class="text-muted ps-0" style="width:45%">Firma</th><td class="fw-semibold"><?= h($order['company_name']) ?></td></tr><?php endif; ?>
+                <tr><th class="text-muted ps-0">Kontakt</th><td><?= h($order['contact_name'] ?? '—') ?></td></tr>
+                <?php if ($order['client_phone']): ?><tr><th class="text-muted ps-0">Telefon</th><td><a href="tel:<?= h($order['client_phone']) ?>"><?= h($order['client_phone']) ?></a></td></tr><?php endif; ?>
+                <?php if ($order['client_email']): ?><tr><th class="text-muted ps-0">E-mail</th><td><a href="mailto:<?= h($order['client_email']) ?>"><?= h($order['client_email']) ?></a></td></tr><?php endif; ?>
+            </table>
+            <a href="<?= getBaseUrl() ?>clients.php?action=view&id=<?= $order['client_id'] ?>" class="btn btn-sm btn-outline-primary mt-2">
+                <i class="fas fa-external-link-alt me-1"></i>Karta klienta
+            </a>
+            <?php endif; ?>
+            <?php if (!in_array($order['status'], ['zakonczone','anulowane'])): ?>
+            <hr>
+            <div class="d-flex flex-wrap gap-2">
+                <?php if ($order['status'] === 'nowe'): ?>
+                <form method="POST"><?= csrfField() ?><input type="hidden" name="action" value="change_status"><input type="hidden" name="id" value="<?= $order['id'] ?>"><input type="hidden" name="new_status" value="w_trakcie"><button type="submit" class="btn btn-sm btn-warning"><i class="fas fa-play me-1"></i>Rozpocznij</button></form>
+                <?php endif; ?>
+                <?php if (in_array($order['status'], ['nowe','w_trakcie'])): ?>
+                <form method="POST"><?= csrfField() ?><input type="hidden" name="action" value="change_status"><input type="hidden" name="id" value="<?= $order['id'] ?>"><input type="hidden" name="new_status" value="zakonczone"><button type="submit" class="btn btn-sm btn-success"><i class="fas fa-check me-1"></i>Zakończ</button></form>
+                <form method="POST" onsubmit="return confirm('Anulować zlecenie?')"><?= csrfField() ?><input type="hidden" name="action" value="change_status"><input type="hidden" name="id" value="<?= $order['id'] ?>"><input type="hidden" name="new_status" value="anulowane"><button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-ban me-1"></i>Anuluj zlecenie</button></form>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <div class="col-md-7">
+            <p class="fw-semibold mb-2"><i class="fas fa-microchip me-1 text-muted"></i>Przypisane urządzenia GPS (<?= count($orderDevices) ?>)</p>
+            <?php if (empty($orderDevices)): ?>
+            <div class="text-muted text-center py-3">
+                <i class="fas fa-microchip fa-2x mb-2 d-block opacity-25"></i>
+                Brak urządzeń. Przejdź do <a href="<?= getBaseUrl() ?>devices.php">listy urządzeń</a> i użyj przycisku <strong>Montaż</strong>.
+            </div>
+            <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead><tr><th>Urządzenie</th><th>Pojazd</th><th>Data montażu</th><th>Status</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($orderDevices as $dev): ?>
+                        <tr>
+                            <td><?= h($dev['manufacturer_name'] . ' ' . $dev['model_name']) ?><br><small class="text-muted"><?= h($dev['serial_number']) ?></small></td>
+                            <td><?= h($dev['registration']) ?></td>
+                            <td><?= formatDate($dev['installation_date']) ?></td>
+                            <td><?= getStatusBadge($dev['inst_status'], 'installation') ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
+            <div class="mt-3 d-flex gap-2">
+                <a href="<?= getBaseUrl() ?>orders.php?action=view&id=<?= $order['id'] ?>" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-external-link-alt me-1"></i>Pełny widok zlecenia
+                </a>
+                <a href="<?= getBaseUrl() ?>devices.php" class="btn btn-sm btn-outline-success">
+                    <i class="fas fa-plus me-1"></i>Przypisz urządzenie
+                </a>
+            </div>
+        </div>
+    </div>
+    <?php
+    exit;
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -311,16 +525,22 @@ include __DIR__ . '/includes/header.php';
         <i class="fas fa-plus-circle me-2 text-success"></i>Nowe zlecenie
         <?php elseif ($action === 'view'): ?>
         <i class="fas fa-clipboard-list me-2 text-primary"></i>Zlecenie <?= h($order['order_number']) ?>
+        <?php elseif ($action === 'demontaze'): ?>
+        <i class="fas fa-tools me-2 text-warning"></i>Demontaże
+        <?php elseif ($action === 'protocols'): ?>
+        <i class="fas fa-clipboard-check me-2 text-info"></i>Protokoły montaży
         <?php else: ?>
-        <i class="fas fa-clipboard-list me-2 text-primary"></i>Zlecenia montażowe
+        <i class="fas fa-clipboard-list me-2 text-primary"></i>Zlecenia
         <?php endif; ?>
     </h1>
     <div class="d-flex gap-2">
-        <?php if ($action === 'list'): ?>
+        <?php if (in_array($action, ['list','my','demontaze','protocols'])): ?>
         <a href="orders.php?action=add" class="btn btn-success"><i class="fas fa-plus me-2"></i>Nowe zlecenie</a>
-        <?php elseif ($action === 'my'): ?>
-        <a href="orders.php?action=add" class="btn btn-success"><i class="fas fa-plus me-2"></i>Nowe zlecenie</a>
-        <a href="orders.php" class="btn btn-outline-secondary"><i class="fas fa-list me-1"></i>Wszystkie zlecenia</a>
+        <?php if ($action === 'demontaze'): ?>
+        <button type="button" class="btn btn-warning text-white" data-bs-toggle="modal" data-bs-target="#newDisassemblyModal"><i class="fas fa-plus me-2"></i>Nowy demontaż</button>
+        <?php elseif ($action === 'protocols'): ?>
+        <a href="protocols.php" class="btn btn-outline-info"><i class="fas fa-plus me-2"></i>Nowy protokół</a>
+        <?php endif; ?>
         <?php elseif ($action === 'add'): ?>
         <a href="orders.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
         <?php elseif ($action === 'view'): ?>
@@ -333,6 +553,32 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if (in_array($action, ['list','my','demontaze','protocols'])): ?>
+<!-- ── TABS NAWIGACJA ──────────────────────────────────────────────── -->
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <a class="nav-link <?= $action === 'list' ? 'active' : '' ?>" href="orders.php">
+            <i class="fas fa-clipboard-list me-1"></i>Zlecenia
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $action === 'my' ? 'active' : '' ?>" href="orders.php?action=my">
+            <i class="fas fa-user-check me-1"></i>Moje zlecenia
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $action === 'demontaze' ? 'active' : '' ?>" href="orders.php?action=demontaze">
+            <i class="fas fa-tools me-1"></i>Demontaże
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $action === 'protocols' ? 'active' : '' ?>" href="orders.php?action=protocols">
+            <i class="fas fa-clipboard-check me-1"></i>Protokoły
+        </a>
+    </li>
+</ul>
+<?php endif; ?>
 
 <?php if ($action === 'list'): ?>
 <!-- ── LISTA ZLECEŃ ──────────────────────────────────────────────── -->
@@ -370,11 +616,8 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
+    <div class="card-header">
         <span><i class="fas fa-clipboard-list me-2"></i>Zlecenia (<?= $totalOrders ?>)</span>
-        <a href="orders.php?action=my" class="btn btn-sm btn-outline-primary">
-            <i class="fas fa-user-check me-1"></i>Moje zlecenia
-        </a>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -394,7 +637,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($orders as $ord): ?>
                 <tr>
                     <td class="fw-semibold">
-                        <a href="orders.php?action=view&id=<?= $ord['id'] ?>">
+                        <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
                             <?= h($ord['order_number']) ?>
                         </a>
                     </td>
@@ -418,9 +661,10 @@ include __DIR__ . '/includes/header.php';
                     </td>
                     <td><?= orderStatusBadge($ord['status']) ?></td>
                     <td>
-                        <a href="orders.php?action=view&id=<?= $ord['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Szczegóły">
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd zlecenia"
+                                onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-eye"></i>
-                        </a>
+                        </button>
                         <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć zlecenie <?= h($ord['order_number']) ?>?')">
                             <?= csrfField() ?>
@@ -433,7 +677,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($orders)): ?>
-                <tr><td colspan="8" class="text-center text-muted py-4">Brak zleceń.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">Brak zleceń. <a href="orders.php?action=add">Utwórz pierwsze zlecenie</a>.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -489,7 +733,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($myOrders as $ord): ?>
                 <tr>
                     <td class="fw-semibold">
-                        <a href="orders.php?action=view&id=<?= $ord['id'] ?>">
+                        <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
                             <?= h($ord['order_number']) ?>
                         </a>
                     </td>
@@ -512,9 +756,10 @@ include __DIR__ . '/includes/header.php';
                     </td>
                     <td><?= orderStatusBadge($ord['status']) ?></td>
                     <td>
-                        <a href="orders.php?action=view&id=<?= $ord['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Szczegóły">
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd zlecenia"
+                                onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-eye"></i>
-                        </a>
+                        </button>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -906,6 +1151,267 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
 </div>
 <?php endif; ?>
 
+<?php elseif ($action === 'demontaze'): ?>
+<!-- ── DEMONTAŻE ──────────────────────────────────────────────────── -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-center">
+            <input type="hidden" name="action" value="demontaze">
+            <div class="col-md-5">
+                <input type="search" name="search" class="form-control form-control-sm"
+                       placeholder="Szukaj (nr seryjny, rejestracja, klient...)"
+                       value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="orders.php?action=demontaze" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header d-flex align-items-center gap-2">
+        <i class="fas fa-tools text-warning me-1"></i>
+        Urządzenia do demontażu (<?= count($disassemblyDevices ?? []) ?>)
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Technik</th><th>Data montażu</th><th>Status</th><th>Akcje</th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($disassemblyDevices ?? [] as $dd): ?>
+                <tr>
+                    <td>
+                        <a href="devices.php?action=view&id=<?= $dd['device_id'] ?>"><?= h($dd['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($dd['manufacturer_name'] . ' ' . $dd['model_name']) ?></small>
+                        <?php if ($dd['imei']): ?><br><small class="text-muted">IMEI: <?= h($dd['imei']) ?></small><?php endif; ?>
+                    </td>
+                    <td>
+                        <?= $dd['registration'] ? h($dd['registration']) : '<span class="text-muted">—</span>' ?>
+                        <?php if ($dd['make']): ?><br><small class="text-muted"><?= h($dd['make']) ?></small><?php endif; ?>
+                    </td>
+                    <td><?= h($dd['company_name'] ?: $dd['contact_name'] ?? '—') ?></td>
+                    <td><?= h($dd['technician_name'] ?? '—') ?></td>
+                    <td><?= $dd['installation_date'] ? formatDate($dd['installation_date']) : '<span class="text-muted">—</span>' ?></td>
+                    <td><?= getStatusBadge($dd['device_status'], 'device') ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action"
+                                title="Zakończ demontaż"
+                                onclick="showCompleteDisassemblyModal(<?= $dd['device_id'] ?>, '<?= h($dd['serial_number']) ?>', <?= (int)($dd['installation_id'] ?? 0) ?>)">
+                            <i class="fas fa-check-circle"></i>
+                        </button>
+                        <a href="devices.php?action=view&id=<?= $dd['device_id'] ?>" class="btn btn-sm btn-outline-secondary btn-action" title="Szczegóły urządzenia">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                        <?php if ($dd['installation_id']): ?>
+                        <a href="installations.php?action=view&id=<?= $dd['installation_id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Otwórz montaż">
+                            <i class="fas fa-car"></i>
+                        </a>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($disassemblyDevices ?? [])): ?>
+                <tr><td colspan="7" class="text-center text-muted p-3"><i class="fas fa-check-circle text-success me-2"></i>Brak urządzeń do demontażu.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Complete Disassembly Modal -->
+<div class="modal fade" id="completeDisassemblyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="complete_disassembly">
+                <input type="hidden" name="device_id" id="cdDeviceId" value="">
+                <input type="hidden" name="installation_id" id="cdInstallationId" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-check-circle me-2 text-success"></i>Zakończ demontaż</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">Urządzenie: <strong id="cdSerialNumber"></strong></p>
+                    <p class="text-muted small mb-3">Po zakończeniu demontażu urządzenie wróci do stanu magazynowego jako <strong>Sprawne</strong>.</p>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Data demontażu</label>
+                        <input type="date" name="disassembly_date" id="cdDate" class="form-control" required value="<?= date('Y-m-d') ?>">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success"><i class="fas fa-check me-1"></i>Zakończ demontaż</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- New Disassembly Modal -->
+<div class="modal fade" id="newDisassemblyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add_disassembly">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-tools me-2 text-warning"></i>Nowy demontaż</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label required-star">Urządzenie do demontażu</label>
+                            <select name="device_id" class="form-select" required>
+                                <option value="">— wybierz urządzenie z aktywnego montażu —</option>
+                                <?php foreach ($activeInstForDis ?? [] as $ai): ?>
+                                <option value="<?= $ai['device_id'] ?>">
+                                    <?= h($ai['serial_number']) ?> — <?= h($ai['manufacturer_name'] . ' ' . $ai['model_name']) ?>
+                                    | Rejestracja: <?= h($ai['registration']) ?>
+                                    <?= ($ai['company_name'] ?: $ai['contact_name']) ? '| ' . h($ai['company_name'] ?: $ai['contact_name']) : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (empty($activeInstForDis ?? [])): ?>
+                            <div class="form-text text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Brak aktywnych montaży do zaplanowania demontażu.</div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik wykonujący demontaż</label>
+                            <select name="technician_id" class="form-select">
+                                <option value="">— aktualny użytkownik —</option>
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>" <?= $currentUser['id'] == $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Planowana data demontażu</label>
+                            <input type="date" name="disassembly_date" class="form-control" value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control" rows="2" placeholder="Powód demontażu, dodatkowe informacje..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-warning text-white" <?= empty($activeInstForDis ?? []) ? 'disabled' : '' ?>>
+                        <i class="fas fa-tools me-1"></i>Zaplanuj demontaż
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function showCompleteDisassemblyModal(deviceId, serial, installationId) {
+    document.getElementById('cdDeviceId').value = deviceId;
+    document.getElementById('cdInstallationId').value = installationId;
+    document.getElementById('cdSerialNumber').textContent = serial;
+    document.getElementById('cdDate').value = new Date().toISOString().split('T')[0];
+    new bootstrap.Modal(document.getElementById('completeDisassemblyModal')).show();
+}
+</script>
+
+<?php elseif ($action === 'protocols'): ?>
+<!-- ── PROTOKOŁY MONTAŻY ────────────────────────────────────────────── -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-center">
+            <input type="hidden" name="action" value="protocols">
+            <div class="col-md-4">
+                <input type="search" name="search" class="form-control form-control-sm"
+                       placeholder="Szukaj (nr protokołu, rejestracja, nr seryjny...)"
+                       value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-md-2">
+                <select name="type" class="form-select form-select-sm">
+                    <option value="">Wszystkie typy</option>
+                    <option value="PP" <?= ($_GET['type'] ?? '') === 'PP' ? 'selected' : '' ?>>PP — Przekazania</option>
+                    <option value="PU" <?= ($_GET['type'] ?? '') === 'PU' ? 'selected' : '' ?>>PU — Uruchomienia</option>
+                    <option value="PS" <?= ($_GET['type'] ?? '') === 'PS' ? 'selected' : '' ?>>PS — Serwisowy</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="orders.php?action=protocols" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-clipboard-check me-2 text-info"></i>Protokoły montaży (<?= count($protocols ?? []) ?>)</span>
+        <small class="text-muted">PP = Przekazania &nbsp;|&nbsp; PU = Uruchomienia &nbsp;|&nbsp; PS = Serwisowy</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Nr protokołu</th><th>Typ</th><th>Data</th><th>Pojazd</th><th>Urządzenie</th><th>Technik</th><th>Akcje</th></tr>
+            </thead>
+            <tbody>
+                <?php
+                $protoTypeLbl   = ['PP' => 'Przekazania', 'PU' => 'Uruchomienia', 'PS' => 'Serwisowy'];
+                $protoTypeColor = ['PP' => 'primary', 'PU' => 'success', 'PS' => 'warning'];
+                foreach ($protocols ?? [] as $p): ?>
+                <tr>
+                    <td class="fw-bold"><a href="protocols.php?action=view&id=<?= $p['id'] ?>"><?= h($p['protocol_number']) ?></a></td>
+                    <td><span class="badge bg-<?= $protoTypeColor[$p['type']] ?? 'secondary' ?>"><?= $protoTypeLbl[$p['type']] ?? h($p['type']) ?></span></td>
+                    <td><?= formatDate($p['date']) ?></td>
+                    <td><?= h($p['registration'] ?? '—') ?></td>
+                    <td><?= h($p['serial_number'] ?? '—') ?><?php if (!empty($p['model_name'])): ?><br><small class="text-muted"><?= h($p['model_name']) ?></small><?php endif; ?></td>
+                    <td><?= h($p['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <a href="protocols.php?action=view&id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-info btn-action" title="Podgląd"><i class="fas fa-eye"></i></a>
+                        <a href="protocols.php?action=print&id=<?= $p['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary btn-action" title="Drukuj"><i class="fas fa-print"></i></a>
+                        <a href="protocols.php?action=edit&id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($protocols ?? [])): ?><tr><td colspan="7" class="text-center text-muted p-3">Brak protokołów montaży.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <?php endif; ?>
+
+<!-- ── MODAL PODGLĄDU ZLECENIA ─────────────────────────────────────── -->
+<div class="modal fade" id="orderPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="orderPreviewTitle"><i class="fas fa-clipboard-list me-2"></i>Zlecenie</h5>
+                <div class="ms-auto d-flex align-items-center gap-2 me-3" id="orderPreviewFullLink"></div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="orderPreviewBody">
+                <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>
+            </div>
+            <div class="modal-footer">
+                <a href="#" id="orderPreviewOpenFull" class="btn btn-outline-primary btn-sm" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Pełny widok</a>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function openOrderModal(orderId, orderNumber) {
+    var modal = new bootstrap.Modal(document.getElementById('orderPreviewModal'));
+    document.getElementById('orderPreviewTitle').innerHTML = '<i class="fas fa-clipboard-list me-2"></i>Zlecenie ' + orderNumber;
+    document.getElementById('orderPreviewOpenFull').href = 'orders.php?action=view&id=' + orderId;
+    document.getElementById('orderPreviewBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>';
+    modal.show();
+    fetch('orders.php?action=view&id=' + orderId + '&ajax=1')
+        .then(function(r) { return r.text(); })
+        .then(function(html) { document.getElementById('orderPreviewBody').innerHTML = html; })
+        .catch(function() { document.getElementById('orderPreviewBody').innerHTML = '<p class="text-danger p-3">Błąd ładowania danych zlecenia.</p>'; });
+}
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
