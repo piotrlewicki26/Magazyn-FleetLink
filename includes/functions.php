@@ -172,6 +172,16 @@ function generateOfferNumber() {
     return sprintf('OF/%s/%s/%04d', $year, $month, $count);
 }
 
+function generateOrderNumber() {
+    $db = getDb();
+    $year  = date('Y');
+    $month = date('m');
+    $stmt  = $db->prepare("SELECT COUNT(*) FROM work_orders WHERE YEAR(created_at) = ? AND MONTH(created_at) = ?");
+    $stmt->execute([$year, $month]);
+    $count = (int)$stmt->fetchColumn() + 1;
+    return sprintf('ZL/%s/%s/%04d', $year, $month, $count);
+}
+
 function generateProtocolNumber($type = 'PP') {
     $db = getDb();
     $year = date('Y');
@@ -396,6 +406,26 @@ function getEmailTemplateDefaults() {
   <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Opis</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
 </table>
 <p>Szczegóły dostępne są w panelu systemu.</p>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'order_created' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#198754;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}} &mdash; Nowe zlecenie montażowe</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
+<p>Witaj <strong>{{TECHNICIAN}}</strong>,</p>
+<p>Zostało Ci przydzielone nowe zlecenie montażowe. Szczegóły poniżej:</p>
+<table style="border-collapse:collapse;width:100%;margin:12px 0">
+  <tr><td style="padding:6px 10px;color:#555;width:40%"><strong>Nr zlecenia</strong></td><td style="padding:6px 10px"><strong>{{ORDER_NUMBER}}</strong></td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Data</strong></td><td style="padding:6px 10px">{{DATE}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Klient</strong></td><td style="padding:6px 10px">{{CLIENT}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Adres montażu</strong></td><td style="padding:6px 10px">{{ADDRESS}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Uwagi</strong></td><td style="padding:6px 10px">{{NOTES}}</td></tr>
+</table>
+<p>Urządzenia GPS do montażu wybierzesz z listy urządzeń w systemie, przypisując je do tego zlecenia.</p>
+<p>Szczegóły zlecenia: <a href="{{ORDER_URL}}">{{ORDER_URL}}</a></p>
 <br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
 ' . $footer . '
 </div></body></html>',

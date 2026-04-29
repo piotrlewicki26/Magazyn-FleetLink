@@ -240,6 +240,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($postAction === 'device_install') {
         $instDeviceId   = (int)($_POST['device_id'] ?? 0);
+        $instWorkOrderId= (int)($_POST['work_order_id'] ?? 0) ?: null;
         $instClientId   = (int)($_POST['client_id'] ?? 0) ?: null;
         $instVehicleId  = (int)($_POST['vehicle_id'] ?? 0) ?: null;
         $instVehicleReg = strtoupper(trim(sanitize($_POST['vehicle_registration_new'] ?? '')));
@@ -247,6 +248,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $instSimNumber  = sanitize($_POST['sim_number'] ?? '');
         $instNotes      = sanitize($_POST['notes'] ?? '');
         $currentUser    = getCurrentUser();
+
+        // If linked to a work order, inherit client_id and date from order if not provided
+        if ($instWorkOrderId) {
+            try {
+                $woRow = $db->prepare("SELECT date, client_id, technician_id FROM work_orders WHERE id=? LIMIT 1");
+                $woRow->execute([$instWorkOrderId]);
+                $woData = $woRow->fetch();
+                if ($woData) {
+                    if (!$instClientId && $woData['client_id']) $instClientId = (int)$woData['client_id'];
+                    if (empty($instDate)) $instDate = $woData['date'];
+                }
+            } catch (PDOException $e) { $instWorkOrderId = null; }
+        }
 
         if (!$instDeviceId || !$instDate) {
             flashError('Urządzenie i data montażu są wymagane.');
@@ -281,13 +295,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE device_id=? AND status='aktywna'")
                ->execute([$instDate, $instDeviceId]);
 
-            // Create new installation
-            $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes) VALUES (?,?,?,?,?,?,?)")
-               ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null]);
+            // Determine insert SQL based on whether work_order_id column exists
+            try {
+                $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes, work_order_id) VALUES (?,?,?,?,?,?,?,?)")
+                   ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null, $instWorkOrderId]);
+            } catch (PDOException $colEx) {
+                // Fallback if work_order_id column not yet added
+                $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes) VALUES (?,?,?,?,?,?,?)")
+                   ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null]);
+            }
+
+            // Update work order status to "w_trakcie" if it was "nowe"
+            if ($instWorkOrderId) {
+                try {
+                    $db->prepare("UPDATE work_orders SET status='w_trakcie' WHERE id=? AND status='nowe'")->execute([$instWorkOrderId]);
+                } catch (PDOException $e) {}
+            }
 
             // Update device status and optionally SIM number
             $prevStatus = $devRow['status'];
-            $simUpdate = $instSimNumber !== '' ? $instSimNumber : null;
             if ($instSimNumber !== '') {
                 $db->prepare("UPDATE devices SET status='zamontowany', sim_number=? WHERE id=?")
                    ->execute([$instSimNumber, $instDeviceId]);
@@ -313,7 +339,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             adjustInventoryForStatusChange($db, $devRow['model_id'], $prevStatus, 'zamontowany');
             $db->commit();
-            flashSuccess('Montaż został zarejestrowany.');
+            if ($instWorkOrderId) {
+                flashSuccess('Montaż zarejestrowany i przypisany do zlecenia.');
+            } else {
+                flashSuccess('Montaż został zarejestrowany.');
+            }
         } catch (Exception $e) {
             $db->rollBack();
             flashError('Błąd podczas rejestracji montażu: ' . $e->getMessage());
@@ -625,12 +655,26 @@ if ($action === 'list') {
 $simCardOptions = [];
 $clientsList    = [];
 $vehiclesList   = [];
+$openWorkOrders = [];
 if ($action === 'list') {
     try {
         $simCardOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN);
     } catch (Exception $e) { $simCardOptions = []; }
     $clientsList = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
     $vehiclesList = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
+    // Load active work orders for the "related to order" dropdown
+    try {
+        $openWorkOrders = $db->query("
+            SELECT wo.id, wo.order_number, wo.date, wo.installation_address,
+                   c.contact_name, c.company_name, c.id as client_id,
+                   u.name as technician_name
+            FROM work_orders wo
+            LEFT JOIN clients c ON c.id=wo.client_id
+            LEFT JOIN users u ON u.id=wo.technician_id
+            WHERE wo.status IN ('nowe','w_trakcie')
+            ORDER BY wo.date DESC, wo.order_number
+        ")->fetchAll();
+    } catch (PDOException $e) { $openWorkOrders = []; }
 }
 
 // Load clients for move_device modal (also needed in view)
@@ -1241,6 +1285,42 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
                 <div class="modal-body">
                     <div class="row g-3">
+
+                        <!-- Powiązanie ze zleceniem -->
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">
+                                <i class="fas fa-clipboard-list me-1 text-primary"></i>Powiązane ze zleceniem
+                            </label>
+                            <select name="work_order_id" id="installWorkOrderSelect" class="form-select">
+                                <option value="">— montaż bez zlecenia (samodzielny) —</option>
+                                <?php
+                                // Build JSON map of order data for JS auto-fill
+                                $woJsMap = [];
+                                foreach ($openWorkOrders as $wo):
+                                    $clientLabel = $wo['company_name'] ? $wo['company_name'] . ' — ' . ($wo['contact_name'] ?? '') : ($wo['contact_name'] ?? '');
+                                    $woJsMap[$wo['id']] = [
+                                        'client_id'   => (int)($wo['client_id'] ?? 0),
+                                        'client_label'=> $clientLabel,
+                                        'date'        => $wo['date'],
+                                        'technician'  => $wo['technician_name'] ?? '',
+                                    ];
+                                ?>
+                                <option value="<?= $wo['id'] ?>"
+                                        data-client-id="<?= (int)($wo['client_id'] ?? 0) ?>"
+                                        data-date="<?= h($wo['date']) ?>">
+                                    <?= h($wo['order_number']) ?> — <?= h($clientLabel ?: '(brak klienta)') ?>
+                                    <?php if ($wo['installation_address']): ?> | <?= h($wo['installation_address']) ?><?php endif; ?>
+                                    (<?= formatDate($wo['date']) ?>)
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (!empty($openWorkOrders)): ?>
+                            <div class="form-text">Wybierz zlecenie, aby automatycznie uzupełnić klienta i datę.</div>
+                            <?php else: ?>
+                            <div class="form-text text-muted">Brak aktywnych zleceń. <a href="orders.php?action=add" target="_blank">Utwórz zlecenie</a></div>
+                            <?php endif; ?>
+                        </div>
+
                         <div class="col-md-6">
                             <label class="form-label required-star">Data montażu</label>
                             <input type="date" name="installation_date" id="installDate" class="form-control" required>
@@ -1323,6 +1403,9 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
 </div>
 <script>
+// Work order data map for auto-filling fields
+var _woDataMap = <?= json_encode($woJsMap ?? []) ?>;
+
 function openInstallModal(deviceId, serial, currentSim) {
     document.getElementById('installDeviceId').value   = deviceId;
     document.getElementById('installDeviceSerial').textContent = serial;
@@ -1331,11 +1414,26 @@ function openInstallModal(deviceId, serial, currentSim) {
     document.getElementById('installVehicleSelect').value = '';
     document.getElementById('installVehicleReg').value = '';
     document.getElementById('installClientSelect').value = '';
+    document.getElementById('installWorkOrderSelect').value = '';
     document.getElementById('addClientForm').classList.add('d-none');
     filterInstallVehicles();
     var modal = new bootstrap.Modal(document.getElementById('installModal'));
     modal.show();
 }
+
+// Auto-fill client and date when order is selected
+document.getElementById('installWorkOrderSelect').addEventListener('change', function() {
+    var orderId = this.value;
+    if (orderId && _woDataMap[orderId]) {
+        var wo = _woDataMap[orderId];
+        if (wo.date) document.getElementById('installDate').value = wo.date;
+        if (wo.client_id) {
+            document.getElementById('installClientSelect').value = wo.client_id;
+            filterInstallVehicles();
+        }
+    }
+});
+
 function filterInstallVehicles() {
     var clientId = document.getElementById('installClientSelect').value;
     document.querySelectorAll('#installVehicleSelect option').forEach(function(opt) {

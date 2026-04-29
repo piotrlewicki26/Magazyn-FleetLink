@@ -109,6 +109,40 @@ if (isset($_GET['json'])) {
         ];
     }
 
+    // Work orders (Zlecenia montażowe) — show as distinct calendar entries
+    try {
+        $woStmt = $db->prepare("
+            SELECT wo.id, wo.order_number, wo.date, wo.status,
+                   wo.installation_address,
+                   c.contact_name, c.company_name,
+                   u.name as technician_name,
+                   (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count
+            FROM work_orders wo
+            LEFT JOIN clients c ON c.id=wo.client_id
+            LEFT JOIN users u ON u.id=wo.technician_id
+            WHERE wo.date BETWEEN ? AND ?
+              AND wo.status NOT IN ('anulowane')
+        ");
+        $woStmt->execute([$start, $end]);
+        foreach ($woStmt->fetchAll() as $wo) {
+            $clientLabel = $wo['company_name'] ?: ($wo['contact_name'] ?: 'brak klienta');
+            $devInfo = $wo['device_count'] > 0 ? ' (' . (int)$wo['device_count'] . ' urządz.)' : '';
+            $woStatusColors = ['nowe' => '#0d6efd', 'w_trakcie' => '#fd7e14', 'zakonczone' => '#198754'];
+            $events[] = [
+                'id'    => 'wo_' . $wo['id'],
+                'title' => '📋 Zlecenie: ' . $wo['order_number'] . ' — ' . $clientLabel . $devInfo,
+                'start' => $wo['date'],
+                'color' => $woStatusColors[$wo['status']] ?? '#198754',
+                'url'   => 'orders.php?action=view&id=' . $wo['id'],
+                'extendedProps' => [
+                    'type'      => 'order',
+                    'technician'=> $wo['technician_name'] ?? '',
+                    'address'   => $wo['installation_address'] ?? '',
+                ],
+            ];
+        }
+    } catch (PDOException $e) { /* work_orders table may not exist yet */ }
+
     // Uninstallations
     $stmt = $db->prepare("
         SELECT i.id, i.uninstallation_date, d.serial_number, m.name as model_name, v.registration
@@ -168,10 +202,11 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="page-header">
-    <h1><i class="fas fa-calendar-alt me-2 text-primary"></i>Kalendarz serwisów i montaży</h1>
+    <h1><i class="fas fa-calendar-alt me-2 text-primary"></i>Kalendarz serwisów i zleceń</h1>
     <div>
+        <a href="orders.php?action=add" class="btn btn-sm btn-outline-success me-1"><i class="fas fa-plus me-1"></i>Nowe zlecenie</a>
         <button type="button" class="btn btn-sm btn-outline-warning me-1" data-bs-toggle="modal" data-bs-target="#calSvcAddModal"><i class="fas fa-plus me-1"></i>Nowy serwis</button>
-        <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#calInstAddModal"><i class="fas fa-plus me-1"></i>Nowy montaż</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#calInstAddModal"><i class="fas fa-plus me-1"></i>Nowy montaż</button>
     </div>
 </div>
 
@@ -194,10 +229,13 @@ include __DIR__ . '/includes/header.php';
                     <span class="badge me-2" style="background:#dc3545">&#9632;</span>Serwis w trakcie
                 </div>
                 <div class="d-flex align-items-center mb-2">
-                    <span class="badge me-2" style="background:#198754">&#9632;</span>Serwis zakończony
+                    <span class="badge me-2" style="background:#198754">&#9632;</span>Serwis zakończony / Zlecenie zakończone
                 </div>
                 <div class="d-flex align-items-center mb-2">
-                    <span class="badge me-2" style="background:#0d6efd">&#9632;</span>Montaż
+                    <span class="badge me-2" style="background:#0d6efd">&#9632;</span>Zlecenie nowe / Montaż
+                </div>
+                <div class="d-flex align-items-center mb-2">
+                    <span class="badge me-2" style="background:#fd7e14">&#9632;</span>Zlecenie w trakcie
                 </div>
                 <div class="d-flex align-items-center">
                     <span class="badge me-2" style="background:#6f42c1">&#9632;</span>Demontaż

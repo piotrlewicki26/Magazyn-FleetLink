@@ -84,6 +84,23 @@ foreach ($recentInstallationRows as $row) {
     if (count($recentInstallations) >= 3) break;
 }
 
+// Recent work orders (Ostatnie zlecenia)
+$recentOrders = [];
+try {
+    $recentOrders = $db->query("
+        SELECT wo.id, wo.order_number, wo.date, wo.status,
+               wo.installation_address,
+               c.contact_name, c.company_name,
+               u.name as technician_name,
+               (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count
+        FROM work_orders wo
+        LEFT JOIN clients c ON c.id=wo.client_id
+        LEFT JOIN users u ON u.id=wo.technician_id
+        ORDER BY wo.date DESC, wo.id DESC
+        LIMIT 5
+    ")->fetchAll();
+} catch (PDOException $e) { $recentOrders = []; }
+
 // Upcoming services
 $upcomingServices = $db->query("
     SELECT s.id, s.planned_date, s.type, s.status, s.description,
@@ -149,13 +166,13 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
                     <div class="stat-number"><?= $stats['active_installations'] ?></div>
-                    <div class="small opacity-75">Montaże</div>
+                    <div class="small opacity-75">Zlecenia</div>
                 </div>
-                <i class="fas fa-car stat-icon"></i>
+                <i class="fas fa-clipboard-list stat-icon"></i>
             </div>
             <div class="card-footer bg-transparent border-0 pt-0">
-                <a href="installations.php" class="text-white-50 small text-decoration-none">
-                    <i class="fas fa-arrow-right me-1"></i>Zobacz wszystkie
+                <a href="orders.php" class="text-white-50 small text-decoration-none">
+                    <i class="fas fa-arrow-right me-1"></i>Zobacz zlecenia
                 </a>
             </div>
         </div>
@@ -195,40 +212,48 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <div class="row g-3">
-    <!-- Recent Installations -->
+    <!-- Recent Orders (Ostatnie zlecenia) -->
     <div class="col-md-6">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-car me-2 text-success"></i>Ostatnie montaże</span>
-                <a href="installations.php" class="btn btn-sm btn-outline-primary">Wszystkie</a>
+                <span><i class="fas fa-clipboard-list me-2 text-success"></i>Ostatnie zlecenia</span>
+                <a href="orders.php" class="btn btn-sm btn-outline-primary">Wszystkie</a>
             </div>
             <div class="card-body p-0">
-                <?php if (empty($recentInstallations)): ?>
-                <div class="p-3 text-muted text-center">Brak montaży</div>
+                <?php if (empty($recentOrders)): ?>
+                <div class="p-3 text-muted text-center">Brak zleceń. <a href="orders.php?action=add">Utwórz pierwsze zlecenie</a>.</div>
                 <?php else: ?>
                 <div class="list-group list-group-flush">
-                    <?php foreach ($recentInstallations as $inst): ?>
-                    <a href="<?= $inst['is_batch'] ? 'installations.php' : 'installations.php?action=view&id=' . $inst['id'] ?>" class="list-group-item list-group-item-action">
+                    <?php foreach ($recentOrders as $ord): ?>
+                    <?php
+                    $orderStatusMap = [
+                        'nowe'      => ['primary', 'Nowe'],
+                        'w_trakcie' => ['warning', 'W trakcie'],
+                        'zakonczone'=> ['success', 'Zakończone'],
+                        'anulowane' => ['danger', 'Anulowane'],
+                    ];
+                    $osi = $orderStatusMap[$ord['status']] ?? ['secondary', $ord['status']];
+                    ?>
+                    <a href="orders.php?action=view&id=<?= $ord['id'] ?>" class="list-group-item list-group-item-action">
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
-                                <?php if ($inst['is_batch']): ?>
-                                <div class="fw-semibold">
-                                    <span class="badge bg-primary me-1"><?= $inst['device_count'] ?> urządz.</span>
-                                    <?= h($inst['registration']) ?> — <?= h($inst['make'] . ' ' . $inst['vehicle_model']) ?>
-                                </div>
-                                <small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?> / <?= h($inst['serial_number']) ?>
-                                <?php if (!empty($inst['extra_serials'])): ?> + <?= count($inst['extra_serials']) ?> więcej<?php endif; ?></small>
-                                <?php else: ?>
-                                <div class="fw-semibold"><?= h($inst['registration']) ?> — <?= h($inst['make'] . ' ' . $inst['vehicle_model']) ?></div>
-                                <small class="text-muted"><?= h($inst['manufacturer_name'] . ' ' . $inst['model_name']) ?> / <?= h($inst['serial_number']) ?></small>
+                                <div class="fw-semibold"><?= h($ord['order_number']) ?></div>
+                                <?php if ($ord['company_name'] || $ord['contact_name']): ?>
+                                <small class="text-muted"><i class="fas fa-user me-1"></i><?= h($ord['company_name'] ?: $ord['contact_name']) ?></small>
                                 <?php endif; ?>
-                                <?php if ($inst['client_name']): ?>
-                                <br><small class="text-muted"><i class="fas fa-user me-1"></i><?= h($inst['company_name'] ?: $inst['client_name']) ?></small>
+                                <?php if ($ord['installation_address']): ?>
+                                <br><small class="text-muted"><i class="fas fa-map-marker-alt me-1"></i><?= h($ord['installation_address']) ?></small>
+                                <?php endif; ?>
+                                <?php if ($ord['technician_name']): ?>
+                                <br><small class="text-muted"><i class="fas fa-user-cog me-1"></i><?= h($ord['technician_name']) ?></small>
                                 <?php endif; ?>
                             </div>
                             <div class="text-end">
-                                <?= getStatusBadge($inst['status'], 'installation') ?>
-                                <br><small class="text-muted"><?= formatDate($inst['installation_date']) ?></small>
+                                <span class="badge bg-<?= $osi[0] ?>"><?= h($osi[1]) ?></span>
+                                <br><small class="text-muted"><?= formatDate($ord['date']) ?></small>
+                                <?php if ($ord['device_count'] > 0): ?>
+                                <br><small class="badge bg-secondary"><?= (int)$ord['device_count'] ?> urządz.</small>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </a>
@@ -295,15 +320,15 @@ include __DIR__ . '/includes/header.php';
                         </button>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <button type="button" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center py-3" onclick="dashOpenInstall()">
-                            <i class="fas fa-car fa-lg mb-1"></i>
-                            <span class="small">Nowy montaż</span>
-                        </button>
+                        <a href="orders.php?action=add" class="btn btn-outline-success quick-action-btn w-100 d-flex flex-column align-items-center py-3">
+                            <i class="fas fa-clipboard-list fa-lg mb-1"></i>
+                            <span class="small">Nowe zlecenie</span>
+                        </a>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
-                        <a href="installations.php?action=my" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-3">
+                        <a href="orders.php?action=my" class="btn btn-outline-primary quick-action-btn w-100 d-flex flex-column align-items-center py-3">
                             <i class="fas fa-user-check fa-lg mb-1"></i>
-                            <span class="small">Moje montaże</span>
+                            <span class="small">Moje zlecenia</span>
                         </a>
                     </div>
                     <div class="col-6 col-md-auto flex-fill">
