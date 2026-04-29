@@ -62,14 +62,13 @@ try {
         "SELECT i.id, i.installation_date, i.client_id, i.technician_id, i.installation_address, i.notes
          FROM installations i
          WHERE i.status IN ('zakonczona','archiwum')
-           AND (i.work_order_id IS NULL OR i.work_order_id = 0)
-         LIMIT 500"
+           AND (i.work_order_id IS NULL OR i.work_order_id = 0)"
     );
     $orphans = $orphanStmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($orphans as $inst) {
-        // Generate a unique order number
+        // Generate a unique order number based on installation id
         $orderNum = 'MIG-' . $inst['id'] . '-' . substr(md5($inst['id'] . $inst['installation_date']), 0, 6);
-        // Check it doesn't already exist
+        // Skip if already migrated (idempotent)
         $exists = $db->prepare("SELECT id FROM work_orders WHERE order_number=?");
         $exists->execute([$orderNum]);
         if ($exists->fetchColumn()) { continue; }
