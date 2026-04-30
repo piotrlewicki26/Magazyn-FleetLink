@@ -171,7 +171,8 @@ if (in_array($action, ['view','edit','print']) && $id) {
 
 $allDevices = $db->query("
     SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
-           COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id
+           COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
+           (SELECT v.registration FROM installations i3 JOIN vehicles v ON v.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1) as active_registration
     FROM devices d
     JOIN models m ON m.id=d.model_id
     JOIN manufacturers mf ON mf.id=m.manufacturer_id
@@ -527,9 +528,9 @@ function showServicePreview(data) {
                             }
                         ?>
                         <option value="<?= $d['id'] ?>"
-                                data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'])) ?>"
+                                data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'] . ' ' . ($d['active_registration'] ?? ''))) ?>"
                                 <?= ($service['device_id'] ?? (int)($_GET['device'] ?? 0)) == $d['id'] ? 'selected' : '' ?>>
-                            <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?>
+                            <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?><?= $d['active_registration'] ? ' [' . h($d['active_registration']) . ']' : '' ?>
                         </option>
                         <?php endforeach; if ($currentGroup) echo '</optgroup>'; ?>
                     </select>
@@ -564,7 +565,7 @@ function showServicePreview(data) {
                         <option value="">— wybierz urządzenie zastępcze —</option>
                         <?php foreach ($allDevices as $repDev): ?>
                         <option value="<?= $repDev['id'] ?>" <?= ($service['replacement_device_id'] ?? 0) == $repDev['id'] ? 'selected' : '' ?>>
-                            <?= h($repDev['serial_number']) ?> — <?= h($repDev['manufacturer_name'] . ' ' . $repDev['model_name']) ?>
+                            <?= h($repDev['serial_number']) ?> — <?= h($repDev['manufacturer_name'] . ' ' . $repDev['model_name']) ?><?= $repDev['active_registration'] ? ' [' . h($repDev['active_registration']) . ']' : '' ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
@@ -956,8 +957,8 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
                                 ?>
                                 <option value="<?= $d['id'] ?>"
                                         data-client="<?= (int)$d['client_id'] ?>"
-                                        data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'])) ?>">
-                                    <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?>
+                                        data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'] . ' ' . ($d['active_registration'] ?? ''))) ?>">
+                                    <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?><?= $d['active_registration'] ? ' [' . h($d['active_registration']) . ']' : '' ?>
                                 </option>
                                 <?php endforeach; if ($slGroup) echo '</optgroup>'; ?>
                             </select>

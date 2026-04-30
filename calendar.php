@@ -109,11 +109,12 @@ if (isset($_GET['json'])) {
         ];
     }
 
-    // Work orders (Zlecenia montażowe) — show as distinct calendar entries
+    // Work orders (Zlecenia montażowe) — group by client+date so multiple orders for the same customer appear as one event
     try {
         $woStmt = $db->prepare("
             SELECT wo.id, wo.order_number, wo.date, wo.status,
                    wo.installation_address,
+                   wo.client_id,
                    c.contact_name, c.company_name,
                    u.name as technician_name,
                    (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count
@@ -124,20 +125,51 @@ if (isset($_GET['json'])) {
               AND wo.status NOT IN ('anulowane')
         ");
         $woStmt->execute([$start, $end]);
-        foreach ($woStmt->fetchAll() as $wo) {
-            $clientLabel = $wo['company_name'] ?: ($wo['contact_name'] ?: 'brak klienta');
-            $devInfo = $wo['device_count'] > 0 ? ' (' . (int)$wo['device_count'] . ' urządz.)' : '';
-            $woStatusColors = ['nowe' => '#0d6efd', 'w_trakcie' => '#fd7e14', 'zakonczone' => '#198754'];
+        $woRows = $woStmt->fetchAll();
+
+        // Group by date + client
+        $woGroups = [];
+        foreach ($woRows as $wo) {
+            $clientKey = $wo['company_name'] ?: ($wo['contact_name'] ?: 'brak klienta');
+            $groupKey  = $wo['date'] . '|' . $clientKey;
+            if (!isset($woGroups[$groupKey])) {
+                $woGroups[$groupKey] = [
+                    'date'        => $wo['date'],
+                    'client'      => $clientKey,
+                    'count'       => 0,
+                    'device_total'=> 0,
+                    'first_id'    => $wo['id'],
+                    'first_number'=> $wo['order_number'],
+                    'status'      => $wo['status'],
+                    'technician'  => $wo['technician_name'] ?? '',
+                    'address'     => $wo['installation_address'] ?? '',
+                ];
+            }
+            $woGroups[$groupKey]['count']++;
+            $woGroups[$groupKey]['device_total'] += (int)$wo['device_count'];
+        }
+
+        $woStatusColors = ['nowe' => '#0d6efd', 'w_trakcie' => '#fd7e14', 'zakonczone' => '#198754'];
+        foreach ($woGroups as $grp) {
+            if ($grp['count'] >= 2) {
+                $title = '📋 Zlecenia: ' . $grp['client'] . ' (' . $grp['count'] . ' zlecenia';
+                $title .= $grp['device_total'] > 0 ? ', ' . $grp['device_total'] . ' urządz.)' : ')';
+                $url = 'orders.php?action=list';
+            } else {
+                $devInfo = $grp['device_total'] > 0 ? ' (' . $grp['device_total'] . ' urządz.)' : '';
+                $title = '📋 Zlecenie: ' . $grp['first_number'] . ' — ' . $grp['client'] . $devInfo;
+                $url = 'orders.php?action=view&id=' . $grp['first_id'];
+            }
             $events[] = [
-                'id'    => 'wo_' . $wo['id'],
-                'title' => '📋 Zlecenie: ' . $wo['order_number'] . ' — ' . $clientLabel . $devInfo,
-                'start' => $wo['date'],
-                'color' => $woStatusColors[$wo['status']] ?? '#198754',
-                'url'   => 'orders.php?action=view&id=' . $wo['id'],
+                'id'    => 'wo_' . $grp['first_id'],
+                'title' => $title,
+                'start' => $grp['date'],
+                'color' => $woStatusColors[$grp['status']] ?? '#198754',
+                'url'   => $url,
                 'extendedProps' => [
-                    'type'      => 'order',
-                    'technician'=> $wo['technician_name'] ?? '',
-                    'address'   => $wo['installation_address'] ?? '',
+                    'type'       => 'order',
+                    'technician' => $grp['technician'],
+                    'address'    => $grp['address'],
                 ],
             ];
         }
@@ -188,7 +220,9 @@ $calAvailableDevices = $db->query("
 $calClients = $db->query("SELECT id, contact_name, company_name, address, city, postal_code FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 $calUsers   = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
 $calAllDevices = $db->query("
-    SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name
+    SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
+           COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
+           (SELECT v.registration FROM installations i3 JOIN vehicles v ON v.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1) as active_registration
     FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id
     WHERE d.status != 'wycofany' ORDER BY mf.name, m.name, d.serial_number
 ")->fetchAll();
@@ -340,8 +374,8 @@ document.addEventListener('DOMContentLoaded', function () {
                                     $grp = $d['manufacturer_name'] . ' ' . $d['model_name'];
                                     if ($grp !== $calSvcGrp) { if ($calSvcGrp) echo '</optgroup>'; echo '<optgroup label="' . h($grp) . '">'; $calSvcGrp = $grp; }
                                 ?>
-                                <option value="<?= $d['id'] ?>" data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'])) ?>">
-                                    <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?>
+                                <option value="<?= $d['id'] ?>" data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'] . ' ' . ($d['active_registration'] ?? ''))) ?>">
+                                    <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?><?= $d['active_registration'] ? ' [' . h($d['active_registration']) . ']' : '' ?>
                                 </option>
                                 <?php endforeach; if ($calSvcGrp) echo '</optgroup>'; ?>
                             </select>

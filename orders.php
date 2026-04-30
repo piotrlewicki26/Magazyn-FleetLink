@@ -895,9 +895,45 @@ include __DIR__ . '/includes/header.php';
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($myOrders as $ord): ?>
-                <tr>
-                    <td class="fw-semibold">
+                <?php
+                // Group myOrders by client_id + date (same as main list)
+                $myGroupedOrders = [];
+                foreach ($myOrders as $ord) {
+                    $groupKey = ($ord['client_id'] ?? '0') . '|' . $ord['date'];
+                    if (!isset($myGroupedOrders[$groupKey])) {
+                        $myGroupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id'], 'date' => $ord['date']];
+                    }
+                    $myGroupedOrders[$groupKey]['orders'][] = $ord;
+                }
+                $myGroupIdx = 0;
+                foreach ($myGroupedOrders as $gKey => $group):
+                    $groupOrders = $group['orders'];
+                    $isGroup = count($groupOrders) > 1;
+                    if ($isGroup):
+                        $myGroupIdx++;
+                        $firstOrd = $groupOrders[0];
+                        $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
+                        $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
+                        $myGroupRowId = 'mygrp' . $myGroupIdx;
+                ?>
+                <tr class="table-light fw-semibold" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')" data-group-id="<?= h($myGroupRowId) ?>">
+                    <td colspan="2" class="text-muted small">
+                        <i class="fas fa-layer-group me-1"></i>Grupa: <?= formatDate($firstOrd['date']) ?>
+                        <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($myGroupRowId) ?>" style="font-size:.75rem"></i>
+                    </td>
+                    <td><?= h($clientLabel) ?></td>
+                    <td class="text-muted small"><?= count($groupOrders) ?> zlecenia</td>
+                    <td><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+                <?php
+                    endif;
+                    foreach ($groupOrders as $ord):
+                ?>
+                <tr class="<?= $isGroup ? 'ps-3 d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($myGroupRowId) . '"' : '' ?>>
+                    <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
+                        <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
                             <?= h($ord['order_number']) ?>
                         </a>
@@ -925,9 +961,23 @@ include __DIR__ . '/includes/header.php';
                                 onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <?php if ($ord['status'] !== 'archiwum'): ?>
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Przenieś do archiwum"
+                                onclick="quickChangeStatus(<?= $ord['id'] ?>, 'archiwum', <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
+                            <i class="fas fa-archive"></i>
+                        </button>
+                        <?php endif; ?>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć zlecenie <?= h($ord['order_number']) ?>?')">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $ord['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
-                <?php endforeach; ?>
+                <?php endforeach; endforeach; ?>
                 <?php if (empty($myOrders)): ?>
                 <tr><td colspan="7" class="text-center text-muted py-4">Nie masz przypisanych zleceń.</td></tr>
                 <?php endif; ?>

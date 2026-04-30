@@ -37,6 +37,17 @@ $dashUsers = [];
 try { $dashUsers = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll(); } catch (Exception $e) {}
 $dashAllDevicesForSim = [];
 try { $dashAllDevicesForSim = $db->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status NOT IN ('wycofany','sprzedany') ORDER BY mf.name, m.name, d.serial_number")->fetchAll(); } catch (Exception $e) {}
+// All non-withdrawn devices with client_id + active vehicle registration for the service modal
+$dashSvcAllDevices = $db->query("
+    SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
+           COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
+           (SELECT v.registration FROM installations i3 JOIN vehicles v ON v.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1) as active_registration
+    FROM devices d
+    JOIN models m ON m.id=d.model_id
+    JOIN manufacturers mf ON mf.id=m.manufacturer_id
+    WHERE d.status != 'wycofany'
+    ORDER BY mf.name, m.name, d.serial_number
+")->fetchAll();
 
 // Recent installations – grouped by batch_id so multi-device batches appear as one row
 // Fetch more rows than needed so PHP grouping can collapse batches into 5 display items
@@ -725,22 +736,19 @@ include __DIR__ . '/includes/header.php';
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label required-star">Urządzenie GPS</label>
-                            <input type="text" id="dashSvcDevSearch" class="form-control form-control-sm mb-1"
-                                   placeholder="Szukaj urządzenia (nr seryjny, model…)" autocomplete="off">
-                            <select name="device_id" id="dashSvcDevSelect" class="form-select" required size="4" style="height:auto">
-                                <option value="">— wybierz urządzenie —</option>
-                                <?php foreach ($dashAvailableDevices as $dd): ?>
-                                <option value="<?= $dd['id'] ?>"
-                                        data-search="<?= h(strtolower($dd['serial_number'] . ' ' . $dd['model_name'] . ' ' . $dd['manufacturer_name'])) ?>">
-                                    <?= h($dd['serial_number']) ?> — <?= h($dd['manufacturer_name'] . ' ' . $dd['model_name']) ?>
+                            <label class="form-label">Filtruj wg klienta</label>
+                            <select id="dashSvcClientFilter" class="form-select form-select-sm">
+                                <option value="">— wszyscy klienci —</option>
+                                <?php foreach ($dashClients as $cl): ?>
+                                <option value="<?= $cl['id'] ?>">
+                                    <?= h($cl['company_name'] ?: $cl['contact_name']) ?>
                                 </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Powiązany montaż (aktywny)</label>
-                            <select name="installation_id" class="form-select">
+                            <select name="installation_id" class="form-select form-select-sm">
                                 <option value="">— brak —</option>
                                 <?php foreach ($dashActiveInstallations as $ainst): ?>
                                 <option value="<?= $ainst['id'] ?>">
@@ -748,6 +756,31 @@ include __DIR__ . '/includes/header.php';
                                 </option>
                                 <?php endforeach; ?>
                             </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label required-star">Urządzenie GPS</label>
+                            <input type="text" id="dashSvcDevSearch" class="form-control form-control-sm mb-1"
+                                   placeholder="Szukaj urządzenia (nr seryjny, model, rejestracja…)" autocomplete="off">
+                            <select name="device_id" id="dashSvcDevSelect" class="form-select" required size="5" style="height:auto">
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php
+                                $dashSvcGroup = '';
+                                foreach ($dashSvcAllDevices as $dd):
+                                    $grp = $dd['manufacturer_name'] . ' ' . $dd['model_name'];
+                                    if ($grp !== $dashSvcGroup) {
+                                        if ($dashSvcGroup) echo '</optgroup>';
+                                        echo '<optgroup label="' . h($grp) . '">';
+                                        $dashSvcGroup = $grp;
+                                    }
+                                ?>
+                                <option value="<?= $dd['id'] ?>"
+                                        data-client="<?= (int)$dd['client_id'] ?>"
+                                        data-search="<?= h(strtolower($dd['serial_number'] . ' ' . $dd['model_name'] . ' ' . $dd['manufacturer_name'] . ' ' . ($dd['active_registration'] ?? ''))) ?>">
+                                    <?= h($dd['serial_number']) ?> — <?= h($dd['manufacturer_name'] . ' ' . $dd['model_name']) ?><?= $dd['active_registration'] ? ' [' . h($dd['active_registration']) . ']' : '' ?>
+                                </option>
+                                <?php endforeach; if ($dashSvcGroup) echo '</optgroup>'; ?>
+                            </select>
+                            <div class="form-text">Wpisz fragment numeru seryjnego, modelu, producenta lub tablicy rejestracyjnej aby przefiltrować listę.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label required-star">Typ serwisu</label>
@@ -1185,14 +1218,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ===== Wyszukiwanie w selekcji urządzenia dla serwisu =====
     var svcSearch = document.getElementById('dashSvcDevSearch');
-    if (svcSearch) {
-        svcSearch.addEventListener('input', function() {
-            var q = svcSearch.value.toLowerCase().trim();
-            document.querySelectorAll('#dashSvcDevSelect option').forEach(function(opt) {
-                if (!opt.value) { opt.style.display = ''; return; }
-                opt.style.display = (!q || (opt.dataset.search || '').includes(q)) ? '' : 'none';
+    var svcClientFilter = document.getElementById('dashSvcClientFilter');
+    function dashSvcFilterDevices() {
+        var q = (svcSearch ? svcSearch.value : '').toLowerCase().trim();
+        var clientId = svcClientFilter ? parseInt(svcClientFilter.value) || 0 : 0;
+        var groups = document.querySelectorAll('#dashSvcDevSelect optgroup');
+        groups.forEach(function(grp) {
+            var anyVisible = false;
+            grp.querySelectorAll('option[data-search]').forEach(function(opt) {
+                var matchSearch = !q || (opt.dataset.search || '').includes(q);
+                var matchClient = !clientId || parseInt(opt.dataset.client || '0') === clientId || parseInt(opt.dataset.client || '0') === 0;
+                opt.style.display = (matchSearch && matchClient) ? '' : 'none';
+                if (matchSearch && matchClient) anyVisible = true;
             });
+            grp.style.display = anyVisible ? '' : 'none';
         });
+    }
+    if (svcSearch) {
+        svcSearch.addEventListener('input', dashSvcFilterDevices);
+    }
+    if (svcClientFilter) {
+        svcClientFilter.addEventListener('change', dashSvcFilterDevices);
     }
 });
 
@@ -1200,7 +1246,10 @@ document.addEventListener('DOMContentLoaded', function() {
 function dashOpenService() {
     document.getElementById('dashSvcDevSearch').value = '';
     document.getElementById('dashSvcDevSelect').value = '';
-    document.querySelectorAll('#dashSvcDevSelect option').forEach(function(opt) { opt.style.display = ''; });
+    document.getElementById('dashSvcClientFilter').value = '';
+    // Reset optgroup / option visibility
+    document.querySelectorAll('#dashSvcDevSelect optgroup').forEach(function(grp) { grp.style.display = ''; });
+    document.querySelectorAll('#dashSvcDevSelect option[data-search]').forEach(function(opt) { opt.style.display = ''; });
     document.getElementById('dashSvcPlannedDate').value = new Date().toISOString().slice(0, 10);
     new bootstrap.Modal(document.getElementById('dashServiceModal')).show();
 }

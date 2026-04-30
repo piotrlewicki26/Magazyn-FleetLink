@@ -1600,7 +1600,30 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script>
-function openSimEdit(deviceId, currentSim) {
+// ===== Walidacja formularza montażu: wymagany pojazd =====
+(function() {
+    var installForm = document.getElementById('installForm');
+    if (!installForm) return;
+    installForm.addEventListener('submit', function(e) {
+        var vehicleSelect = document.getElementById('installVehicleSelect');
+        var vehicleReg    = document.getElementById('installVehicleReg');
+        var hasVehicle    = vehicleSelect && vehicleSelect.value;
+        var hasReg        = vehicleReg && vehicleReg.value.trim() !== '';
+        if (!hasVehicle && !hasReg) {
+            e.preventDefault();
+            var errEl = document.getElementById('installVehicleError');
+            if (!errEl) {
+                errEl = document.createElement('div');
+                errEl.id = 'installVehicleError';
+                errEl.className = 'alert alert-danger mt-2';
+                vehicleReg.parentElement.parentElement.appendChild(errEl);
+            }
+            errEl.textContent = 'Wybierz pojazd z listy lub wpisz nowy numer rejestracyjny.';
+            errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    });
+})();
+</script>
     document.getElementById('simEditDeviceId').value = deviceId;
     document.getElementById('simEditNumber').value = currentSim || '';
     var modal = new bootstrap.Modal(document.getElementById('simEditModal'));
