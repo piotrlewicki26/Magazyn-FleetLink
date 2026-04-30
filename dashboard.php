@@ -40,7 +40,7 @@ try { $dashAllDevicesForSim = $db->query("SELECT d.id, d.serial_number, d.imei, 
 // All non-withdrawn devices with client_id + active vehicle registration for the service modal
 $dashSvcAllDevices = $db->query("
     SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
-           COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
+           COALESCE((SELECT COALESCE(i2.client_id, vv.client_id) FROM installations i2 LEFT JOIN vehicles vv ON vv.id=i2.vehicle_id WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
            (SELECT v.registration FROM installations i3 JOIN vehicles v ON v.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1) as active_registration
     FROM devices d
     JOIN models m ON m.id=d.model_id
@@ -735,24 +735,13 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <div class="modal-body">
                     <div class="row g-3">
-                        <div class="col-md-6">
+                        <div class="col-12">
                             <label class="form-label">Filtruj wg klienta</label>
                             <select id="dashSvcClientFilter" class="form-select form-select-sm">
                                 <option value="">— wszyscy klienci —</option>
                                 <?php foreach ($dashClients as $cl): ?>
                                 <option value="<?= $cl['id'] ?>">
                                     <?= h($cl['company_name'] ?: $cl['contact_name']) ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Powiązany montaż (aktywny)</label>
-                            <select name="installation_id" class="form-select form-select-sm">
-                                <option value="">— brak —</option>
-                                <?php foreach ($dashActiveInstallations as $ainst): ?>
-                                <option value="<?= $ainst['id'] ?>">
-                                    <?= h($ainst['registration'] . ' — ' . $ainst['serial_number']) ?>
                                 </option>
                                 <?php endforeach; ?>
                             </select>

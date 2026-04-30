@@ -440,7 +440,7 @@ $schemaFields = [
             <div class="col-md-6">
                 <h6 class="fw-bold text-uppercase text-muted small mb-3"><i class="fas fa-info-circle me-2"></i>Informacje o systemie</h6>
                 <table class="table table-sm table-borderless mb-0">
-                    <tr><th class="text-muted pe-3" style="width:180px">Wersja aplikacji</th><td><span class="badge bg-primary"><?= defined('APP_VERSION') ? h(APP_VERSION) : '1.0.0' ?></span></td></tr>
+                    <tr><th class="text-muted pe-3" style="width:180px">Wersja aplikacji</th><td><span class="badge bg-primary"><?= defined('APP_VERSION') ? h(APP_VERSION) : '1.2.0' ?></span></td></tr>
                     <tr><th class="text-muted pe-3">Wersja PHP</th><td><?= phpversion() ?></td></tr>
                     <tr><th class="text-muted pe-3">Strefa czasowa</th><td><?= defined('APP_TIMEZONE') ? h(APP_TIMEZONE) : 'Europe/Warsaw' ?></td></tr>
                     <tr><th class="text-muted pe-3">Baza danych</th><td><?= defined('DB_NAME') ? h(DB_HOST . ' / ' . DB_NAME) : '—' ?></td></tr>

@@ -9,7 +9,7 @@ if (!defined('IN_APP')) {
     <div class="container-fluid">
         <div class="row align-items-center">
             <div class="col text-muted" style="font-size:.78rem">
-                &copy; <?= date('Y') ?> FleetLink System GPS v<?= defined('APP_VERSION') ? APP_VERSION : '1.0.0' ?>
+                &copy; <?= date('Y') ?> FleetLink System GPS v<?= defined('APP_VERSION') ? APP_VERSION : '1.2.0' ?>
             </div>
             <div class="col-auto text-muted" style="font-size:.78rem">
                 <a href="https://www.fleetlink.pl" target="_blank" rel="noopener" class="text-muted text-decoration-none me-3">

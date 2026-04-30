@@ -11,7 +11,7 @@ define('DB_PASS', '{{DB_PASS}}');
 define('DB_CHARSET', 'utf8mb4');
 
 define('APP_NAME', 'FleetLink System GPS');
-define('APP_VERSION', '1.0.0');
+define('APP_VERSION', '1.2.0');
 define('APP_TIMEZONE', 'Europe/Warsaw');
 
 define('MAIL_FROM', '{{MAIL_FROM}}');

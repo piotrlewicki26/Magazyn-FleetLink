@@ -422,7 +422,7 @@ if ($action === 'list') {
 } elseif ($action === 'my') {
     $mySearch = sanitize($_GET['search'] ?? '');
     $myStatus = sanitize($_GET['status'] ?? '');
-    $mySql = "SELECT wo.id, wo.order_number, wo.date, wo.status,
+    $mySql = "SELECT wo.id, wo.order_number, wo.date, wo.status, wo.client_id,
               wo.installation_address, wo.notes,
               c.contact_name, c.company_name, c.phone as client_phone,
               u.name as technician_name,
@@ -813,6 +813,10 @@ include __DIR__ . '/includes/header.php';
                     <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
                     <td></td>
                     <td>
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Rozwiń grupę"
+                                onclick="toggleGroupRows('<?= h($groupRowId) ?>')">
+                            <i class="fas fa-eye"></i>
+                        </button>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść wszystkie zlecenia tej grupy do archiwum?')" onclick="event.stopPropagation()">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="archive_group">
@@ -936,6 +940,7 @@ include __DIR__ . '/includes/header.php';
                     <th>Data</th>
                     <th>Klient</th>
                     <th>Adres instalacji</th>
+                    <th>Technik</th>
                     <th>Urządzenia</th>
                     <th>Status</th>
                     <th></th>
@@ -943,7 +948,7 @@ include __DIR__ . '/includes/header.php';
             </thead>
             <tbody>
                 <?php
-                // Group myOrders by client_id (all orders of same client together)
+                // Group myOrders by client_id (separate group per client)
                 $myGroupedOrders = [];
                 foreach ($myOrders as $ord) {
                     $groupKey = $ord['client_id'] ?? '0';
@@ -962,17 +967,38 @@ include __DIR__ . '/includes/header.php';
                         $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
                         $myGroupRowId = 'mygrp' . $myGroupIdx;
+                        $myGroupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
                 ?>
-                <tr class="table-light fw-semibold" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')" data-group-id="<?= h($myGroupRowId) ?>">
-                    <td colspan="2" class="text-muted small">
+                <tr class="table-light fw-semibold" data-group-id="<?= h($myGroupRowId) ?>">
+                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')">
                         <i class="fas fa-layer-group me-1"></i>Klient: <?= h($clientLabel) ?>
+                        <span class="badge bg-secondary ms-1"><?= count($groupOrders) ?></span>
                         <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($myGroupRowId) ?>" style="font-size:.75rem"></i>
                     </td>
-                    <td><?= h($clientLabel) ?></td>
-                    <td class="text-muted small"><?= count($groupOrders) ?> zleceń</td>
-                    <td><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
+                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')"><?= h($clientLabel) ?></td>
+                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')"><?= count($groupOrders) ?> zleceń</td>
+                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
                     <td></td>
-                    <td></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Rozwiń grupę"
+                                onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść wszystkie zlecenia tej grupy do archiwum?')" onclick="event.stopPropagation()">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="archive_group">
+                            <input type="hidden" name="group_ids" value="<?= $myGroupIdsJson ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary btn-action" title="Archiwizuj grupę"><i class="fas fa-archive"></i></button>
+                        </form>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć wszystkie (<?= count($groupOrders) ?>) zlecenia tej grupy?')" onclick="event.stopPropagation()">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete_group">
+                            <input type="hidden" name="group_ids" value="<?= $myGroupIdsJson ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń grupę"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <?php
                     endif;
@@ -995,6 +1021,7 @@ include __DIR__ . '/includes/header.php';
                         <?php endif; ?>
                     </td>
                     <td class="text-muted small"><?= h($ord['installation_address'] ?? '—') ?></td>
+                    <td><?= h($ord['technician_name'] ?? '—') ?></td>
                     <td>
                         <?php if ($ord['device_count'] > 0): ?>
                         <span class="badge bg-success"><?= (int)$ord['device_count'] ?></span>
@@ -1008,6 +1035,12 @@ include __DIR__ . '/includes/header.php';
                                 onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <?php if (!in_array($ord['status'], ['zakonczone','archiwum','anulowane'])): ?>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action" title="Zakończ zlecenie"
+                                onclick="quickChangeStatus(<?= $ord['id'] ?>, 'zakonczone', <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <?php endif; ?>
                         <?php if ($ord['status'] !== 'archiwum'): ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Przenieś do archiwum"
                                 onclick="quickChangeStatus(<?= $ord['id'] ?>, 'archiwum', <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
@@ -1026,7 +1059,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; endforeach; ?>
                 <?php if (empty($myOrders)): ?>
-                <tr><td colspan="7" class="text-center text-muted py-4">Nie masz przypisanych zleceń.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">Nie masz przypisanych zleceń.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>

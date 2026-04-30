@@ -114,7 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
         </div>
         <div class="card-footer text-center text-muted small py-3">
-            FleetLink System GPS v<?= defined('APP_VERSION') ? h(APP_VERSION) : '1.0.0' ?>
+            FleetLink System GPS v<?= defined('APP_VERSION') ? h(APP_VERSION) : '1.2.0' ?>
         </div>
     </div>
 </div>
