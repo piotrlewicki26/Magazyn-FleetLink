@@ -21,8 +21,11 @@ try {
     $navAvailableModels = $_navDb->query("SELECT m.id as model_id, m.name as model_name, mf.name as manufacturer_name, COUNT(d.id) as available_count FROM models m JOIN manufacturers mf ON mf.id=m.manufacturer_id JOIN devices d ON d.model_id=m.id AND d.status IN ('nowy','sprawny') GROUP BY m.id HAVING available_count > 0 ORDER BY mf.name, m.name")->fetchAll();
     $navAvailableDevices = $_navDb->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status IN ('nowy','sprawny') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
     $navAllDevices = $_navDb->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name,
-           COALESCE((SELECT COALESCE(i2.client_id, vv.client_id) FROM installations i2 LEFT JOIN vehicles vv ON vv.id=i2.vehicle_id WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
-           (SELECT v2.registration FROM installations i3 JOIN vehicles v2 ON v2.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1) as active_registration
+           COALESCE(
+               (SELECT COALESCE(i2.client_id, vv.client_id) FROM installations i2 LEFT JOIN vehicles vv ON vv.id=i2.vehicle_id WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1),
+               (SELECT COALESCE(i3.client_id, vv2.client_id) FROM installations i3 LEFT JOIN vehicles vv2 ON vv2.id=i3.vehicle_id WHERE i3.device_id=d.id ORDER BY i3.id DESC LIMIT 1),
+               0) as client_id,
+           (SELECT v2.registration FROM installations i4 JOIN vehicles v2 ON v2.id=i4.vehicle_id WHERE i4.device_id=d.id AND i4.status='aktywna' ORDER BY i4.id DESC LIMIT 1) as active_registration
            FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status NOT IN ('wycofany','sprzedany') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
     $navActiveInstallations = $_navDb->query("SELECT i.id, v.registration, d.serial_number FROM installations i JOIN vehicles v ON v.id=i.vehicle_id JOIN devices d ON d.id=i.device_id WHERE i.status='aktywna' ORDER BY v.registration")->fetchAll();
     $navClients = $_navDb->query("SELECT id, contact_name, company_name, address, city, postal_code FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();

@@ -801,6 +801,10 @@ include __DIR__ . '/includes/header.php';
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
                         $groupRowId = 'grp' . $groupIdx;
                         $groupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
+                        $groupOrdersForModal = array_map(function($o) {
+                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'status'=>$o['status']];
+                        }, $groupOrders);
+                        $groupOrdersModalJson = htmlspecialchars(json_encode($groupOrdersForModal), ENT_QUOTES);
                 ?>
                 <tr class="table-light fw-semibold" data-group-id="<?= h($groupRowId) ?>">
                     <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')">
@@ -813,8 +817,8 @@ include __DIR__ . '/includes/header.php';
                     <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
                     <td></td>
                     <td>
-                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Rozwiń grupę"
-                                onclick="toggleGroupRows('<?= h($groupRowId) ?>')">
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy (modal)"
+                                onclick="openGroupPreviewModal('<?= $groupOrdersModalJson ?>', '<?= addslashes(htmlspecialchars_decode($clientLabel)) ?>')">
                             <i class="fas fa-eye"></i>
                         </button>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść wszystkie zlecenia tej grupy do archiwum?')" onclick="event.stopPropagation()">
@@ -968,6 +972,10 @@ include __DIR__ . '/includes/header.php';
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
                         $myGroupRowId = 'mygrp' . $myGroupIdx;
                         $myGroupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
+                        $myGroupOrdersForModal = array_map(function($o) {
+                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'status'=>$o['status']];
+                        }, $groupOrders);
+                        $myGroupOrdersModalJson = htmlspecialchars(json_encode($myGroupOrdersForModal), ENT_QUOTES);
                 ?>
                 <tr class="table-light fw-semibold" data-group-id="<?= h($myGroupRowId) ?>">
                     <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')">
@@ -980,8 +988,8 @@ include __DIR__ . '/includes/header.php';
                     <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
                     <td></td>
                     <td>
-                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Rozwiń grupę"
-                                onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')">
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy (modal)"
+                                onclick="openGroupPreviewModal('<?= $myGroupOrdersModalJson ?>', '<?= addslashes(htmlspecialchars_decode($clientLabel)) ?>')">
                             <i class="fas fa-eye"></i>
                         </button>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść wszystkie zlecenia tej grupy do archiwum?')" onclick="event.stopPropagation()">
@@ -1923,6 +1931,21 @@ document.getElementById('newOrderModal').addEventListener('hidden.bs.modal', fun
     if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
 });
 </script>
+<div class="modal fade" id="groupPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-layer-group me-2"></i>Podgląd grupy – <span id="groupPreviewClientName"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0" id="groupPreviewBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="orderPreviewModal" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
@@ -1942,6 +1965,44 @@ document.getElementById('newOrderModal').addEventListener('hidden.bs.modal', fun
     </div>
 </div>
 <script>
+function openGroupPreviewModal(ordersJson, clientLabel) {
+    var orders;
+    try { orders = JSON.parse(ordersJson); } catch(e) { alert('Błąd parsowania danych grupy'); return; }
+    document.getElementById('groupPreviewClientName').textContent = clientLabel;
+    var statusLabels = {
+        'nowe':'<span class="badge bg-primary">Nowe</span>',
+        'w_trakcie':'<span class="badge bg-warning text-dark">W trakcie</span>',
+        'zakonczone':'<span class="badge bg-success">Zakończone</span>',
+        'anulowane':'<span class="badge bg-danger">Anulowane</span>',
+        'archiwum':'<span class="badge bg-secondary">Archiwum</span>'
+    };
+    var rows = orders.map(function(o) {
+        var st = statusLabels[o.status] || ('<span class="badge bg-secondary">'+o.status+'</span>');
+        return '<tr>'
+            + '<td class="fw-semibold"><a href="#" onclick="closeGroupOpenOrder('+o.id+','+JSON.stringify(o.order_number)+');return false;">'+escHtml(o.order_number)+'</a></td>'
+            + '<td>'+escHtml(o.date)+'</td>'
+            + '<td>'+escHtml(o.technician_name||'—')+'</td>'
+            + '<td><span class="badge '+(o.device_count>0?'bg-success':'bg-secondary')+'">'+o.device_count+'</span></td>'
+            + '<td>'+st+'</td>'
+            + '<td><button class="btn btn-sm btn-outline-primary btn-action" title="Podgląd" onclick="closeGroupOpenOrder('+o.id+','+JSON.stringify(o.order_number)+')"><i class="fas fa-eye"></i></button></td>'
+            + '</tr>';
+    }).join('');
+    document.getElementById('groupPreviewBody').innerHTML =
+        '<table class="table table-hover mb-0">'
+        + '<thead><tr><th>Nr zlecenia</th><th>Data</th><th>Technik</th><th>Urządzenia</th><th>Status</th><th>Akcje</th></tr></thead>'
+        + '<tbody>'+rows+'</tbody></table>';
+    bootstrap.Modal.getInstance(document.getElementById('groupPreviewModal'))?.hide();
+    new bootstrap.Modal(document.getElementById('groupPreviewModal')).show();
+}
+function closeGroupOpenOrder(orderId, orderNumber) {
+    var gm = bootstrap.Modal.getInstance(document.getElementById('groupPreviewModal'));
+    if (gm) gm.hide();
+    setTimeout(function() { openOrderModal(orderId, orderNumber); }, 300);
+}
+function escHtml(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function openOrderModal(orderId, orderNumber) {
     var modal = new bootstrap.Modal(document.getElementById('orderPreviewModal'));
     document.getElementById('orderPreviewTitle').innerHTML = '<i class="fas fa-clipboard-list me-2"></i>Zlecenie ' + orderNumber;
