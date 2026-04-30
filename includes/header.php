@@ -20,7 +20,10 @@ try {
     try { $navSimOptions = $_navDb->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN); } catch (Exception $_e2) {}
     $navAvailableModels = $_navDb->query("SELECT m.id as model_id, m.name as model_name, mf.name as manufacturer_name, COUNT(d.id) as available_count FROM models m JOIN manufacturers mf ON mf.id=m.manufacturer_id JOIN devices d ON d.model_id=m.id AND d.status IN ('nowy','sprawny') GROUP BY m.id HAVING available_count > 0 ORDER BY mf.name, m.name")->fetchAll();
     $navAvailableDevices = $_navDb->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status IN ('nowy','sprawny') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
-    $navAllDevices = $_navDb->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status NOT IN ('wycofany','sprzedany') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
+    $navAllDevices = $_navDb->query("SELECT d.id, d.serial_number, d.imei, d.sim_number, m.name as model_name, mf.name as manufacturer_name,
+           COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
+           (SELECT v2.registration FROM installations i3 JOIN vehicles v2 ON v2.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1) as active_registration
+           FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status NOT IN ('wycofany','sprzedany') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
     $navActiveInstallations = $_navDb->query("SELECT i.id, v.registration, d.serial_number FROM installations i JOIN vehicles v ON v.id=i.vehicle_id JOIN devices d ON d.id=i.device_id WHERE i.status='aktywna' ORDER BY v.registration")->fetchAll();
     $navClients = $_navDb->query("SELECT id, contact_name, company_name, address, city, postal_code FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
     $navUsers = $_navDb->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
@@ -687,22 +690,19 @@ try {
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label required-star">Urządzenie GPS</label>
-                            <input type="text" id="navSvcDevSearch" class="form-control form-control-sm mb-1"
-                                   placeholder="Szukaj urządzenia (nr seryjny, model…)" autocomplete="off">
-                            <select name="device_id" id="navSvcDevSelect" class="form-select" required size="4" style="height:auto">
-                                <option value="">— wybierz urządzenie —</option>
-                                <?php foreach ($navAllDevices as $dd): ?>
-                                <option value="<?= $dd['id'] ?>"
-                                        data-search="<?= h(strtolower($dd['serial_number'] . ' ' . $dd['model_name'] . ' ' . $dd['manufacturer_name'])) ?>">
-                                    <?= h($dd['serial_number']) ?> — <?= h($dd['manufacturer_name'] . ' ' . $dd['model_name']) ?>
+                            <label class="form-label">Filtruj wg klienta</label>
+                            <select id="navSvcClientFilter" class="form-select form-select-sm">
+                                <option value="">— wszyscy klienci —</option>
+                                <?php foreach ($navClients as $cl): ?>
+                                <option value="<?= $cl['id'] ?>">
+                                    <?= h($cl['company_name'] ?: $cl['contact_name']) ?>
                                 </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Powiązany montaż (aktywny)</label>
-                            <select name="installation_id" class="form-select">
+                            <select name="installation_id" class="form-select form-select-sm">
                                 <option value="">— brak —</option>
                                 <?php foreach ($navActiveInstallations as $ainst): ?>
                                 <option value="<?= $ainst['id'] ?>">
@@ -710,6 +710,31 @@ try {
                                 </option>
                                 <?php endforeach; ?>
                             </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label required-star">Urządzenie GPS</label>
+                            <input type="text" id="navSvcDevSearch" class="form-control form-control-sm mb-1"
+                                   placeholder="Szukaj urządzenia (nr seryjny, model, rejestracja…)" autocomplete="off">
+                            <select name="device_id" id="navSvcDevSelect" class="form-select" required size="5" style="height:auto">
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php
+                                $navSvcGroup = '';
+                                foreach ($navAllDevices as $dd):
+                                    $grp = $dd['manufacturer_name'] . ' ' . $dd['model_name'];
+                                    if ($grp !== $navSvcGroup) {
+                                        if ($navSvcGroup) echo '</optgroup>';
+                                        echo '<optgroup label="' . h($grp) . '">';
+                                        $navSvcGroup = $grp;
+                                    }
+                                ?>
+                                <option value="<?= $dd['id'] ?>"
+                                        data-client="<?= (int)$dd['client_id'] ?>"
+                                        data-search="<?= h(strtolower($dd['serial_number'] . ' ' . $dd['model_name'] . ' ' . $dd['manufacturer_name'] . ' ' . ($dd['active_registration'] ?? ''))) ?>">
+                                    <?= h($dd['serial_number']) ?> — <?= h($dd['manufacturer_name'] . ' ' . $dd['model_name']) ?><?= $dd['active_registration'] ? ' [' . h($dd['active_registration']) . ']' : '' ?>
+                                </option>
+                                <?php endforeach; if ($navSvcGroup) echo '</optgroup>'; ?>
+                            </select>
+                            <div class="form-text">Wpisz fragment numeru seryjnego, modelu, producenta lub tablicy rejestracyjnej aby przefiltrować listę.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label required-star">Typ serwisu</label>
@@ -805,25 +830,39 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    // Device search in nav service modal
+    // Device search + client filter in nav service modal
     var navSvcSearch = document.getElementById('navSvcDevSearch');
     var navSvcSelect = document.getElementById('navSvcDevSelect');
-    if (navSvcSearch && navSvcSelect) {
-        navSvcSearch.addEventListener('input', function () {
-            var q = this.value.toLowerCase();
-            Array.from(navSvcSelect.options).forEach(function (opt) {
-                if (!opt.value) { opt.style.display = ''; return; }
-                opt.style.display = (opt.dataset.search || '').indexOf(q) !== -1 ? '' : 'none';
+    var navSvcClientFilter = document.getElementById('navSvcClientFilter');
+    function navSvcFilterDevices() {
+        var q = (navSvcSearch ? navSvcSearch.value : '').toLowerCase().trim();
+        var clientId = navSvcClientFilter ? parseInt(navSvcClientFilter.value) || 0 : 0;
+        var groups = document.querySelectorAll('#navSvcDevSelect optgroup');
+        groups.forEach(function(grp) {
+            var anyVisible = false;
+            grp.querySelectorAll('option[data-search]').forEach(function(opt) {
+                var matchSearch = !q || (opt.dataset.search || '').includes(q);
+                var matchClient = !clientId || parseInt(opt.dataset.client || '0') === clientId;
+                opt.style.display = (matchSearch && matchClient) ? '' : 'none';
+                if (matchSearch && matchClient) anyVisible = true;
             });
+            grp.style.display = anyVisible ? '' : 'none';
         });
     }
+    if (navSvcSearch) navSvcSearch.addEventListener('input', navSvcFilterDevices);
+    if (navSvcClientFilter) navSvcClientFilter.addEventListener('change', navSvcFilterDevices);
 
-    // Set today's date on service modal open
+    // Set today's date on service modal open + reset filters
     var navSvcModal = document.getElementById('navSvcAddModal');
     if (navSvcModal) {
         navSvcModal.addEventListener('show.bs.modal', function () {
             var d = document.getElementById('navSvcPlannedDate');
             if (d && !d.value) d.value = new Date().toISOString().slice(0, 10);
+            // Reset filters
+            if (navSvcSearch) navSvcSearch.value = '';
+            if (navSvcClientFilter) navSvcClientFilter.value = '';
+            document.querySelectorAll('#navSvcDevSelect optgroup').forEach(function(grp) { grp.style.display = ''; });
+            document.querySelectorAll('#navSvcDevSelect option[data-search]').forEach(function(opt) { opt.style.display = ''; });
         });
     }
 

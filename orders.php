@@ -225,6 +225,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flashSuccess('Zlecenie usunięte.');
         redirect(getBaseUrl() . 'orders.php');
 
+    } elseif ($postAction === 'archive_group') {
+        // Archive all orders in a group (passed as JSON array of IDs)
+        $groupIds = json_decode($_POST['group_ids'] ?? '[]', true);
+        if (!is_array($groupIds)) $groupIds = [];
+        $groupIds = array_map('intval', $groupIds);
+        $groupIds = array_filter($groupIds);
+        if (!empty($groupIds)) {
+            $placeholders = implode(',', array_fill(0, count($groupIds), '?'));
+            $db->prepare("UPDATE work_orders SET status='archiwum' WHERE id IN ($placeholders)")
+               ->execute(array_values($groupIds));
+        }
+        flashSuccess('Wszystkie zlecenia grupy przeniesione do archiwum.');
+        redirect(getBaseUrl() . 'orders.php');
+
+    } elseif ($postAction === 'delete_group') {
+        if (!isAdmin()) { flashError('Kasowanie zleceń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'orders.php'); }
+        $groupIds = json_decode($_POST['group_ids'] ?? '[]', true);
+        if (!is_array($groupIds)) $groupIds = [];
+        $groupIds = array_map('intval', $groupIds);
+        $groupIds = array_filter($groupIds);
+        if (!empty($groupIds)) {
+            $placeholders = implode(',', array_fill(0, count($groupIds), '?'));
+            $db->prepare("UPDATE installations SET work_order_id=NULL WHERE work_order_id IN ($placeholders)")
+               ->execute(array_values($groupIds));
+            $db->prepare("DELETE FROM work_orders WHERE id IN ($placeholders)")
+               ->execute(array_values($groupIds));
+        }
+        flashSuccess('Grupa zleceń usunięta.');
+        redirect(getBaseUrl() . 'orders.php');
+
     } elseif ($postAction === 'change_status') {
         $csId     = (int)($_POST['id'] ?? 0);
         $newSt    = sanitize($_POST['new_status'] ?? '');
@@ -750,12 +780,12 @@ include __DIR__ . '/includes/header.php';
             </thead>
             <tbody>
                 <?php
-                // Group orders by client_id + date when multiple orders share the same client and date
+                // Group orders by client_id (all orders of same client together)
                 $groupedOrders = [];
                 foreach ($orders as $ord) {
-                    $groupKey = ($ord['client_id'] ?? '0') . '|' . $ord['date'];
+                    $groupKey = $ord['client_id'] ?? '0';
                     if (!isset($groupedOrders[$groupKey])) {
-                        $groupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id'], 'date' => $ord['date']];
+                        $groupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id']];
                     }
                     $groupedOrders[$groupKey]['orders'][] = $ord;
                 }
@@ -770,17 +800,34 @@ include __DIR__ . '/includes/header.php';
                         $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
                         $groupRowId = 'grp' . $groupIdx;
+                        $groupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
                 ?>
-                <tr class="table-light fw-semibold" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')" data-group-id="<?= h($groupRowId) ?>">
-                    <td colspan="2" class="text-muted small">
-                        <i class="fas fa-layer-group me-1"></i>Grupa: <?= formatDate($firstOrd['date']) ?>
+                <tr class="table-light fw-semibold" data-group-id="<?= h($groupRowId) ?>">
+                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')">
+                        <i class="fas fa-layer-group me-1"></i>Klient: <?= h($clientLabel) ?>
+                        <span class="badge bg-secondary ms-1"><?= count($groupOrders) ?></span>
                         <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($groupRowId) ?>" style="font-size:.75rem"></i>
                     </td>
-                    <td><?= h($clientLabel) ?></td>
-                    <td colspan="2" class="text-muted small"><?= count($groupOrders) ?> zlecenia</td>
-                    <td><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
+                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><?= h($clientLabel) ?></td>
+                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><?= count($groupOrders) ?> zleceń</td>
+                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
                     <td></td>
-                    <td></td>
+                    <td>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść wszystkie zlecenia tej grupy do archiwum?')" onclick="event.stopPropagation()">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="archive_group">
+                            <input type="hidden" name="group_ids" value="<?= $groupIdsJson ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary btn-action" title="Archiwizuj grupę"><i class="fas fa-archive"></i></button>
+                        </form>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć wszystkie (<?= count($groupOrders) ?>) zlecenia tej grupy?')" onclick="event.stopPropagation()">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete_group">
+                            <input type="hidden" name="group_ids" value="<?= $groupIdsJson ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń grupę"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <?php
                     endif;
@@ -896,12 +943,12 @@ include __DIR__ . '/includes/header.php';
             </thead>
             <tbody>
                 <?php
-                // Group myOrders by client_id + date (same as main list)
+                // Group myOrders by client_id (all orders of same client together)
                 $myGroupedOrders = [];
                 foreach ($myOrders as $ord) {
-                    $groupKey = ($ord['client_id'] ?? '0') . '|' . $ord['date'];
+                    $groupKey = $ord['client_id'] ?? '0';
                     if (!isset($myGroupedOrders[$groupKey])) {
-                        $myGroupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id'], 'date' => $ord['date']];
+                        $myGroupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id']];
                     }
                     $myGroupedOrders[$groupKey]['orders'][] = $ord;
                 }
@@ -918,11 +965,11 @@ include __DIR__ . '/includes/header.php';
                 ?>
                 <tr class="table-light fw-semibold" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')" data-group-id="<?= h($myGroupRowId) ?>">
                     <td colspan="2" class="text-muted small">
-                        <i class="fas fa-layer-group me-1"></i>Grupa: <?= formatDate($firstOrd['date']) ?>
+                        <i class="fas fa-layer-group me-1"></i>Klient: <?= h($clientLabel) ?>
                         <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($myGroupRowId) ?>" style="font-size:.75rem"></i>
                     </td>
                     <td><?= h($clientLabel) ?></td>
-                    <td class="text-muted small"><?= count($groupOrders) ?> zlecenia</td>
+                    <td class="text-muted small"><?= count($groupOrders) ?> zleceń</td>
                     <td><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
                     <td></td>
                     <td></td>

@@ -242,7 +242,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $instDeviceId   = (int)($_POST['device_id'] ?? 0);
         $instWorkOrderId= (int)($_POST['work_order_id'] ?? 0) ?: null;
         $instClientId   = (int)($_POST['client_id'] ?? 0) ?: null;
-        $instVehicleId  = (int)($_POST['vehicle_id'] ?? 0) ?: null;
         $instVehicleReg = strtoupper(trim(sanitize($_POST['vehicle_registration_new'] ?? '')));
         $instDate       = sanitize($_POST['installation_date'] ?? '');
         $instSimNumber  = sanitize($_POST['sim_number'] ?? '');
@@ -266,22 +265,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Urządzenie i data montażu są wymagane.');
             redirect(getBaseUrl() . 'devices.php');
         }
-        // Resolve or create vehicle
-        if (!$instVehicleId && $instVehicleReg) {
-            $vChk = $db->prepare("SELECT id FROM vehicles WHERE registration=? LIMIT 1");
-            $vChk->execute([$instVehicleReg]);
-            $vRow = $vChk->fetch();
-            if ($vRow) {
-                $instVehicleId = $vRow['id'];
-            } else {
-                $db->prepare("INSERT INTO vehicles (registration, client_id) VALUES (?,?)")
-                   ->execute([$instVehicleReg, $instClientId]);
-                $instVehicleId = (int)$db->lastInsertId();
-            }
-        }
-        if (!$instVehicleId) {
-            flashError('Wybierz pojazd lub wpisz numer rejestracyjny.');
+        if (empty($instVehicleReg)) {
+            flashError('Numer rejestracyjny pojazdu jest wymagany.');
             redirect(getBaseUrl() . 'devices.php');
+        }
+        // Resolve or create vehicle
+        $instVehicleId = null;
+        $vChk = $db->prepare("SELECT id FROM vehicles WHERE registration=? LIMIT 1");
+        $vChk->execute([$instVehicleReg]);
+        $vRow = $vChk->fetch();
+        if ($vRow) {
+            $instVehicleId = $vRow['id'];
+        } else {
+            $db->prepare("INSERT INTO vehicles (registration, client_id) VALUES (?,?)")
+               ->execute([$instVehicleReg, $instClientId]);
+            $instVehicleId = (int)$db->lastInsertId();
         }
         // Check device availability
         $devChk = $db->prepare("SELECT id, model_id, status FROM devices WHERE id=? LIMIT 1");
@@ -1377,19 +1375,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             </div>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Pojazd</label>
-                            <select name="vehicle_id" id="installVehicleSelect" class="form-select mb-2">
-                                <option value="">— wybierz z listy —</option>
-                                <?php foreach ($vehiclesList as $veh): ?>
-                                <option value="<?= $veh['id'] ?>" data-client="<?= (int)$veh['client_id'] ?>">
-                                    <?= h($veh['registration'] . ($veh['make'] ? ' ' . $veh['make'] : '') . ($veh['model_name'] ? ' ' . $veh['model_name'] : '')) ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="text-muted small">lub wpisz nowy numer rejestracyjny:</span>
-                                <input type="text" name="vehicle_registration_new" id="installVehicleReg" class="form-control form-control-sm" style="max-width:160px" placeholder="np. WA12345">
-                            </div>
+                            <label class="form-label required-star">Numer rejestracyjny pojazdu</label>
+                            <input type="text" name="vehicle_registration_new" id="installVehicleReg" class="form-control" placeholder="np. WA12345" required>
                         </div>
                         <div class="col-12">
                             <label class="form-label">Uwagi</label>
@@ -1470,12 +1457,10 @@ function openInstallModal(deviceId, serial, currentSim) {
     document.getElementById('installDeviceSerial').textContent = serial;
     document.getElementById('installSim').value        = currentSim || '';
     document.getElementById('installDate').value       = new Date().toISOString().slice(0, 10);
-    document.getElementById('installVehicleSelect').value = '';
     document.getElementById('installVehicleReg').value = '';
     document.getElementById('installClientSelect').value = '';
     document.getElementById('installWorkOrderSelect').value = '';
     document.getElementById('addClientForm').classList.add('d-none');
-    filterInstallVehicles();
     var modal = new bootstrap.Modal(document.getElementById('installModal'));
     modal.show();
 }
@@ -1488,22 +1473,12 @@ document.getElementById('installWorkOrderSelect').addEventListener('change', fun
         if (wo.date) document.getElementById('installDate').value = wo.date;
         if (wo.client_id) {
             document.getElementById('installClientSelect').value = wo.client_id;
-            filterInstallVehicles();
         }
     }
 });
 
 function filterInstallVehicles() {
-    var clientId = document.getElementById('installClientSelect').value;
-    document.querySelectorAll('#installVehicleSelect option').forEach(function(opt) {
-        if (!opt.value) { opt.style.display = ''; return; }
-        if (!clientId || parseInt(opt.dataset.client) === parseInt(clientId) || !opt.dataset.client || parseInt(opt.dataset.client) === 0) {
-            opt.style.display = '';
-        } else {
-            opt.style.display = 'none';
-        }
-    });
-    document.getElementById('installVehicleSelect').value = '';
+    // No-op: vehicle dropdown removed
 }
 document.addEventListener('DOMContentLoaded', function() {
     var installClientSel = document.getElementById('installClientSelect');
@@ -1600,25 +1575,23 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script>
-// ===== Walidacja formularza montażu: wymagany pojazd =====
+// ===== Walidacja formularza montażu: wymagany numer rejestracyjny =====
 (function() {
     var installForm = document.getElementById('installForm');
     if (!installForm) return;
     installForm.addEventListener('submit', function(e) {
-        var vehicleSelect = document.getElementById('installVehicleSelect');
-        var vehicleReg    = document.getElementById('installVehicleReg');
-        var hasVehicle    = vehicleSelect && vehicleSelect.value;
-        var hasReg        = vehicleReg && vehicleReg.value.trim() !== '';
-        if (!hasVehicle && !hasReg) {
+        var vehicleReg = document.getElementById('installVehicleReg');
+        if (!vehicleReg || vehicleReg.value.trim() === '') {
             e.preventDefault();
             var errEl = document.getElementById('installVehicleError');
             if (!errEl) {
                 errEl = document.createElement('div');
                 errEl.id = 'installVehicleError';
                 errEl.className = 'alert alert-danger mt-2';
-                vehicleReg.parentElement.parentElement.appendChild(errEl);
+                vehicleReg.parentElement.appendChild(errEl);
             }
-            errEl.textContent = 'Wybierz pojazd z listy lub wpisz nowy numer rejestracyjny.';
+            errEl.textContent = 'Numer rejestracyjny pojazdu jest wymagany.';
+            vehicleReg.focus();
             errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
     });

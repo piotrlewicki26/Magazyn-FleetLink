@@ -1227,7 +1227,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var anyVisible = false;
             grp.querySelectorAll('option[data-search]').forEach(function(opt) {
                 var matchSearch = !q || (opt.dataset.search || '').includes(q);
-                var matchClient = !clientId || parseInt(opt.dataset.client || '0') === clientId || parseInt(opt.dataset.client || '0') === 0;
+                var matchClient = !clientId || parseInt(opt.dataset.client || '0') === clientId;
                 opt.style.display = (matchSearch && matchClient) ? '' : 'none';
                 if (matchSearch && matchClient) anyVisible = true;
             });
