@@ -1624,6 +1624,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 })();
 </script>
+<script>
+function openSimEdit(deviceId, currentSim) {
     document.getElementById('simEditDeviceId').value = deviceId;
     document.getElementById('simEditNumber').value = currentSim || '';
     var modal = new bootstrap.Modal(document.getElementById('simEditModal'));
