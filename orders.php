@@ -239,6 +239,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flashSuccess('Wszystkie zlecenia grupy przeniesione do archiwum.');
         redirect(getBaseUrl() . 'orders.php');
 
+    } elseif ($postAction === 'restore_group') {
+        // Restore all orders in a group to 'nowe' status
+        $groupIds = json_decode($_POST['group_ids'] ?? '[]', true);
+        if (!is_array($groupIds)) $groupIds = [];
+        $groupIds = array_map('intval', $groupIds);
+        $groupIds = array_filter($groupIds);
+        if (!empty($groupIds)) {
+            $placeholders = implode(',', array_fill(0, count($groupIds), '?'));
+            $db->prepare("UPDATE work_orders SET status='nowe' WHERE id IN ($placeholders)")
+               ->execute(array_values($groupIds));
+        }
+        flashSuccess('Zlecenia grupy przywrócone do statusu Nowe.');
+        redirect(getBaseUrl() . 'orders.php?action=archive');
+
     } elseif ($postAction === 'delete_group') {
         if (!isAdmin()) { flashError('Kasowanie zleceń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'orders.php'); }
         $groupIds = json_decode($_POST['group_ids'] ?? '[]', true);
@@ -669,6 +683,15 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                 <?php if (in_array($order['status'], ['nowe','w_trakcie'])): ?>
                 <form method="POST"><?= csrfField() ?><input type="hidden" name="action" value="change_status"><input type="hidden" name="id" value="<?= $order['id'] ?>"><input type="hidden" name="new_status" value="zakonczone"><button type="submit" class="btn btn-sm btn-success"><i class="fas fa-check me-1"></i>Zakończ</button></form>
                 <form method="POST" onsubmit="return confirm('Anulować zlecenie?')"><?= csrfField() ?><input type="hidden" name="action" value="change_status"><input type="hidden" name="id" value="<?= $order['id'] ?>"><input type="hidden" name="new_status" value="anulowane"><button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-ban me-1"></i>Anuluj zlecenie</button></form>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+            <?php if (in_array($order['status'], ['zakonczone','anulowane','archiwum'])): ?>
+            <hr>
+            <div class="d-flex flex-wrap gap-2">
+                <form method="POST" onsubmit="return confirm('Przywrócić zlecenie do statusu Nowe?')"><?= csrfField() ?><input type="hidden" name="action" value="change_status"><input type="hidden" name="id" value="<?= $order['id'] ?>"><input type="hidden" name="new_status" value="nowe"><button type="submit" class="btn btn-sm btn-outline-primary"><i class="fas fa-undo me-1"></i>Przywróć do Nowych</button></form>
+                <?php if ($order['status'] === 'archiwum'): ?>
+                <form method="POST" onsubmit="return confirm('Zmienić status na W trakcie?')"><?= csrfField() ?><input type="hidden" name="action" value="change_status"><input type="hidden" name="id" value="<?= $order['id'] ?>"><input type="hidden" name="new_status" value="w_trakcie"><button type="submit" class="btn btn-sm btn-outline-warning"><i class="fas fa-play me-1"></i>W trakcie</button></form>
                 <?php endif; ?>
             </div>
             <?php endif; ?>
@@ -1193,9 +1216,72 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($archiveOrders as $ord): ?>
-                <tr>
-                    <td class="fw-semibold">
+                <?php
+                // Group archive orders by client_id
+                $archGroupedOrders = [];
+                foreach ($archiveOrders as $ord) {
+                    $groupKey = $ord['client_id'] ?? '0';
+                    if (!isset($archGroupedOrders[$groupKey])) {
+                        $archGroupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id']];
+                    }
+                    $archGroupedOrders[$groupKey]['orders'][] = $ord;
+                }
+                $archGroupIdx = 0;
+                foreach ($archGroupedOrders as $gKey => $group):
+                    $groupOrders = $group['orders'];
+                    $isGroup = count($groupOrders) > 1;
+                    if ($isGroup):
+                        $archGroupIdx++;
+                        $firstOrd = $groupOrders[0];
+                        $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
+                        $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
+                        $archGroupRowId = 'archgrp' . $archGroupIdx;
+                        $archGroupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
+                        $archGroupOrdersForModal = array_map(function($o) {
+                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'status'=>$o['status']];
+                        }, $groupOrders);
+                        $archGroupOrdersModalJson = htmlspecialchars(json_encode($archGroupOrdersForModal), ENT_QUOTES);
+                ?>
+                <tr class="table-light fw-semibold" data-group-id="<?= h($archGroupRowId) ?>">
+                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')">
+                        <i class="fas fa-layer-group me-1"></i>Klient: <?= h($clientLabel) ?>
+                        <span class="badge bg-secondary ms-1"><?= count($groupOrders) ?></span>
+                        <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($archGroupRowId) ?>" style="font-size:.75rem"></i>
+                    </td>
+                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')"><?= h($clientLabel) ?></td>
+                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')"><?= count($groupOrders) ?> zleceń</td>
+                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
+                    <td></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy"
+                                data-orders="<?= $archGroupOrdersModalJson ?>"
+                                data-client="<?= h($clientLabel) ?>"
+                                onclick="openGroupPreviewModal(this.dataset.orders, this.dataset.client)">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Przywrócić wszystkie zlecenia tej grupy do statusu Nowe?')" onclick="event.stopPropagation()">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="restore_group">
+                            <input type="hidden" name="group_ids" value="<?= $archGroupIdsJson ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-success btn-action" title="Przywróć grupę (Nowe)"><i class="fas fa-undo"></i></button>
+                        </form>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć wszystkie (<?= count($groupOrders) ?>) zlecenia tej grupy?')" onclick="event.stopPropagation()">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete_group">
+                            <input type="hidden" name="group_ids" value="<?= $archGroupIdsJson ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń grupę"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php
+                    endif;
+                    foreach ($groupOrders as $ord):
+                ?>
+                <tr class="<?= $isGroup ? 'ps-3 d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($archGroupRowId) . '"' : '' ?>>
+                    <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
+                        <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
                             <?= h($ord['order_number']) ?>
                         </a>
@@ -1224,6 +1310,10 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                                 onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <button type="button" class="btn btn-sm btn-outline-success btn-action" title="Zmień status"
+                                onclick="openArchiveStatusModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>, '<?= h($ord['status']) ?>')">
+                            <i class="fas fa-exchange-alt"></i>
+                        </button>
                         <?php if (isAdmin()): ?>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć zlecenie <?= h($ord['order_number']) ?>?')">
                             <?= csrfField() ?>
@@ -1234,7 +1324,7 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                         <?php endif; ?>
                     </td>
                 </tr>
-                <?php endforeach; ?>
+                <?php endforeach; endforeach; ?>
                 <?php if (empty($archiveOrders)): ?>
                 <tr><td colspan="8" class="text-center text-muted py-4">Brak zarchiwizowanych zleceń.</td></tr>
                 <?php endif; ?>
@@ -1460,6 +1550,30 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                     <input type="hidden" name="new_status" value="anulowane">
                     <button type="submit" class="btn btn-sm btn-outline-danger">
                         <i class="fas fa-ban me-1"></i>Anuluj zlecenie
+                    </button>
+                </form>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+            <?php if (in_array($order['status'], ['zakonczone','anulowane','archiwum'])): ?>
+            <div class="card-footer d-flex flex-wrap gap-2 py-2">
+                <form method="POST" class="d-inline" onsubmit="return confirm('Przywrócić zlecenie do statusu Nowe?')">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="change_status">
+                    <input type="hidden" name="id" value="<?= $order['id'] ?>">
+                    <input type="hidden" name="new_status" value="nowe">
+                    <button type="submit" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-undo me-1"></i>Przywróć do Nowych
+                    </button>
+                </form>
+                <?php if ($order['status'] === 'archiwum'): ?>
+                <form method="POST" class="d-inline" onsubmit="return confirm('Zmienić status na W trakcie?')">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="change_status">
+                    <input type="hidden" name="id" value="<?= $order['id'] ?>">
+                    <input type="hidden" name="new_status" value="w_trakcie">
+                    <button type="submit" class="btn btn-sm btn-outline-warning">
+                        <i class="fas fa-play me-1"></i>W trakcie
                     </button>
                 </form>
                 <?php endif; ?>
@@ -2200,6 +2314,46 @@ function toggleGroupRows(groupId) {
         else          { icon.classList.remove('fa-chevron-up');   icon.classList.add('fa-chevron-down'); }
     }
 }
+
+function openArchiveStatusModal(orderId, orderNumber, currentStatus) {
+    document.getElementById('archStatusOrderId').value = orderId;
+    document.getElementById('archStatusOrderNumber').textContent = orderNumber;
+    var sel = document.getElementById('archStatusSelect');
+    if (sel) sel.value = currentStatus;
+    new bootstrap.Modal(document.getElementById('archiveStatusModal')).show();
+}
 </script>
+
+<!-- Modal: Zmiana statusu (Archiwum) -->
+<div class="modal fade" id="archiveStatusModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="change_status">
+                <input type="hidden" name="id" id="archStatusOrderId" value="">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="fas fa-exchange-alt me-2"></i>Zmień status</h6>
+                    <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-2">Zlecenie: <strong id="archStatusOrderNumber"></strong></p>
+                    <label class="form-label">Nowy status</label>
+                    <select name="new_status" id="archStatusSelect" class="form-select form-select-sm">
+                        <option value="nowe">Nowe</option>
+                        <option value="w_trakcie">W trakcie</option>
+                        <option value="zakonczone">Zakończone</option>
+                        <option value="anulowane">Anulowane</option>
+                        <option value="archiwum">Archiwum</option>
+                    </select>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Zapisz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
