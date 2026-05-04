@@ -1580,12 +1580,12 @@ document.addEventListener('DOMContentLoaded', function() {
 <script>
 var _woDataMap = <?= json_encode($woJsMap ?? []) ?>;
 
-function _installClientSetFree() {
+function installClientSetFree() {
     document.getElementById('installClientLocked').classList.add('d-none');
     document.getElementById('installClientFree').classList.remove('d-none');
 }
 
-function _installClientSetLocked(clientId, clientLabel) {
+function installClientSetLocked(clientId, clientLabel) {
     document.getElementById('installClientSelect').value = clientId;
     document.getElementById('installClientLockedName').textContent = clientLabel || '(brak nazwy)';
     document.getElementById('installClientLocked').classList.remove('d-none');
@@ -1601,7 +1601,7 @@ function openInstallModal(deviceId, serial, currentSim) {
     document.getElementById('installVehicleReg').value = '';
     document.getElementById('installClientSelect').value = '';
     document.getElementById('installWorkOrderSelect').value = '';
-    _installClientSetFree();
+    installClientSetFree();
     var modal = new bootstrap.Modal(document.getElementById('installModal'));
     modal.show();
 }
@@ -1613,16 +1613,16 @@ document.getElementById('installWorkOrderSelect').addEventListener('change', fun
         var wo = _woDataMap[orderId];
         if (wo.date) document.getElementById('installDate').value = wo.date;
         if (wo.client_id) {
-            _installClientSetLocked(wo.client_id, wo.client_label);
+            installClientSetLocked(wo.client_id, wo.client_label);
         } else {
             // Order has no client — allow free selection
             document.getElementById('installClientSelect').value = '';
-            _installClientSetFree();
+            installClientSetFree();
         }
     } else {
         // No order selected — free selection
         document.getElementById('installClientSelect').value = '';
-        _installClientSetFree();
+        installClientSetFree();
     }
 });
 

@@ -325,9 +325,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ((int)$ar['inst_client_id'] !== $woClientId) {
                             $db->prepare("UPDATE installations SET client_id=? WHERE id=?")->execute([$woClientId, $ar['inst_id']]);
                         }
-                        // Update vehicle client if not set or different, avoiding duplicate registrations per client
+                        // Update vehicle client only if vehicle has no client or already belongs to this client
                         if ($ar['vehicle_id']) {
-                            $db->prepare("UPDATE vehicles SET client_id=? WHERE id=?")->execute([$woClientId, $ar['vehicle_id']]);
+                            $db->prepare("UPDATE vehicles SET client_id=? WHERE id=? AND (client_id IS NULL OR client_id=?)")->execute([$woClientId, $ar['vehicle_id'], $woClientId]);
                         }
                     }
                 }

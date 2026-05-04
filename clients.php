@@ -65,10 +65,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $installationId = (int)($_POST['installation_id'] ?? 0);
         $clientId       = (int)($_POST['client_id'] ?? 0);
         if (!$installationId || !$clientId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId); }
-        $instChk = $db->prepare("SELECT * FROM installations WHERE id=? AND client_id=?");
+        $instChk = $db->prepare("SELECT * FROM installations WHERE id=? AND client_id=? AND status='aktywna'");
         $instChk->execute([$installationId, $clientId]);
         $instRow = $instChk->fetch();
-        if (!$instRow) { flashError('Instalacja nie istnieje lub nie należy do tego klienta.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId); }
+        if (!$instRow) { flashError('Instalacja nie istnieje, nie należy do tego klienta lub nie jest aktywna.'); redirect(getBaseUrl() . 'clients.php?action=view&id=' . $clientId); }
         $currentUser = getCurrentUser();
         $removalNote = '[Odłączono od klienta przez: ' . $currentUser['name'] . ' dnia ' . date('d.m.Y H:i') . ']';
         $db->beginTransaction();
