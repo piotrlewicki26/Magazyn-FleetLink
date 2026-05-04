@@ -92,11 +92,11 @@ function getStatusBadge($status, $type = 'device') {
         'device' => [
             'nowy'       => ['success', 'Nowy'],
             'sprawny'    => ['success', 'Sprawny'],
-            'w_serwisie' => ['warning', 'W serwisie'],
-            'uszkodzony' => ['danger', 'Uszkodzony'],
+            'w_serwisie' => ['warning-orange', 'W serwisie'],
+            'uszkodzony' => ['dark', 'Uszkodzony'],
             'zamontowany'=> ['primary', 'Zamontowany'],
-            'wycofany'   => ['secondary', 'Wycofany'],
-            'sprzedany'  => ['info', 'Sprzedany'],
+            'wycofany'   => ['dark', 'Wycofany'],
+            'sprzedany'  => ['danger', 'Sprzedany'],
             'dzierżawa'    => ['purple', 'Dzierżawa'],
             'do_demontazu' => ['warning-orange', 'Do demontażu'],
         ],
@@ -123,10 +123,10 @@ function getStatusBadge($status, $type = 'device') {
     $item = $map[$type][$status] ?? ['secondary', ucfirst($status)];
     // 'purple' is a custom color not in Bootstrap – render inline
     if ($item[0] === 'purple') {
-        return '<span class="badge" style="background:#6f42c1">' . h($item[1]) . '</span>';
+        return '<span class="badge" style="background:#6f42c1;color:#fff">' . h($item[1]) . '</span>';
     }
     if ($item[0] === 'warning-orange') {
-        return '<span class="badge" style="background:#e67e22">' . h($item[1]) . '</span>';
+        return '<span class="badge" style="background:#e67e22;color:#fff">' . h($item[1]) . '</span>';
     }
     return '<span class="badge bg-' . $item[0] . '">' . h($item[1]) . '</span>';
 }

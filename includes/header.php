@@ -25,7 +25,10 @@ try {
                (SELECT COALESCE(i2.client_id, vv.client_id) FROM installations i2 LEFT JOIN vehicles vv ON vv.id=i2.vehicle_id WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1),
                (SELECT COALESCE(i3.client_id, vv2.client_id) FROM installations i3 LEFT JOIN vehicles vv2 ON vv2.id=i3.vehicle_id WHERE i3.device_id=d.id ORDER BY i3.id DESC LIMIT 1),
                0) as client_id,
-           (SELECT v2.registration FROM installations i4 JOIN vehicles v2 ON v2.id=i4.vehicle_id WHERE i4.device_id=d.id AND i4.status='aktywna' ORDER BY i4.id DESC LIMIT 1) as active_registration
+           COALESCE(
+               (SELECT v2.registration FROM installations i4 JOIN vehicles v2 ON v2.id=i4.vehicle_id WHERE i4.device_id=d.id AND i4.status='aktywna' ORDER BY i4.id DESC LIMIT 1),
+               (SELECT v3.registration FROM installations i5 JOIN vehicles v3 ON v3.id=i5.vehicle_id WHERE i5.device_id=d.id ORDER BY i5.id DESC LIMIT 1)
+           ) as active_registration
            FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.status NOT IN ('wycofany','sprzedany') ORDER BY mf.name, m.name, d.serial_number")->fetchAll();
     $navActiveInstallations = $_navDb->query("SELECT i.id, v.registration, d.serial_number FROM installations i JOIN vehicles v ON v.id=i.vehicle_id JOIN devices d ON d.id=i.device_id WHERE i.status='aktywna' ORDER BY v.registration")->fetchAll();
     $navClients = $_navDb->query("SELECT id, contact_name, company_name, address, city, postal_code FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
@@ -191,7 +194,7 @@ try {
                     <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
                         <i class="fas fa-sitemap me-1"></i>Schematy
                     </a>
-                    <ul class="dropdown-menu">
+                    <ul class="dropdown-menu" style="max-height:80vh;overflow-y:auto">
                         <?php foreach ($navSchemas as $schemaIdx => $schema): $schemaId = 'schemaPass' . $schemaIdx; ?>
                         <li>
                             <a class="dropdown-item" href="<?= h($schema['url']) ?>" target="_blank" rel="noopener noreferrer">

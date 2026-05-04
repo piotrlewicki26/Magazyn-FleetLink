@@ -381,16 +381,22 @@ try {
 $orders = [];
 $totalOrders = 0;
 $myOrders = [];
+$myTotalOrders = 0;
+$archiveOrders = [];
+$archiveTotalOrders = 0;
 
 if ($action === 'list') {
     $filterStatus = sanitize($_GET['status'] ?? '');
     $search = sanitize($_GET['search'] ?? '');
     $filterTech = (int)($_GET['technician'] ?? 0);
+    $perPage = in_array((int)($_GET['per_page'] ?? 10), [10, 50, 100]) ? (int)($_GET['per_page'] ?? 10) : 10;
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $offset = ($page - 1) * $perPage;
 
     $countSql = "SELECT COUNT(*) FROM work_orders wo
         LEFT JOIN clients c ON c.id=wo.client_id
         LEFT JOIN users u ON u.id=wo.technician_id
-        WHERE 1=1";
+        WHERE wo.status != 'archiwum'";
     $listSql = "SELECT wo.id, wo.order_number, wo.date, wo.status, wo.client_id,
                wo.installation_address, wo.notes,
                c.contact_name, c.company_name, c.phone as client_phone,
@@ -399,9 +405,9 @@ if ($action === 'list') {
         FROM work_orders wo
         LEFT JOIN clients c ON c.id=wo.client_id
         LEFT JOIN users u ON u.id=wo.technician_id
-        WHERE 1=1";
+        WHERE wo.status != 'archiwum'";
     $params = [];
-    if ($filterStatus) { $listSql .= " AND wo.status=?"; $countSql .= " AND wo.status=?"; $params[] = $filterStatus; }
+    if ($filterStatus && $filterStatus !== 'archiwum') { $listSql .= " AND wo.status=?"; $countSql .= " AND wo.status=?"; $params[] = $filterStatus; }
     if ($filterTech)   { $listSql .= " AND wo.technician_id=?"; $countSql .= " AND wo.technician_id=?"; $params[] = $filterTech; }
     if ($search) {
         $clause = " AND (wo.order_number LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ? OR wo.installation_address LIKE ?)";
@@ -413,15 +419,22 @@ if ($action === 'list') {
     $countStmt->execute($params);
     $totalOrders = (int)$countStmt->fetchColumn();
 
-    $listSql .= " ORDER BY wo.date DESC, wo.id DESC";
+    $listSql .= " ORDER BY wo.date DESC, wo.id DESC LIMIT ? OFFSET ?";
 
     $listStmt = $db->prepare($listSql);
-    $listStmt->execute($params);
+    $listStmt->execute(array_merge($params, [$perPage, $offset]));
     $orders = $listStmt->fetchAll();
 
 } elseif ($action === 'my') {
     $mySearch = sanitize($_GET['search'] ?? '');
     $myStatus = sanitize($_GET['status'] ?? '');
+    $myPerPage = in_array((int)($_GET['per_page'] ?? 10), [10, 50, 100]) ? (int)($_GET['per_page'] ?? 10) : 10;
+    $myPage = max(1, (int)($_GET['page'] ?? 1));
+    $myOffset = ($myPage - 1) * $myPerPage;
+
+    $myCountSql = "SELECT COUNT(*) FROM work_orders wo
+        LEFT JOIN clients c ON c.id=wo.client_id
+        WHERE wo.technician_id=? AND wo.status != 'archiwum'";
     $mySql = "SELECT wo.id, wo.order_number, wo.date, wo.status, wo.client_id,
               wo.installation_address, wo.notes,
               c.contact_name, c.company_name, c.phone as client_phone,
@@ -430,17 +443,58 @@ if ($action === 'list') {
        FROM work_orders wo
        LEFT JOIN clients c ON c.id=wo.client_id
        LEFT JOIN users u ON u.id=wo.technician_id
-       WHERE wo.technician_id=?";
+       WHERE wo.technician_id=? AND wo.status != 'archiwum'";
     $myParams = [(int)$currentUser['id']];
-    if ($myStatus) { $mySql .= " AND wo.status=?"; $myParams[] = $myStatus; }
+    $myCountParams = [(int)$currentUser['id']];
+    if ($myStatus && $myStatus !== 'archiwum') { $mySql .= " AND wo.status=?"; $myCountSql .= " AND wo.status=?"; $myParams[] = $myStatus; $myCountParams[] = $myStatus; }
     if ($mySearch) {
-        $mySql .= " AND (wo.order_number LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ?)";
+        $clause = " AND (wo.order_number LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ?)";
+        $mySql .= $clause; $myCountSql .= $clause;
         $myParams = array_merge($myParams, ["%$mySearch%","%$mySearch%","%$mySearch%"]);
+        $myCountParams = array_merge($myCountParams, ["%$mySearch%","%$mySearch%","%$mySearch%"]);
     }
-    $mySql .= " ORDER BY wo.date DESC, wo.id DESC";
+    $myCountStmt = $db->prepare($myCountSql);
+    $myCountStmt->execute($myCountParams);
+    $myTotalOrders = (int)$myCountStmt->fetchColumn();
+    $mySql .= " ORDER BY wo.date DESC, wo.id DESC LIMIT ? OFFSET ?";
     $myStmt = $db->prepare($mySql);
-    $myStmt->execute($myParams);
+    $myStmt->execute(array_merge($myParams, [$myPerPage, $myOffset]));
     $myOrders = $myStmt->fetchAll();
+
+} elseif ($action === 'archive') {
+    $archSearch = sanitize($_GET['search'] ?? '');
+    $archTech = (int)($_GET['technician'] ?? 0);
+    $archPerPage = in_array((int)($_GET['per_page'] ?? 10), [10, 50, 100]) ? (int)($_GET['per_page'] ?? 10) : 10;
+    $archPage = max(1, (int)($_GET['page'] ?? 1));
+    $archOffset = ($archPage - 1) * $archPerPage;
+
+    $archCountSql = "SELECT COUNT(*) FROM work_orders wo
+        LEFT JOIN clients c ON c.id=wo.client_id
+        LEFT JOIN users u ON u.id=wo.technician_id
+        WHERE wo.status = 'archiwum'";
+    $archSql = "SELECT wo.id, wo.order_number, wo.date, wo.status, wo.client_id,
+               wo.installation_address, wo.notes,
+               c.contact_name, c.company_name, c.phone as client_phone,
+               u.name as technician_name,
+               (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count
+        FROM work_orders wo
+        LEFT JOIN clients c ON c.id=wo.client_id
+        LEFT JOIN users u ON u.id=wo.technician_id
+        WHERE wo.status = 'archiwum'";
+    $archParams = [];
+    if ($archTech) { $archSql .= " AND wo.technician_id=?"; $archCountSql .= " AND wo.technician_id=?"; $archParams[] = $archTech; }
+    if ($archSearch) {
+        $clause = " AND (wo.order_number LIKE ? OR c.contact_name LIKE ? OR c.company_name LIKE ? OR wo.installation_address LIKE ?)";
+        $archSql .= $clause; $archCountSql .= $clause;
+        $archParams = array_merge($archParams, ["%$archSearch%","%$archSearch%","%$archSearch%","%$archSearch%"]);
+    }
+    $archCountStmt = $db->prepare($archCountSql);
+    $archCountStmt->execute($archParams);
+    $archiveTotalOrders = (int)$archCountStmt->fetchColumn();
+    $archSql .= " ORDER BY wo.date DESC, wo.id DESC LIMIT ? OFFSET ?";
+    $archStmt = $db->prepare($archSql);
+    $archStmt->execute(array_merge($archParams, [$archPerPage, $archOffset]));
+    $archiveOrders = $archStmt->fetchAll();
 
 } elseif ($action === 'view' && $id) {
     $ordStmt = $db->prepare("
@@ -569,6 +623,7 @@ $pageTitleMap = [
     'add'       => 'Nowe zlecenie',
     'demontaze' => 'Demontaże',
     'protocols' => 'Protokoły montaży',
+    'archive'   => 'Archiwum zleceń',
 ];
 $pageTitle = $pageTitleMap[$action] ?? 'Zlecenia montażowe';
 
@@ -671,12 +726,14 @@ include __DIR__ . '/includes/header.php';
         <i class="fas fa-tools me-2 text-warning"></i>Demontaże
         <?php elseif ($action === 'protocols'): ?>
         <i class="fas fa-clipboard-check me-2 text-info"></i>Protokoły montaży
+        <?php elseif ($action === 'archive'): ?>
+        <i class="fas fa-archive me-2 text-secondary"></i>Archiwum zleceń
         <?php else: ?>
         <i class="fas fa-clipboard-list me-2 text-primary"></i>Zlecenia
         <?php endif; ?>
     </h1>
     <div class="d-flex gap-2">
-        <?php if (in_array($action, ['list','my','demontaze','protocols'])): ?>
+        <?php if (in_array($action, ['list','my','demontaze','protocols','archive'])): ?>
         <?php if ($action === 'list'): ?>
         <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#newOrderModal"><i class="fas fa-plus me-2"></i>Nowe zlecenie</button>
         <?php endif; ?>
@@ -698,7 +755,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php if (in_array($action, ['list','my','demontaze','protocols'])): ?>
+<?php if (in_array($action, ['list','my','demontaze','protocols','archive'])): ?>
 <!-- ── TABS NAWIGACJA ──────────────────────────────────────────────── -->
 <ul class="nav nav-tabs mb-3">
     <li class="nav-item">
@@ -709,6 +766,11 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $action === 'my' ? 'active' : '' ?>" href="orders.php?action=my">
             <i class="fas fa-user-check me-1"></i>Moje zlecenia
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $action === 'archive' ? 'active' : '' ?>" href="orders.php?action=archive">
+            <i class="fas fa-archive me-1"></i>Archiwum
         </a>
     </li>
     <li class="nav-item">
@@ -741,15 +803,21 @@ include __DIR__ . '/includes/header.php';
                     <option value="w_trakcie"  <?= ($_GET['status'] ?? '') === 'w_trakcie'  ? 'selected' : '' ?>>W trakcie</option>
                     <option value="zakonczone" <?= ($_GET['status'] ?? '') === 'zakonczone' ? 'selected' : '' ?>>Zakończone</option>
                     <option value="anulowane"  <?= ($_GET['status'] ?? '') === 'anulowane'  ? 'selected' : '' ?>>Anulowane</option>
-                    <option value="archiwum"   <?= ($_GET['status'] ?? '') === 'archiwum'   ? 'selected' : '' ?>>Archiwum</option>
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <select name="technician" class="form-select form-select-sm">
                     <option value="">Wszyscy technicy</option>
                     <?php foreach ($users as $u): ?>
                     <option value="<?= $u['id'] ?>" <?= ($_GET['technician'] ?? '') == $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
                     <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="per_page" class="form-select form-select-sm" style="width:auto">
+                    <option value="10"  <?= ($perPage ?? 10) == 10  ? 'selected' : '' ?>>10 / stronę</option>
+                    <option value="50"  <?= ($perPage ?? 10) == 50  ? 'selected' : '' ?>>50 / stronę</option>
+                    <option value="100" <?= ($perPage ?? 10) == 100 ? 'selected' : '' ?>>100 / stronę</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -818,7 +886,9 @@ include __DIR__ . '/includes/header.php';
                     <td></td>
                     <td>
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy (modal)"
-                                onclick="openGroupPreviewModal('<?= $groupOrdersModalJson ?>', '<?= addslashes(htmlspecialchars_decode($clientLabel)) ?>')">
+                                data-orders="<?= $groupOrdersModalJson ?>"
+                                data-client="<?= h($clientLabel) ?>"
+                                onclick="openGroupPreviewModal(this.dataset.orders, this.dataset.client)">
                             <i class="fas fa-eye"></i>
                         </button>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść wszystkie zlecenia tej grupy do archiwum?')" onclick="event.stopPropagation()">
@@ -878,20 +948,10 @@ include __DIR__ . '/includes/header.php';
                             <i class="fas fa-check"></i>
                         </button>
                         <?php endif; ?>
-                        <?php if ($ord['status'] !== 'archiwum'): ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Przenieś do archiwum"
                                 onclick="quickChangeStatus(<?= $ord['id'] ?>, 'archiwum', <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-archive"></i>
                         </button>
-                        <?php endif; ?>
-                        <?php if (isAdmin()): ?>
-                        <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć zlecenie <?= h($ord['order_number']) ?>?')">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="id" value="<?= $ord['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń"><i class="fas fa-trash"></i></button>
-                        </form>
-                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; endforeach; ?>
@@ -902,6 +962,10 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+<?php
+$_listUrl = rtrim('orders.php?' . http_build_query(array_filter(['search' => $_GET['search'] ?? '', 'status' => $_GET['status'] ?? '', 'technician' => $_GET['technician'] ?? '', 'per_page' => $perPage != 10 ? $perPage : ''])), '?');
+echo paginate($totalOrders, $perPage, $page, $_listUrl);
+?>
 
 <?php elseif ($action === 'my'): ?>
 <!-- ── MOJE ZLECENIA ──────────────────────────────────────────────── -->
@@ -921,7 +985,13 @@ include __DIR__ . '/includes/header.php';
                     <option value="w_trakcie"  <?= ($_GET['status'] ?? '') === 'w_trakcie'  ? 'selected' : '' ?>>W trakcie</option>
                     <option value="zakonczone" <?= ($_GET['status'] ?? '') === 'zakonczone' ? 'selected' : '' ?>>Zakończone</option>
                     <option value="anulowane"  <?= ($_GET['status'] ?? '') === 'anulowane'  ? 'selected' : '' ?>>Anulowane</option>
-                    <option value="archiwum"   <?= ($_GET['status'] ?? '') === 'archiwum'   ? 'selected' : '' ?>>Archiwum</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="per_page" class="form-select form-select-sm" style="width:auto">
+                    <option value="10"  <?= ($myPerPage ?? 10) == 10  ? 'selected' : '' ?>>10 / stronę</option>
+                    <option value="50"  <?= ($myPerPage ?? 10) == 50  ? 'selected' : '' ?>>50 / stronę</option>
+                    <option value="100" <?= ($myPerPage ?? 10) == 100 ? 'selected' : '' ?>>100 / stronę</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -934,7 +1004,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="card">
     <div class="card-header">
-        <i class="fas fa-user-check me-2"></i>Moje zlecenia — <?= h($currentUser['name']) ?> (<?= count($myOrders) ?>)
+        <i class="fas fa-user-check me-2"></i>Moje zlecenia — <?= h($currentUser['name']) ?> (<?= $myTotalOrders ?>)
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -989,7 +1059,9 @@ include __DIR__ . '/includes/header.php';
                     <td></td>
                     <td>
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy (modal)"
-                                onclick="openGroupPreviewModal('<?= $myGroupOrdersModalJson ?>', '<?= addslashes(htmlspecialchars_decode($clientLabel)) ?>')">
+                                data-orders="<?= $myGroupOrdersModalJson ?>"
+                                data-client="<?= h($clientLabel) ?>"
+                                onclick="openGroupPreviewModal(this.dataset.orders, this.dataset.client)">
                             <i class="fas fa-eye"></i>
                         </button>
                         <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść wszystkie zlecenia tej grupy do archiwum?')" onclick="event.stopPropagation()">
@@ -1049,20 +1121,10 @@ include __DIR__ . '/includes/header.php';
                             <i class="fas fa-check"></i>
                         </button>
                         <?php endif; ?>
-                        <?php if ($ord['status'] !== 'archiwum'): ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Przenieś do archiwum"
                                 onclick="quickChangeStatus(<?= $ord['id'] ?>, 'archiwum', <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
                             <i class="fas fa-archive"></i>
                         </button>
-                        <?php endif; ?>
-                        <?php if (isAdmin()): ?>
-                        <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć zlecenie <?= h($ord['order_number']) ?>?')">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="id" value="<?= $ord['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń"><i class="fas fa-trash"></i></button>
-                        </form>
-                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; endforeach; ?>
@@ -1073,6 +1135,117 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+<?php
+$_myUrl = rtrim('orders.php?' . http_build_query(array_filter(['action' => 'my', 'search' => $_GET['search'] ?? '', 'status' => $_GET['status'] ?? '', 'per_page' => $myPerPage != 10 ? $myPerPage : ''])), '?');
+echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
+?>
+
+<?php elseif ($action === 'archive'): ?>
+<!-- ── ARCHIWUM ZLECEŃ ──────────────────────────────────────────────── -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-center">
+            <input type="hidden" name="action" value="archive">
+            <div class="col-md-3">
+                <input type="search" name="search" class="form-control form-control-sm"
+                       placeholder="Szukaj (nr zlecenia, klient, adres...)"
+                       value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-md-2">
+                <select name="technician" class="form-select form-select-sm">
+                    <option value="">Wszyscy technicy</option>
+                    <?php foreach ($users as $u): ?>
+                    <option value="<?= $u['id'] ?>" <?= ($_GET['technician'] ?? '') == $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="per_page" class="form-select form-select-sm" style="width:auto">
+                    <option value="10"  <?= ($archPerPage ?? 10) == 10  ? 'selected' : '' ?>>10 / stronę</option>
+                    <option value="50"  <?= ($archPerPage ?? 10) == 50  ? 'selected' : '' ?>>50 / stronę</option>
+                    <option value="100" <?= ($archPerPage ?? 10) == 100 ? 'selected' : '' ?>>100 / stronę</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="orders.php?action=archive" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span><i class="fas fa-archive me-2"></i>Archiwum zleceń (<?= $archiveTotalOrders ?>)</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Nr zlecenia</th>
+                    <th>Data</th>
+                    <th>Klient</th>
+                    <th>Adres instalacji</th>
+                    <th>Technik</th>
+                    <th>Urządzenia</th>
+                    <th>Status</th>
+                    <th>Akcje</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($archiveOrders as $ord): ?>
+                <tr>
+                    <td class="fw-semibold">
+                        <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
+                            <?= h($ord['order_number']) ?>
+                        </a>
+                    </td>
+                    <td><?= formatDate($ord['date']) ?></td>
+                    <td>
+                        <?php if ($ord['company_name']): ?>
+                        <div class="fw-semibold"><?= h($ord['company_name']) ?></div>
+                        <small class="text-muted"><?= h($ord['contact_name'] ?? '') ?></small>
+                        <?php else: ?>
+                        <?= h($ord['contact_name'] ?? '—') ?>
+                        <?php endif; ?>
+                    </td>
+                    <td class="text-muted small"><?= h($ord['installation_address'] ?? '—') ?></td>
+                    <td><?= h($ord['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <?php if ($ord['device_count'] > 0): ?>
+                        <span class="badge bg-success"><?= (int)$ord['device_count'] ?></span>
+                        <?php else: ?>
+                        <span class="badge bg-secondary">0</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= orderStatusBadge($ord['status']) ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd zlecenia"
+                                onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>)">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Usunąć zlecenie <?= h($ord['order_number']) ?>?')">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $ord['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($archiveOrders)): ?>
+                <tr><td colspan="8" class="text-center text-muted py-4">Brak zarchiwizowanych zleceń.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php
+$_archUrl = rtrim('orders.php?' . http_build_query(array_filter(['action' => 'archive', 'search' => $_GET['search'] ?? '', 'technician' => $_GET['technician'] ?? '', 'per_page' => $archPerPage != 10 ? $archPerPage : ''])), '?');
+echo paginate($archiveTotalOrders, $archPerPage, $archPage, $_archUrl);
+?>
 
 <?php elseif ($action === 'add'): ?>
 <!-- ── NOWE ZLECENIE ──────────────────────────────────────────────── -->

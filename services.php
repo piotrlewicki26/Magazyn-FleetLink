@@ -172,7 +172,10 @@ if (in_array($action, ['view','edit','print']) && $id) {
 $allDevices = $db->query("
     SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
            COALESCE((SELECT i2.client_id FROM installations i2 WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1), 0) as client_id,
-           (SELECT v.registration FROM installations i3 JOIN vehicles v ON v.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1) as active_registration
+           COALESCE(
+               (SELECT v.registration FROM installations i3 JOIN vehicles v ON v.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1),
+               (SELECT v.registration FROM installations i4 JOIN vehicles v ON v.id=i4.vehicle_id WHERE i4.device_id=d.id ORDER BY i4.id DESC LIMIT 1)
+           ) as active_registration
     FROM devices d
     JOIN models m ON m.id=d.model_id
     JOIN manufacturers mf ON mf.id=m.manufacturer_id

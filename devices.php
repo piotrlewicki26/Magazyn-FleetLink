@@ -1000,15 +1000,15 @@ var _previewDeviceData = null;
 function showDevicePreview(data) {
     _previewDeviceData = data;
     var statusMap = {
-        'nowy':          '<span class="badge bg-primary">Nowy</span>',
+        'nowy':          '<span class="badge bg-success">Nowy</span>',
         'sprawny':       '<span class="badge bg-success">Sprawny</span>',
-        'zamontowany':   '<span class="badge bg-info text-dark">Zamontowany</span>',
-        'w_serwisie':    '<span class="badge bg-warning text-dark">W serwisie</span>',
-        'uszkodzony':    '<span class="badge bg-danger">Uszkodzony</span>',
-        'wycofany':      '<span class="badge bg-secondary">Wycofany</span>',
-        'sprzedany':     '<span class="badge bg-dark">Sprzedany</span>',
-        'dzierżawa':     '<span class="badge" style="background:#6f42c1">Dzierżawa</span>',
-        'do_demontazu':  '<span class="badge" style="background:#e67e22">Do demontażu</span>'
+        'zamontowany':   '<span class="badge bg-primary">Zamontowany</span>',
+        'w_serwisie':    '<span class="badge" style="background:#e67e22;color:#fff">W serwisie</span>',
+        'uszkodzony':    '<span class="badge bg-dark">Uszkodzony</span>',
+        'wycofany':      '<span class="badge bg-dark">Wycofany</span>',
+        'sprzedany':     '<span class="badge bg-danger">Sprzedany</span>',
+        'dzierżawa':     '<span class="badge" style="background:#6f42c1;color:#fff">Dzierżawa</span>',
+        'do_demontazu':  '<span class="badge" style="background:#e67e22;color:#fff">Do demontażu</span>'
     };
     var statusBadge = statusMap[data.status] || ('<span class="badge bg-secondary">' + data.status + '</span>');
     var formatDate = function(d) { return d ? d.split('-').reverse().join('.') : '—'; };
