@@ -214,7 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $archCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
         $archCheck->execute([$editId]);
         $archRow = $archCheck->fetch();
-        if ($archRow && $archRow['status'] === 'archiwum' && $status === 'archiwum') {
+        if ($archRow && $archRow['status'] === 'archiwum') {
             flashError('Nie można edytować zarchiwizowanego zlecenia. Najpierw zmień status na Nowe.');
             redirect(getBaseUrl() . 'orders.php?action=view&id=' . $editId);
         }
