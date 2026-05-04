@@ -86,6 +86,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Numer seryjny i model są wymagane.');
             redirect(getBaseUrl() . 'devices.php?action=add');
         }
+        // Check for duplicate serial number
+        $dupSnCheck = $db->prepare("SELECT id FROM devices WHERE serial_number=? LIMIT 1");
+        $dupSnCheck->execute([$serialNumber]);
+        if ($dupSnCheck->fetch()) {
+            flashError('Urządzenie z numerem seryjnym "' . h($serialNumber) . '" już istnieje w systemie.');
+            redirect(getBaseUrl() . 'devices.php?action=add');
+        }
+        // Check for duplicate IMEI
+        if (!empty($imei)) {
+            $dupImeiCheck = $db->prepare("SELECT id FROM devices WHERE imei=? LIMIT 1");
+            $dupImeiCheck->execute([$imei]);
+            if ($dupImeiCheck->fetch()) {
+                flashError('Urządzenie z numerem IMEI "' . h($imei) . '" już istnieje w systemie.');
+                redirect(getBaseUrl() . 'devices.php?action=add');
+            }
+        }
         try {
             $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, ble_id, major, minor, mac_address, status, purchase_date, purchase_price, sale_date, lease_end_date, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
             $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes]);
@@ -119,6 +135,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($serialNumber) || !$modelId || !$editId) {
             flashError('Nieprawidłowe dane.');
             redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $editId);
+        }
+        // Check for duplicate serial number (excluding this device)
+        $dupSnCheck = $db->prepare("SELECT id FROM devices WHERE serial_number=? AND id!=? LIMIT 1");
+        $dupSnCheck->execute([$serialNumber, $editId]);
+        if ($dupSnCheck->fetch()) {
+            flashError('Urządzenie z numerem seryjnym "' . h($serialNumber) . '" już istnieje w systemie.');
+            redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $editId);
+        }
+        // Check for duplicate IMEI (excluding this device)
+        if (!empty($imei)) {
+            $dupImeiCheck = $db->prepare("SELECT id FROM devices WHERE imei=? AND id!=? LIMIT 1");
+            $dupImeiCheck->execute([$imei, $editId]);
+            if ($dupImeiCheck->fetch()) {
+                flashError('Urządzenie z numerem IMEI "' . h($imei) . '" już istnieje w systemie.');
+                redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $editId);
+            }
         }
         // Fetch old status and old sim_number for inventory/SIM sync
         $oldRow = $db->prepare("SELECT model_id, status, sim_number FROM devices WHERE id=?");
@@ -379,6 +411,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $major  = isset($majors[$i]) && $majors[$i] !== '' ? (int)$majors[$i] : null;
             $minor  = isset($minors[$i]) && $minors[$i] !== '' ? (int)$minors[$i] : null;
             $mac    = sanitize($macs[$i]    ?? '');
+            // Pre-check duplicates to give a clear error
+            $snChk = $db->prepare("SELECT id FROM devices WHERE serial_number=? LIMIT 1");
+            $snChk->execute([$serial]);
+            if ($snChk->fetch()) { $errors[] = $serial . ' (duplikat SN)'; continue; }
+            if (!empty($imei)) {
+                $imeiChk = $db->prepare("SELECT id FROM devices WHERE imei=? LIMIT 1");
+                $imeiChk->execute([$imei]);
+                if ($imeiChk->fetch()) { $errors[] = $serial . ' (duplikat IMEI: ' . $imei . ')'; continue; }
+            }
             try {
                 $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, ble_id, major, minor, mac_address, status, purchase_date, purchase_price, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
                 $stmt->execute([$sharedModelId, $serial, $imei ?: null, $sim ?: null, $bleId ?: null, $major, $minor, $mac ?: null, $sharedStatus, $sharedPurchDate ?: null, (float)$sharedPurchPrice, $notes ?: null]);
@@ -406,7 +447,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             elseif ($n <= 4) $label = $n . ' urządzenia';
             else $label = $n . ' urządzeń';
             $msg = 'Dodano ' . $label . '.';
-            if (!empty($errors)) $msg .= ' Błąd dla: ' . implode(', ', $errors) . ' (duplikat nr seryjnego?).';
+            if (!empty($errors)) $msg .= ' Pominięto (duplikaty): ' . implode(', ', $errors) . '.';
             flashSuccess($msg);
         } else {
             flashError('Nie dodano żadnego urządzenia. Sprawdź czy numery seryjne nie są duplikatami.');
@@ -450,6 +491,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(getBaseUrl() . 'devices.php');
 
+    } elseif ($postAction === 'change_vehicle_registration') {
+        // Change registration number of vehicle linked to active installation of a mounted device
+        $cvrDeviceId = (int)($_POST['device_id'] ?? 0);
+        $cvrNewReg   = strtoupper(trim(sanitize($_POST['new_registration'] ?? '')));
+        $returnTo    = sanitize($_POST['return_to'] ?? 'list');
+        if (!$cvrDeviceId || empty($cvrNewReg)) {
+            flashError('Nieprawidłowe dane. Numer rejestracyjny jest wymagany.');
+            redirect($returnTo === 'view' ? getBaseUrl() . 'devices.php?action=view&id=' . $cvrDeviceId : getBaseUrl() . 'devices.php');
+        }
+        // Verify device is mounted
+        $cvrDevCheck = $db->prepare("SELECT id, status FROM devices WHERE id=? LIMIT 1");
+        $cvrDevCheck->execute([$cvrDeviceId]);
+        $cvrDev = $cvrDevCheck->fetch();
+        if (!$cvrDev || $cvrDev['status'] !== 'zamontowany') {
+            flashError('Zmiana numeru rejestracyjnego jest możliwa tylko dla urządzenia ze statusem Zamontowane.');
+            redirect($returnTo === 'view' ? getBaseUrl() . 'devices.php?action=view&id=' . $cvrDeviceId : getBaseUrl() . 'devices.php');
+        }
+        // Get active installation
+        $cvrInstStmt = $db->prepare("SELECT i.id as inst_id, v.id as vehicle_id, v.registration, i.client_id FROM installations i JOIN vehicles v ON v.id=i.vehicle_id WHERE i.device_id=? AND i.status='aktywna' LIMIT 1");
+        $cvrInstStmt->execute([$cvrDeviceId]);
+        $cvrInst = $cvrInstStmt->fetch();
+        if (!$cvrInst) {
+            flashError('Brak aktywnej instalacji dla tego urządzenia.');
+            redirect($returnTo === 'view' ? getBaseUrl() . 'devices.php?action=view&id=' . $cvrDeviceId : getBaseUrl() . 'devices.php');
+        }
+        $db->beginTransaction();
+        try {
+            // Check if a vehicle with this registration already exists
+            $cvrVehStmt = $db->prepare("SELECT id, client_id FROM vehicles WHERE registration=? LIMIT 1");
+            $cvrVehStmt->execute([$cvrNewReg]);
+            $cvrExistingVeh = $cvrVehStmt->fetch();
+            if ($cvrExistingVeh) {
+                // Use existing vehicle, update installation to point to it
+                $db->prepare("UPDATE installations SET vehicle_id=? WHERE id=?")->execute([$cvrExistingVeh['id'], $cvrInst['inst_id']]);
+                // If existing vehicle has no client but installation has one, assign
+                if (!$cvrExistingVeh['client_id'] && $cvrInst['client_id']) {
+                    $db->prepare("UPDATE vehicles SET client_id=? WHERE id=?")->execute([$cvrInst['client_id'], $cvrExistingVeh['id']]);
+                }
+            } else {
+                // Update the old vehicle's registration number
+                $db->prepare("UPDATE vehicles SET registration=? WHERE id=?")->execute([$cvrNewReg, $cvrInst['vehicle_id']]);
+            }
+            $db->commit();
+            flashSuccess('Numer rejestracyjny zmieniony na ' . $cvrNewReg . '.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        if ($returnTo === 'view') redirect(getBaseUrl() . 'devices.php?action=view&id=' . $cvrDeviceId);
+        if ($returnTo === 'edit') redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $cvrDeviceId);
+        redirect(getBaseUrl() . 'devices.php');
     } elseif ($postAction === 'move_device') {
         // Move device (active installation) to another client/company
         $moveDeviceId  = (int)($_POST['device_id'] ?? 0);
@@ -492,6 +584,15 @@ if ($action === 'edit' && $id) {
     $stmt->execute([$id]);
     $device = $stmt->fetch();
     if (!$device) { flashError('Urządzenie nie istnieje.'); redirect(getBaseUrl() . 'devices.php'); }
+    // Load active installation vehicle (for registration change when zamontowany)
+    $editActiveInstallation = null;
+    if ($device && $device['status'] === 'zamontowany') {
+        try {
+            $eiStmt = $db->prepare("SELECT i.id as inst_id, v.id as vehicle_id, v.registration FROM installations i JOIN vehicles v ON v.id=i.vehicle_id WHERE i.device_id=? AND i.status='aktywna' LIMIT 1");
+            $eiStmt->execute([$id]);
+            $editActiveInstallation = $eiStmt->fetch();
+        } catch (PDOException $e) { $editActiveInstallation = null; }
+    }
 }
 
 if ($action === 'view' && $id) {
@@ -506,6 +607,16 @@ if ($action === 'view' && $id) {
     $stmt->execute([$id]);
     $device = $stmt->fetch();
     if (!$device) { flashError('Urządzenie nie istnieje.'); redirect(getBaseUrl() . 'devices.php'); }
+
+    // Load active installation for mounted device (used for registration change)
+    $viewActiveInstallation = null;
+    if ($device && $device['status'] === 'zamontowany') {
+        try {
+            $viStmt = $db->prepare("SELECT i.id as inst_id, v.id as vehicle_id, v.registration FROM installations i JOIN vehicles v ON v.id=i.vehicle_id WHERE i.device_id=? AND i.status='aktywna' LIMIT 1");
+            $viStmt->execute([$id]);
+            $viewActiveInstallation = $viStmt->fetch();
+        } catch (PDOException $e) { $viewActiveInstallation = null; }
+    }
 
     // History of installations and services
     $installations = $db->prepare("
@@ -914,6 +1025,12 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                         <button type="button" class="btn btn-sm btn-outline-warning btn-action" title="Przenieś do innej firmy"
                                 onclick="openMoveDeviceModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, 'list')">
                             <i class="fas fa-exchange-alt"></i>
+                        </button>
+                        <?php endif; ?>
+                        <?php if ($d['status'] === 'zamontowany'): ?>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action" title="Zmień nr rejestracyjny"
+                                onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['vehicle_registration'] ?? '')) ?>)">
+                            <i class="fas fa-hashtag"></i>
                         </button>
                         <?php endif; ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień nr SIM"
@@ -1336,40 +1453,51 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <?php endforeach; ?>
                             </datalist>
                         </div>
-                        <div class="col-12">
+                        <div class="col-12" id="installClientSection">
                             <label class="form-label">Klient</label>
-                            <div class="d-flex gap-2 align-items-start">
-                                <select name="client_id" id="installClientSelect" class="form-select">
-                                    <option value="">— brak / wybierz klienta —</option>
-                                    <?php foreach ($clientsList as $cl): ?>
-                                    <option value="<?= $cl['id'] ?>">
-                                        <?= h($cl['company_name'] ? $cl['company_name'] . ' — ' . $cl['contact_name'] : $cl['contact_name']) ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" id="showAddClientBtn">
-                                    <i class="fas fa-user-plus me-1"></i>Dodaj klienta
-                                </button>
+                            <!-- Klient zablokowany — pobrany ze zlecenia -->
+                            <div id="installClientLocked" class="d-none">
+                                <div class="alert alert-info d-flex align-items-center gap-2 mb-1 py-2">
+                                    <i class="fas fa-user-check text-primary"></i>
+                                    <span id="installClientLockedName" class="fw-semibold"></span>
+                                    <span class="text-muted small ms-1">(przypisany ze zlecenia)</span>
+                                </div>
                             </div>
-                            <!-- Inline add client -->
-                            <div id="addClientForm" class="card card-body mt-2 p-2 d-none bg-light">
-                                <div class="row g-2">
-                                    <div class="col-md-6">
-                                        <input type="text" id="newClientContactName" class="form-control form-control-sm" placeholder="Imię i nazwisko *">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <input type="text" id="newClientCompanyName" class="form-control form-control-sm" placeholder="Firma">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <input type="text" id="newClientPhone" class="form-control form-control-sm" placeholder="Telefon">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <input type="email" id="newClientEmail" class="form-control form-control-sm" placeholder="E-mail">
-                                    </div>
-                                    <div class="col-12 d-flex gap-2">
-                                        <button type="button" class="btn btn-sm btn-success" id="saveNewClientBtn"><i class="fas fa-check me-1"></i>Zapisz klienta</button>
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="cancelAddClientBtn">Anuluj</button>
-                                        <span id="addClientMsg" class="text-danger small align-self-center"></span>
+                            <!-- Swobodny wybór klienta (brak zlecenia lub zlecenie bez klienta) -->
+                            <div id="installClientFree">
+                                <div class="d-flex gap-2 align-items-start">
+                                    <select name="client_id" id="installClientSelect" class="form-select">
+                                        <option value="">— brak / wybierz klienta —</option>
+                                        <?php foreach ($clientsList as $cl): ?>
+                                        <option value="<?= $cl['id'] ?>">
+                                            <?= h($cl['company_name'] ? $cl['company_name'] . ' — ' . $cl['contact_name'] : $cl['contact_name']) ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" id="showAddClientBtn">
+                                        <i class="fas fa-user-plus me-1"></i>Nowy klient
+                                    </button>
+                                </div>
+                                <!-- Inline add client -->
+                                <div id="addClientForm" class="card card-body mt-2 p-2 d-none bg-light">
+                                    <div class="row g-2">
+                                        <div class="col-md-6">
+                                            <input type="text" id="newClientContactName" class="form-control form-control-sm" placeholder="Imię i nazwisko *">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="text" id="newClientCompanyName" class="form-control form-control-sm" placeholder="Firma">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="text" id="newClientPhone" class="form-control form-control-sm" placeholder="Telefon">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="email" id="newClientEmail" class="form-control form-control-sm" placeholder="E-mail">
+                                        </div>
+                                        <div class="col-12 d-flex gap-2">
+                                            <button type="button" class="btn btn-sm btn-success" id="saveNewClientBtn"><i class="fas fa-check me-1"></i>Zapisz klienta</button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="cancelAddClientBtn">Anuluj</button>
+                                            <span id="addClientMsg" class="text-danger small align-self-center"></span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1452,6 +1580,19 @@ document.addEventListener('DOMContentLoaded', function() {
 <script>
 var _woDataMap = <?= json_encode($woJsMap ?? []) ?>;
 
+function _installClientSetFree() {
+    document.getElementById('installClientLocked').classList.add('d-none');
+    document.getElementById('installClientFree').classList.remove('d-none');
+}
+
+function _installClientSetLocked(clientId, clientLabel) {
+    document.getElementById('installClientSelect').value = clientId;
+    document.getElementById('installClientLockedName').textContent = clientLabel || '(brak nazwy)';
+    document.getElementById('installClientLocked').classList.remove('d-none');
+    document.getElementById('installClientFree').classList.add('d-none');
+    document.getElementById('addClientForm').classList.add('d-none');
+}
+
 function openInstallModal(deviceId, serial, currentSim) {
     document.getElementById('installDeviceId').value   = deviceId;
     document.getElementById('installDeviceSerial').textContent = serial;
@@ -1460,7 +1601,7 @@ function openInstallModal(deviceId, serial, currentSim) {
     document.getElementById('installVehicleReg').value = '';
     document.getElementById('installClientSelect').value = '';
     document.getElementById('installWorkOrderSelect').value = '';
-    document.getElementById('addClientForm').classList.add('d-none');
+    _installClientSetFree();
     var modal = new bootstrap.Modal(document.getElementById('installModal'));
     modal.show();
 }
@@ -1472,8 +1613,16 @@ document.getElementById('installWorkOrderSelect').addEventListener('change', fun
         var wo = _woDataMap[orderId];
         if (wo.date) document.getElementById('installDate').value = wo.date;
         if (wo.client_id) {
-            document.getElementById('installClientSelect').value = wo.client_id;
+            _installClientSetLocked(wo.client_id, wo.client_label);
+        } else {
+            // Order has no client — allow free selection
+            document.getElementById('installClientSelect').value = '';
+            _installClientSetFree();
         }
+    } else {
+        // No order selected — free selection
+        document.getElementById('installClientSelect').value = '';
+        _installClientSetFree();
     }
 });
 
@@ -1768,6 +1917,12 @@ function openSimEdit(deviceId, currentSim) {
                 <?php if (!isTechnician()): ?>
                 <a href="devices.php?action=edit&id=<?= $device['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
                 <?php endif; ?>
+                <?php if ($device['status'] === 'zamontowany' && !empty($viewActiveInstallation)): ?>
+                <button type="button" class="btn btn-sm btn-outline-info"
+                        onclick="openViewChangeRegModal(<?= $device['id'] ?>, <?= htmlspecialchars(json_encode($viewActiveInstallation['registration'])) ?>)">
+                    <i class="fas fa-hashtag me-1"></i>Zmień nr rejestracyjny
+                </button>
+                <?php endif; ?>
                 <?php if (in_array($device['status'], ['zamontowany','do_demontazu'])): ?>
                 <button type="button" class="btn btn-sm btn-outline-warning"
                         onclick="openMoveDeviceModal(<?= $device['id'] ?>, <?= htmlspecialchars(json_encode($device['serial_number'])) ?>, 'view')">
@@ -2049,6 +2204,27 @@ function openSimEdit(deviceId, currentSim) {
                 </div>
             </div>
         </form>
+
+        <?php if ($action === 'edit' && !empty($editActiveInstallation)): ?>
+        <hr>
+        <div class="mt-3">
+            <h6 class="mb-2"><i class="fas fa-car me-1 text-success"></i>Zmiana numeru rejestracyjnego pojazdu</h6>
+            <p class="text-muted small mb-2">Urządzenie jest aktualnie zamontowane w pojeździe <strong><?= h($editActiveInstallation['registration']) ?></strong>. Możesz zmienić numer rejestracyjny.</p>
+            <form method="POST" class="row g-2 align-items-end">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="change_vehicle_registration">
+                <input type="hidden" name="device_id" value="<?= $device['id'] ?>">
+                <input type="hidden" name="return_to" value="edit">
+                <div class="col-md-4">
+                    <label class="form-label required-star">Nowy numer rejestracyjny</label>
+                    <input type="text" name="new_registration" class="form-control" placeholder="np. WA12345" value="<?= h($editActiveInstallation['registration']) ?>" required>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-outline-success"><i class="fas fa-save me-1"></i>Zmień rejestrację</button>
+                </div>
+            </form>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 <script>
@@ -2153,7 +2329,72 @@ function openMoveDeviceModal(deviceId, serial, returnTo) {
     document.querySelector('#moveDeviceForm [name="move_notes"]').value = '';
     new bootstrap.Modal(document.getElementById('moveDeviceModal')).show();
 }
+function openListChangeRegModal(deviceId, currentReg) {
+    document.getElementById('listChangeRegDeviceId').value = deviceId;
+    document.getElementById('listChangeRegInput').value = currentReg;
+    new bootstrap.Modal(document.getElementById('listChangeRegModal')).show();
+}
 </script>
+
+<!-- Change Registration Modal (list/view) -->
+<div class="modal fade" id="listChangeRegModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="change_vehicle_registration">
+                <input type="hidden" name="device_id" id="listChangeRegDeviceId" value="">
+                <input type="hidden" name="return_to" value="list">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label required-star">Nowy numer rejestracyjny</label>
+                    <input type="text" name="new_registration" id="listChangeRegInput" class="form-control" placeholder="np. WA12345" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-info btn-sm text-white"><i class="fas fa-save me-1"></i>Zmień</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<?php if ($action === 'view' && !empty($viewActiveInstallation)): ?>
+<!-- Change Registration Modal (device view) -->
+<div class="modal fade" id="viewChangeRegModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="change_vehicle_registration">
+                <input type="hidden" name="device_id" value="<?= $device['id'] ?>">
+                <input type="hidden" name="return_to" value="view">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label required-star">Nowy numer rejestracyjny</label>
+                    <input type="text" name="new_registration" id="viewChangeRegInput" class="form-control" placeholder="np. WA12345" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-info btn-sm text-white"><i class="fas fa-save me-1"></i>Zmień</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openViewChangeRegModal(deviceId, currentReg) {
+    document.getElementById('viewChangeRegInput').value = currentReg;
+    new bootstrap.Modal(document.getElementById('viewChangeRegModal')).show();
+}
+</script>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

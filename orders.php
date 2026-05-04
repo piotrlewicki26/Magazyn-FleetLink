@@ -309,6 +309,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $flashMsg .= " Wygenerowano $protoCount $protoLabel przekazania (PP).";
                 }
             } catch (Exception $protoEx) { /* non-fatal */ }
+
+            // Assign devices and vehicles to the order's client when order is completed
+            try {
+                $woClientStmt = $db->prepare("SELECT client_id FROM work_orders WHERE id=? LIMIT 1");
+                $woClientStmt->execute([$csId]);
+                $woClientRow = $woClientStmt->fetch();
+                $woClientId  = $woClientRow ? (int)($woClientRow['client_id'] ?? 0) : 0;
+                if ($woClientId) {
+                    $assignInst = $db->prepare("SELECT i.id as inst_id, i.vehicle_id, i.client_id as inst_client_id FROM installations WHERE work_order_id=? AND status='aktywna'");
+                    $assignInst->execute([$csId]);
+                    $assignRows = $assignInst->fetchAll();
+                    foreach ($assignRows as $ar) {
+                        // Update installation client if not already set
+                        if ((int)$ar['inst_client_id'] !== $woClientId) {
+                            $db->prepare("UPDATE installations SET client_id=? WHERE id=?")->execute([$woClientId, $ar['inst_id']]);
+                        }
+                        // Update vehicle client if not set or different, avoiding duplicate registrations per client
+                        if ($ar['vehicle_id']) {
+                            $db->prepare("UPDATE vehicles SET client_id=? WHERE id=?")->execute([$woClientId, $ar['vehicle_id']]);
+                        }
+                    }
+                }
+            } catch (Exception $assignEx) { /* non-fatal */ }
         }
 
         if ($isAjaxSt) {
@@ -318,6 +341,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         flashSuccess($flashMsg);
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $csId);
+
+    } elseif ($postAction === 'change_vehicle_registration') {
+        $ovrInstId  = (int)($_POST['installation_id'] ?? 0);
+        $ovrOrderId = (int)($_POST['order_id'] ?? 0);
+        $ovrNewReg  = strtoupper(trim(sanitize($_POST['new_registration'] ?? '')));
+        if (!$ovrInstId || !$ovrOrderId || empty($ovrNewReg)) {
+            flashError('Nieprawidłowe dane. Numer rejestracyjny jest wymagany.');
+            redirect(getBaseUrl() . 'orders.php?action=view&id=' . $ovrOrderId);
+        }
+        // Verify order is not archived
+        $ovrOrderCheck = $db->prepare("SELECT status, client_id FROM work_orders WHERE id=?");
+        $ovrOrderCheck->execute([$ovrOrderId]);
+        $ovrOrder = $ovrOrderCheck->fetch();
+        if (!$ovrOrder || $ovrOrder['status'] === 'archiwum') {
+            flashError('Nie można edytować zarchiwizowanego zlecenia.');
+            redirect(getBaseUrl() . 'orders.php?action=view&id=' . $ovrOrderId);
+        }
+        $ovrInstCheck = $db->prepare("SELECT id, vehicle_id, client_id FROM installations WHERE id=? AND work_order_id=?");
+        $ovrInstCheck->execute([$ovrInstId, $ovrOrderId]);
+        $ovrInst = $ovrInstCheck->fetch();
+        if (!$ovrInst) {
+            flashError('Montaż nie należy do tego zlecenia.');
+            redirect(getBaseUrl() . 'orders.php?action=view&id=' . $ovrOrderId);
+        }
+        $db->beginTransaction();
+        try {
+            $ovrVehStmt = $db->prepare("SELECT id, client_id FROM vehicles WHERE registration=? LIMIT 1");
+            $ovrVehStmt->execute([$ovrNewReg]);
+            $ovrExistingVeh = $ovrVehStmt->fetch();
+            if ($ovrExistingVeh) {
+                // Point installation to existing vehicle
+                $db->prepare("UPDATE installations SET vehicle_id=? WHERE id=?")->execute([$ovrExistingVeh['id'], $ovrInstId]);
+                if (!$ovrExistingVeh['client_id'] && $ovrInst['client_id']) {
+                    $db->prepare("UPDATE vehicles SET client_id=? WHERE id=?")->execute([$ovrInst['client_id'], $ovrExistingVeh['id']]);
+                }
+            } else {
+                $db->prepare("UPDATE vehicles SET registration=? WHERE id=?")->execute([$ovrNewReg, $ovrInst['vehicle_id']]);
+            }
+            $db->commit();
+            flashSuccess('Numer rejestracyjny zmieniony na ' . $ovrNewReg . '.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        redirect(getBaseUrl() . 'orders.php?action=view&id=' . $ovrOrderId);
 
     } elseif ($postAction === 'add_disassembly') {
         $disDeviceId     = (int)($_POST['device_id'] ?? 0);
@@ -1733,10 +1801,11 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                                 <a href="devices.php?action=view&id=<?= $dev['device_id'] ?>" class="btn btn-sm btn-outline-secondary btn-action" title="Szczegóły urządzenia">
                                     <i class="fas fa-external-link-alt"></i>
                                 </a>
-                                <a href="installations.php?action=view&id=<?= $dev['inst_id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Szczegóły montażu">
-                                    <i class="fas fa-car"></i>
-                                </a>
                                 <?php if ($order['status'] !== 'archiwum'): ?>
+                                <button type="button" class="btn btn-sm btn-outline-info btn-action" title="Zmień nr rejestracyjny"
+                                        onclick="openChangeRegModal(<?= $dev['inst_id'] ?>, <?= htmlspecialchars(json_encode($dev['registration'])) ?>, <?= $order['id'] ?>)">
+                                    <i class="fas fa-hashtag"></i>
+                                </button>
                                 <form method="POST" class="d-inline" onsubmit="return confirm('Odłączyć urządzenie <?= h($dev['serial_number']) ?> od tego zlecenia?')">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="remove_device_from_order">
@@ -1805,6 +1874,39 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
         </div>
     </div>
 </div>
+
+<!-- Change Vehicle Registration Modal -->
+<div class="modal fade" id="changeRegModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST" id="changeRegForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="change_vehicle_registration">
+                <input type="hidden" name="installation_id" id="changeRegInstId" value="">
+                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label required-star">Nowy numer rejestracyjny</label>
+                    <input type="text" name="new_registration" id="changeRegInput" class="form-control" placeholder="np. WA12345" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-info btn-sm text-white"><i class="fas fa-save me-1"></i>Zmień</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openChangeRegModal(instId, currentReg, orderId) {
+    document.getElementById('changeRegInstId').value = instId;
+    document.getElementById('changeRegInput').value  = currentReg;
+    new bootstrap.Modal(document.getElementById('changeRegModal')).show();
+}
+</script>
 
 <!-- Edit Order Modal -->
 <div class="modal fade" id="editOrderModal" tabindex="-1">
