@@ -210,6 +210,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'orders.php');
         }
 
+        // Block editing archived orders
+        $archCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
+        $archCheck->execute([$editId]);
+        $archRow = $archCheck->fetch();
+        if ($archRow && $archRow['status'] === 'archiwum' && $status === 'archiwum') {
+            flashError('Nie można edytować zarchiwizowanego zlecenia. Najpierw zmień status na Nowe.');
+            redirect(getBaseUrl() . 'orders.php?action=view&id=' . $editId);
+        }
+
         $db->prepare("UPDATE work_orders SET date=?, client_id=?, installation_address=?, technician_id=?, status=?, notes=? WHERE id=?")
            ->execute([$orderDate, $clientId, $address ?: null, $techId, $status, $notes ?: null, $editId]);
         flashSuccess('Zlecenie zaktualizowane.');
@@ -338,6 +347,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(getBaseUrl() . 'orders.php?action=demontaze');
 
+    } elseif ($postAction === 'remove_device_from_order') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $instId  = (int)($_POST['installation_id'] ?? 0);
+        if (!$orderId || !$instId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'orders.php'); }
+        // Verify the order is not archived before allowing removal
+        $orderCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
+        $orderCheck->execute([$orderId]);
+        $orderRow = $orderCheck->fetch();
+        if (!$orderRow) { flashError('Zlecenie nie istnieje.'); redirect(getBaseUrl() . 'orders.php'); }
+        if ($orderRow['status'] === 'archiwum') { flashError('Nie można edytować zarchiwizowanego zlecenia.'); redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId); }
+        // Only unlink the installation from the order (do not delete the installation)
+        $db->prepare("UPDATE installations SET work_order_id=NULL WHERE id=? AND work_order_id=?")
+           ->execute([$instId, $orderId]);
+        flashSuccess('Urządzenie zostało odłączone od zlecenia.');
+        redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId);
+
+    } elseif ($postAction === 'add_device_to_order') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $instId  = (int)($_POST['installation_id'] ?? 0);
+        if (!$orderId || !$instId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'orders.php'); }
+        // Verify the order is not archived
+        $orderCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
+        $orderCheck->execute([$orderId]);
+        $orderRow = $orderCheck->fetch();
+        if (!$orderRow) { flashError('Zlecenie nie istnieje.'); redirect(getBaseUrl() . 'orders.php'); }
+        if ($orderRow['status'] === 'archiwum') { flashError('Nie można edytować zarchiwizowanego zlecenia.'); redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId); }
+        // Assign the installation to this order (installation must be active and not already in another order)
+        $instCheck = $db->prepare("SELECT id, status, work_order_id FROM installations WHERE id=?");
+        $instCheck->execute([$instId]);
+        $instRow = $instCheck->fetch();
+        if (!$instRow) { flashError('Montaż nie istnieje.'); redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId); }
+        if ($instRow['status'] !== 'aktywna') { flashError('Wybrany montaż nie jest aktywny.'); redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId); }
+        if ($instRow['work_order_id'] && $instRow['work_order_id'] != $orderId) { flashError('Ten montaż jest już przypisany do innego zlecenia.'); redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId); }
+        $db->prepare("UPDATE installations SET work_order_id=? WHERE id=?")
+           ->execute([$orderId, $instId]);
+        flashSuccess('Urządzenie zostało dodane do zlecenia.');
+        redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId);
+
     } elseif ($postAction === 'complete_disassembly') {
         $disDeviceId = (int)($_POST['device_id'] ?? 0);
         $disInstId   = (int)($_POST['installation_id'] ?? 0);
@@ -370,6 +417,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $clients = $db->query("SELECT id, contact_name, company_name, address, city, postal_code, phone FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
 $users   = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
+$availableInstForOrder = [];
 
 // Data needed for "Nowy protokół" modal (always loaded)
 $modalInstSingle = $db->query("
@@ -543,6 +591,29 @@ if ($action === 'list') {
     ");
     $devStmt->execute([$id]);
     $orderDevices = $devStmt->fetchAll();
+
+    // Active installations not yet assigned to any order (for "add device" modal)
+    $availableInstForOrder = [];
+    if ($order['status'] !== 'archiwum') {
+        $availStmt = $db->prepare("
+            SELECT i.id as inst_id, i.installation_date,
+                   d.id as device_id, d.serial_number, d.imei,
+                   m.name as model_name, mf.name as manufacturer_name,
+                   v.registration, v.make,
+                   c.contact_name, c.company_name
+            FROM installations i
+            JOIN devices d ON d.id=i.device_id
+            JOIN models m ON m.id=d.model_id
+            JOIN manufacturers mf ON mf.id=m.manufacturer_id
+            JOIN vehicles v ON v.id=i.vehicle_id
+            LEFT JOIN clients c ON c.id=i.client_id
+            WHERE i.status='aktywna' AND (i.work_order_id IS NULL OR i.work_order_id=0)
+            ORDER BY i.installation_date DESC, i.id DESC
+            LIMIT 200
+        ");
+        $availStmt->execute();
+        $availableInstForOrder = $availStmt->fetchAll();
+    }
 
 } elseif ($action === 'add') {
     // Pre-fill technician to current user
@@ -769,7 +840,7 @@ include __DIR__ . '/includes/header.php';
         <a href="orders.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
         <?php elseif ($action === 'view'): ?>
         <a href="orders.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
-        <?php if (isAdmin()): ?>
+        <?php if ($order['status'] !== 'archiwum'): ?>
         <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editOrderModal"><i class="fas fa-edit me-1"></i>Edytuj</button>
         <?php endif; ?>
         <?php else: ?>
@@ -1619,16 +1690,19 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-microchip me-2"></i>Przypisane urządzenia GPS (<?= count($orderDevices) ?>)</span>
-                <a href="devices.php" class="btn btn-sm btn-outline-success">
-                    <i class="fas fa-plus me-1"></i>Przypisz urządzenie z listy
-                </a>
+                <?php if ($order['status'] !== 'archiwum'): ?>
+                <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addDeviceToOrderModal">
+                    <i class="fas fa-plus me-1"></i>Dodaj urządzenie
+                </button>
+                <?php endif; ?>
             </div>
             <?php if (empty($orderDevices)): ?>
             <div class="card-body text-center text-muted py-4">
                 <i class="fas fa-microchip fa-2x mb-2 d-block text-muted opacity-25"></i>
                 Brak przypisanych urządzeń.<br>
-                <small>Przejdź do <a href="devices.php">listy urządzeń</a> i użyj przycisku
-                <i class="fas fa-car text-success"></i> <strong>Montaż</strong>, aby przypisać urządzenia do tego zlecenia.</small>
+                <?php if ($order['status'] !== 'archiwum'): ?>
+                <small>Użyj przycisku <strong>Dodaj urządzenie</strong> powyżej, aby przypisać aktywny montaż do tego zlecenia.</small>
+                <?php endif; ?>
             </div>
             <?php else: ?>
             <div class="table-responsive">
@@ -1662,6 +1736,17 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                                 <a href="installations.php?action=view&id=<?= $dev['inst_id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Szczegóły montażu">
                                     <i class="fas fa-car"></i>
                                 </a>
+                                <?php if ($order['status'] !== 'archiwum'): ?>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Odłączyć urządzenie <?= h($dev['serial_number']) ?> od tego zlecenia?')">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="remove_device_from_order">
+                                    <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                                    <input type="hidden" name="installation_id" value="<?= $dev['inst_id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Odłącz od zlecenia">
+                                        <i class="fas fa-unlink"></i>
+                                    </button>
+                                </form>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -1673,7 +1758,54 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
     </div>
 </div>
 
-<?php if (isAdmin()): ?>
+<?php if ($order['status'] !== 'archiwum'): ?>
+<!-- Add Device to Order Modal -->
+<div class="modal fade" id="addDeviceToOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add_device_to_order">
+                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plus me-2 text-success"></i>Dodaj urządzenie do zlecenia <?= h($order['order_number']) ?></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <?php if (empty($availableInstForOrder)): ?>
+                    <div class="alert alert-info mb-0">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Brak aktywnych montaży nieprzypisanych do żadnego zlecenia.
+                    </div>
+                    <?php else: ?>
+                    <div class="mb-3">
+                        <label class="form-label required-star">Wybierz montaż (aktywne, bez przypisanego zlecenia)</label>
+                        <select name="installation_id" class="form-select" required>
+                            <option value="">— wybierz urządzenie —</option>
+                            <?php foreach ($availableInstForOrder as $ai): ?>
+                            <option value="<?= $ai['inst_id'] ?>">
+                                <?= h($ai['serial_number']) ?>
+                                — <?= h($ai['manufacturer_name'] . ' ' . $ai['model_name']) ?>
+                                | <?= h($ai['registration']) ?>
+                                <?= ($ai['company_name'] ?: $ai['contact_name']) ? '| ' . h($ai['company_name'] ?: $ai['contact_name']) : '' ?>
+                                (<?= formatDate($ai['installation_date']) ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-success btn-sm" <?= empty($availableInstForOrder) ? 'disabled' : '' ?>>
+                        <i class="fas fa-link me-1"></i>Przypisz do zlecenia
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Edit Order Modal -->
 <div class="modal fade" id="editOrderModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -1699,7 +1831,9 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                                 <option value="w_trakcie"  <?= $order['status'] === 'w_trakcie'  ? 'selected' : '' ?>>W trakcie</option>
                                 <option value="zakonczone" <?= $order['status'] === 'zakonczone' ? 'selected' : '' ?>>Zakończone</option>
                                 <option value="anulowane"  <?= $order['status'] === 'anulowane'  ? 'selected' : '' ?>>Anulowane</option>
+                                <?php if (isAdmin()): ?>
                                 <option value="archiwum"   <?= $order['status'] === 'archiwum'   ? 'selected' : '' ?>>Archiwum</option>
+                                <?php endif; ?>
                             </select>
                         </div>
                         <div class="col-md-12">
