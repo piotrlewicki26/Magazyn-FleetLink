@@ -145,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
            ->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $currentUser['id']]);
         $newOrderId = (int)$db->lastInsertId();
 
-        // Send email notification to assigned technician
+        // Send email notification to all users
         try {
             $techStmt = $db->prepare("SELECT name, email FROM users WHERE id=? LIMIT 1");
             $techStmt->execute([$techId]);
@@ -171,8 +171,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'SENDER_NAME'  => $currentUser['name'],
             ]);
 
-            if (!empty($techData['email'])) {
-                sendAppEmail($techData['email'], $techData['name'] ?? '', 'Nowe zlecenie montażowe ' . $orderNumber . ' — FleetLink', $body);
+            $allUsersStmt = $db->prepare("SELECT name, email FROM users WHERE email IS NOT NULL AND email <> ''");
+            $allUsersStmt->execute();
+            foreach ($allUsersStmt->fetchAll() as $u) {
+                sendAppEmail($u['email'], $u['name'] ?? '', 'Nowe zlecenie montażowe ' . $orderNumber . ' — FleetLink', $body);
             }
         } catch (Exception $emailEx) { /* non-fatal */ }
 
