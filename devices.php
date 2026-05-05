@@ -1007,12 +1007,11 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 title="Podgląd"><i class="fas fa-eye"></i></button>
                         <?php if (isAdmin()): ?>
                         <a href="devices.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>
-                        <form method="POST" class="d-inline">
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Czy na pewno chcesz usunąć urządzenie <?= h($d['serial_number']) ?>? Tej operacji nie można cofnąć.')">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="id" value="<?= $d['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
-                                    data-confirm="Usuń urządzenie <?= h($d['serial_number']) ?>?"><i class="fas fa-trash"></i></button>
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń urządzenie"><i class="fas fa-trash"></i></button>
                         </form>
                         <?php endif; ?>
                         <?php if (in_array($d['status'], ['nowy', 'sprawny'])): ?>

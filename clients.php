@@ -358,7 +358,7 @@ function showClientPreview(data) {
                             </td>
                             <?php if (isAdmin()): ?>
                             <td class="text-end">
-                                <form method="POST" class="d-inline" onsubmit="return confirm('Odłączyć urządzenie <?= h($dev['serial_number']) ?> od klienta?');">
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Czy na pewno chcesz odłączyć urządzenie <?= h($dev['serial_number']) ?> od klienta?');">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="remove_device_from_client">
                                     <input type="hidden" name="installation_id" value="<?= $dev['installation_id'] ?>">
