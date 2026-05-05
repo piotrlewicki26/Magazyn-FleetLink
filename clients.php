@@ -154,7 +154,7 @@ if ($action === 'view' && $client) {
             JOIN models m ON m.id = d.model_id
             JOIN manufacturers mf ON mf.id = m.manufacturer_id
             JOIN vehicles v ON v.id = i.vehicle_id
-            WHERE i.client_id = ? AND i.status = 'aktywna'
+            WHERE i.client_id = ? AND d.status IN ('zamontowany', 'do_demontazu')
             ORDER BY i.installation_date DESC
         ");
         $stmt->execute([$id]);
