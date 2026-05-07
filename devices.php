@@ -904,9 +904,15 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <label class="form-label form-label-sm mb-1">Data zakupu</label>
                     <input type="date" name="bulk_purchase_date" class="form-control form-control-sm">
                 </div>
-                <div class="col-auto d-flex gap-2 align-items-end">
+                <div class="col-auto d-flex gap-2 align-items-end flex-wrap">
                     <button type="submit" name="action" value="bulk_purchase" class="btn btn-sm btn-warning">
                         <i class="fas fa-save me-1"></i>Przypisz cenę / datę
+                    </button>
+                    <button type="button" class="btn btn-sm btn-success" id="exportXmlBtn">
+                        <i class="fas fa-file-code me-1"></i>Eksportuj XML
+                    </button>
+                    <button type="button" class="btn btn-sm btn-info text-white" id="exportPdfBtn">
+                        <i class="fas fa-file-pdf me-1"></i>Eksportuj PDF
                     </button>
                     <button type="button" class="btn btn-sm btn-danger" id="bulkDeleteBtn">
                         <i class="fas fa-trash me-1"></i>Usuń zaznaczone
@@ -1816,6 +1822,54 @@ function openSimEdit(deviceId, currentSim) {
                 form.submit();
             }
         });
+    }
+
+    function submitExport(format, newTab) {
+        var checkboxes = document.querySelectorAll('.device-checkbox:checked');
+        if (!checkboxes.length) {
+            alert('Zaznacz co najmniej jedno urządzenie do eksportu.');
+            return;
+        }
+        var csrfInput = document.querySelector('#bulkPurchaseForm input[name="csrf_token"]');
+        var exportForm = document.createElement('form');
+        exportForm.method = 'POST';
+        exportForm.action = 'device_export.php';
+        if (newTab) { exportForm.target = '_blank'; }
+
+        var fmtInput = document.createElement('input');
+        fmtInput.type  = 'hidden';
+        fmtInput.name  = 'format';
+        fmtInput.value = format;
+        exportForm.appendChild(fmtInput);
+
+        if (csrfInput) {
+            var csrfClone = document.createElement('input');
+            csrfClone.type  = 'hidden';
+            csrfClone.name  = 'csrf_token';
+            csrfClone.value = csrfInput.value;
+            exportForm.appendChild(csrfClone);
+        }
+
+        checkboxes.forEach(function (cb) {
+            var idInput = document.createElement('input');
+            idInput.type  = 'hidden';
+            idInput.name  = 'device_ids[]';
+            idInput.value = cb.value;
+            exportForm.appendChild(idInput);
+        });
+
+        document.body.appendChild(exportForm);
+        exportForm.submit();
+        document.body.removeChild(exportForm);
+    }
+
+    var exportXmlBtn = document.getElementById('exportXmlBtn');
+    if (exportXmlBtn) {
+        exportXmlBtn.addEventListener('click', function () { submitExport('xml', false); });
+    }
+    var exportPdfBtn = document.getElementById('exportPdfBtn');
+    if (exportPdfBtn) {
+        exportPdfBtn.addEventListener('click', function () { submitExport('pdf', true); });
     }
 })();
 <?php endif; ?>
