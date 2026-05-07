@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetLink System GPS - Device Export (XML / PDF)
+ * FleetLink System GPS - Device Export (CSV / XLSX / PDF)
  */
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';
@@ -16,9 +16,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !verifyCsrfToken($_POST['csrf_token
     exit('Błąd bezpieczeństwa.');
 }
 
-$format = sanitize($_POST['format'] ?? 'xml');
-if (!in_array($format, ['xml', 'pdf'])) {
-    $format = 'xml';
+$format = sanitize($_POST['format'] ?? 'csv');
+if (!in_array($format, ['csv', 'xlsx', 'pdf'])) {
+    $format = 'csv';
 }
 
 $deviceIds = array_map('intval', $_POST['device_ids'] ?? []);
@@ -79,49 +79,178 @@ $statusLabels = [
     'do_demontazu' => 'Do demontażu',
 ];
 
-// ── XML export ────────────────────────────────────────────────────────────────
-if ($format === 'xml') {
-    $filename = 'urzadzenia_' . date('Y-m-d_His') . '.xml';
-    header('Content-Type: application/xml; charset=UTF-8');
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Returns the column headers for the export.
+ * The purchase-price column is added only for admins.
+ */
+function exportHeaders(): array {
+    $cols = [
+        'Nr seryjny', 'IMEI', 'Nr SIM', 'Producent', 'Model',
+        'Status', 'Rejestracja', 'Klient',
+        'Data montażu', 'Data zakupu', 'Data sprzedaży',
+    ];
+    if (isAdmin()) {
+        $cols[] = 'Cena zakupu (PLN)';
+    }
+    $cols[] = 'Uwagi';
+    return $cols;
+}
+
+/**
+ * Converts a single device row to a flat array of strings.
+ */
+function deviceToRow(array $d, array $statusLabels): array {
+    $row = [
+        $d['serial_number'],
+        $d['imei'] ?? '',
+        $d['sim_number'] ?? '',
+        $d['manufacturer_name'],
+        $d['model_name'],
+        $statusLabels[$d['status']] ?? $d['status'],
+        $d['vehicle_registration'] ?? '',
+        $d['company_name'] ?: ($d['contact_name'] ?? ''),
+        $d['installation_date'] ? formatDate($d['installation_date']) : '',
+        $d['purchase_date']     ? formatDate($d['purchase_date'])     : '',
+        $d['sale_date']         ? formatDate($d['sale_date'])         : '',
+    ];
+    if (isAdmin()) {
+        $row[] = $d['purchase_price'] > 0
+            ? number_format((float)$d['purchase_price'], 2, '.', '')
+            : '';
+    }
+    $row[] = $d['notes'] ?? '';
+    return $row;
+}
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+if ($format === 'csv') {
+    $filename = 'urzadzenia_' . date('Y-m-d_His') . '.csv';
+    header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
 
-    $xml = new XMLWriter();
-    $xml->openMemory();
-    $xml->setIndent(true);
-    $xml->setIndentString('    ');
-    $xml->startDocument('1.0', 'UTF-8');
-    $xml->startElement('urzadzenia');
-    $xml->writeAttribute('eksport', date('Y-m-d H:i:s'));
-    $xml->writeAttribute('liczba', (string)count($devices));
+    // UTF-8 BOM so Excel opens the file correctly
+    echo "\xEF\xBB\xBF";
 
+    $out = fopen('php://output', 'w');
+    fputcsv($out, exportHeaders(), ';');
     foreach ($devices as $d) {
-        $xml->startElement('urzadzenie');
-        $xml->writeAttribute('id', (string)$d['id']);
-        $xml->writeElement('nr_seryjny',   $d['serial_number']);
-        $xml->writeElement('imei',         $d['imei'] ?? '');
-        $xml->writeElement('nr_sim',       $d['sim_number'] ?? '');
-        if (!empty($d['ble_id']))      $xml->writeElement('ble_id',      $d['ble_id']);
-        if ($d['major'] !== null)      $xml->writeElement('major',       (string)$d['major']);
-        if ($d['minor'] !== null)      $xml->writeElement('minor',       (string)$d['minor']);
-        if (!empty($d['mac_address'])) $xml->writeElement('mac_address', $d['mac_address']);
-        $xml->writeElement('producent',    $d['manufacturer_name']);
-        $xml->writeElement('model',        $d['model_name']);
-        $xml->writeElement('status',       $statusLabels[$d['status']] ?? $d['status']);
-        $xml->writeElement('rejestracja',  $d['vehicle_registration'] ?? '');
-        $xml->writeElement('klient',       $d['company_name'] ?: ($d['contact_name'] ?? ''));
-        $xml->writeElement('data_montazu', $d['installation_date'] ?? '');
-        $xml->writeElement('data_zakupu',  $d['purchase_date'] ?? '');
-        $xml->writeElement('data_sprzedazy', $d['sale_date'] ?? '');
-        if (isAdmin()) {
-            $xml->writeElement('cena_zakupu', number_format((float)($d['purchase_price'] ?? 0), 2, '.', ''));
+        fputcsv($out, deviceToRow($d, $statusLabels), ';');
+    }
+    fclose($out);
+    exit;
+}
+
+// ── XLSX export ───────────────────────────────────────────────────────────────
+if ($format === 'xlsx') {
+    $filename = 'urzadzenia_' . date('Y-m-d_His') . '.xlsx';
+
+    /* ---- minimal XLSX builder (no external library needed) ---- */
+
+    // Escape a value for XML cell content
+    $xmlEsc = fn($v) => htmlspecialchars((string)$v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+    // Build shared-strings table and return index
+    $sharedStrings = [];
+    $ssIndex = 0;
+    $ssMap = [];
+    $getSSIdx = function (string $v) use (&$sharedStrings, &$ssIndex, &$ssMap): int {
+        if (!isset($ssMap[$v])) {
+            $ssMap[$v]     = $ssIndex++;
+            $sharedStrings[] = $v;
         }
-        $xml->writeElement('uwagi', $d['notes'] ?? '');
-        $xml->endElement(); // urzadzenie
+        return $ssMap[$v];
+    };
+
+    // Collect all rows (header + data)
+    $allRows = [];
+    $headers = exportHeaders();
+    $allRows[] = $headers;
+    foreach ($devices as $d) {
+        $allRows[] = deviceToRow($d, $statusLabels);
     }
 
-    $xml->endElement(); // urzadzenia
-    $xml->endDocument();
-    echo $xml->outputMemory();
+    // Build worksheet XML
+    $wsRows = '';
+    foreach ($allRows as $ri => $row) {
+        $wsRows .= '<row r="' . ($ri + 1) . '">';
+        foreach ($row as $ci => $cellVal) {
+            $colLetter = '';
+            $n = $ci + 1;
+            while ($n > 0) {
+                $rem = ($n - 1) % 26;
+                $colLetter = chr(65 + $rem) . $colLetter;
+                $n = (int)(($n - 1) / 26);
+            }
+            $cellRef = $colLetter . ($ri + 1);
+            $idx = $getSSIdx((string)$cellVal);
+            $wsRows .= '<c r="' . $cellRef . '" t="s"><v>' . $idx . '</v></c>';
+        }
+        $wsRows .= '</row>';
+    }
+
+    $worksheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        . '<sheetData>' . $wsRows . '</sheetData></worksheet>';
+
+    // Build shared strings XML
+    $ssItems = '';
+    foreach ($sharedStrings as $s) {
+        $ssItems .= '<si><t xml:space="preserve">' . $xmlEsc($s) . '</t></si>';
+    }
+    $sharedStringsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        . ' count="' . count($sharedStrings) . '" uniqueCount="' . count($sharedStrings) . '">'
+        . $ssItems . '</sst>';
+
+    $workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        . '<sheets><sheet name="Urządzenia" sheetId="1" r:id="rId1"/></sheets>'
+        . '</workbook>';
+
+    $workbookRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
+        . '</Relationships>';
+
+    $contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        . '<Default Extension="xml"  ContentType="application/xml"/>'
+        . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        . '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+        . '</Types>';
+
+    $relsRoot = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        . '</Relationships>';
+
+    // Assemble zip in memory
+    $tmpFile = tempnam(sys_get_temp_dir(), 'fleetlink_xlsx_');
+    $zip = new ZipArchive();
+    if ($zip->open($tmpFile, ZipArchive::OVERWRITE) !== true) {
+        header('HTTP/1.1 500 Internal Server Error');
+        exit('Nie można wygenerować pliku XLSX.');
+    }
+    $zip->addFromString('[Content_Types].xml',             $contentTypes);
+    $zip->addFromString('_rels/.rels',                     $relsRoot);
+    $zip->addFromString('xl/workbook.xml',                 $workbookXml);
+    $zip->addFromString('xl/_rels/workbook.xml.rels',      $workbookRels);
+    $zip->addFromString('xl/worksheets/sheet1.xml',        $worksheetXml);
+    $zip->addFromString('xl/sharedStrings.xml',            $sharedStringsXml);
+    $zip->close();
+
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Content-Length: ' . filesize($tmpFile));
+    readfile($tmpFile);
+    unlink($tmpFile);
     exit;
 }
 

@@ -908,13 +908,15 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <button type="submit" name="action" value="bulk_purchase" class="btn btn-sm btn-warning">
                         <i class="fas fa-save me-1"></i>Przypisz cenę / datę
                     </button>
-                    <button type="button" class="btn btn-sm btn-success" id="exportXmlBtn">
-                        <i class="fas fa-file-code me-1"></i>Eksportuj XML
+                    <button type="button" class="btn btn-sm btn-success" id="exportCsvBtn">
+                        <i class="fas fa-file-csv me-1"></i>Eksportuj CSV
+                    </button>
+                    <button type="button" class="btn btn-sm btn-success" id="exportXlsxBtn">
+                        <i class="fas fa-file-excel me-1"></i>Eksportuj XLSX
                     </button>
                     <button type="button" class="btn btn-sm btn-info text-white" id="exportPdfBtn">
                         <i class="fas fa-file-pdf me-1"></i>Eksportuj PDF
                     </button>
-                    <button type="button" class="btn btn-sm btn-danger" id="bulkDeleteBtn">
                         <i class="fas fa-trash me-1"></i>Usuń zaznaczone
                     </button>
                 </div>
@@ -1863,9 +1865,13 @@ function openSimEdit(deviceId, currentSim) {
         document.body.removeChild(exportForm);
     }
 
-    var exportXmlBtn = document.getElementById('exportXmlBtn');
-    if (exportXmlBtn) {
-        exportXmlBtn.addEventListener('click', function () { submitExport('xml', false); });
+    var exportCsvBtn = document.getElementById('exportCsvBtn');
+    if (exportCsvBtn) {
+        exportCsvBtn.addEventListener('click', function () { submitExport('csv', false); });
+    }
+    var exportXlsxBtn = document.getElementById('exportXlsxBtn');
+    if (exportXlsxBtn) {
+        exportXlsxBtn.addEventListener('click', function () { submitExport('xlsx', false); });
     }
     var exportPdfBtn = document.getElementById('exportPdfBtn');
     if (exportPdfBtn) {
