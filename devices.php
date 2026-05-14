@@ -794,16 +794,16 @@ if ($action === 'list') {
     $clientsList = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
     $vehiclesList = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
     try { $usersList = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll(); } catch (Exception $e) {}
-    // ECAN devices — available devices whose serial number starts with 'ECAN'
+    // ECAN devices — available devices whose model name starts with 'ECAN'
     try {
         $ecanDevices = $db->query(
             "SELECT d.id, d.serial_number, m.name AS model_name, mf.name AS manufacturer_name
              FROM devices d
              JOIN models m ON m.id = d.model_id
              JOIN manufacturers mf ON mf.id = m.manufacturer_id
-             WHERE d.serial_number LIKE 'ECAN%'
+             WHERE m.name LIKE 'ECAN%'
                AND d.status IN ('nowy','sprawny')
-             ORDER BY d.serial_number"
+             ORDER BY m.name, d.serial_number"
         )->fetchAll();
     } catch (Exception $e) { $ecanDevices = []; }
     // Load active work orders for the "related to order" dropdown
@@ -1507,7 +1507,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <?php endforeach; ?>
                             </select>
                             <?php if (empty($ecanDevices)): ?>
-                            <div class="form-text text-muted">Brak dostępnych urządzeń ECAN (nr seryjny zaczyna się od „ECAN").</div>
+                            <div class="form-text text-muted">Brak dostępnych urządzeń ECAN (model zaczyna się od „ECAN").</div>
                             <?php endif; ?>
                         </div>
 
