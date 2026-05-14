@@ -1055,7 +1055,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń urządzenie"><i class="fas fa-trash"></i></button>
                         </form>
                         <?php endif; ?>
-                        <?php if (in_array($d['status'], ['nowy', 'sprawny'])): ?>
+                        <?php if (in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false): ?>
                         <button type="button" class="btn btn-sm btn-outline-success btn-action" title="Montaż"
                                 onclick="openInstallModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
                             <i class="fas fa-car"></i>
