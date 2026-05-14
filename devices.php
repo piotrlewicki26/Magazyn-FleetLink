@@ -278,6 +278,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $instDate       = sanitize($_POST['installation_date'] ?? '');
         $instSimNumber  = sanitize($_POST['sim_number'] ?? '');
         $instNotes      = sanitize($_POST['notes'] ?? '');
+        $instEcanId     = (int)($_POST['ecan_device_id'] ?? 0) ?: null;
         $currentUser    = getCurrentUser();
 
         // If linked to a work order, inherit client_id and date from order if not provided
@@ -325,14 +326,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE device_id=? AND status='aktywna'")
                ->execute([$instDate, $instDeviceId]);
 
-            // Determine insert SQL based on whether work_order_id column exists
+            // Determine insert SQL based on which optional columns exist
             try {
-                $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes, work_order_id) VALUES (?,?,?,?,?,?,?,?)")
-                   ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null, $instWorkOrderId]);
+                $db->prepare("INSERT INTO installations (device_id, ecan_device_id, vehicle_id, client_id, technician_id, installation_date, status, notes, work_order_id) VALUES (?,?,?,?,?,?,?,?,?)")
+                   ->execute([$instDeviceId, $instEcanId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null, $instWorkOrderId]);
             } catch (PDOException $colEx) {
-                // Fallback if work_order_id column not yet added
-                $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes) VALUES (?,?,?,?,?,?,?)")
-                   ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null]);
+                // Fallback if ecan_device_id or work_order_id column not yet added
+                try {
+                    $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes, work_order_id) VALUES (?,?,?,?,?,?,?,?)")
+                       ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null, $instWorkOrderId]);
+                } catch (PDOException $colEx2) {
+                    $db->prepare("INSERT INTO installations (device_id, vehicle_id, client_id, technician_id, installation_date, status, notes) VALUES (?,?,?,?,?,?,?)")
+                       ->execute([$instDeviceId, $instVehicleId, $instClientId, $currentUser['id'], $instDate, 'aktywna', $instNotes ?: null]);
+                }
             }
 
             // Update work order status to "w_trakcie" if it was "nowe"
@@ -368,6 +374,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$instDeviceId]);
             }
             adjustInventoryForStatusChange($db, $devRow['model_id'], $prevStatus, 'zamontowany');
+
+            // Mark ECAN device as mounted if one was selected
+            if ($instEcanId) {
+                try {
+                    $ecanRow = $db->prepare("SELECT model_id, status FROM devices WHERE id=? LIMIT 1");
+                    $ecanRow->execute([$instEcanId]);
+                    $ecanDev = $ecanRow->fetch();
+                    if ($ecanDev) {
+                        $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$instEcanId]);
+                        adjustInventoryForStatusChange($db, $ecanDev['model_id'], $ecanDev['status'], 'zamontowany');
+                    }
+                } catch (PDOException $e) {}
+            }
+
             $db->commit();
             if ($instWorkOrderId) {
                 flashSuccess('Urządzenie prawidłowo przypisano do zlecenia oraz do klienta.');
@@ -766,6 +786,7 @@ $clientsList    = [];
 $vehiclesList   = [];
 $openWorkOrders = [];
 $usersList      = [];
+$ecanDevices    = [];
 if ($action === 'list') {
     try {
         $simCardOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN);
@@ -773,6 +794,18 @@ if ($action === 'list') {
     $clientsList = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
     $vehiclesList = $db->query("SELECT v.id, v.registration, v.make, v.model_name, v.client_id FROM vehicles v WHERE v.active=1 ORDER BY v.registration")->fetchAll();
     try { $usersList = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll(); } catch (Exception $e) {}
+    // ECAN devices — available devices whose serial number starts with 'ECAN'
+    try {
+        $ecanDevices = $db->query(
+            "SELECT d.id, d.serial_number, m.name AS model_name, mf.name AS manufacturer_name
+             FROM devices d
+             JOIN models m ON m.id = d.model_id
+             JOIN manufacturers mf ON mf.id = m.manufacturer_id
+             WHERE d.serial_number LIKE 'ECAN%'
+               AND d.status IN ('nowy','sprawny')
+             ORDER BY d.serial_number"
+        )->fetchAll();
+    } catch (Exception $e) { $ecanDevices = []; }
     // Load active work orders for the "related to order" dropdown
     try {
         $openWorkOrders = $db->query("
@@ -1460,6 +1493,24 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <?php endforeach; ?>
                             </datalist>
                         </div>
+                        <div class="col-12">
+                            <label class="form-label">
+                                <i class="fas fa-microchip me-1 text-secondary"></i>Urządzenie ECAN
+                                <small class="text-muted fw-normal ms-1">(opcjonalne)</small>
+                            </label>
+                            <select name="ecan_device_id" id="installEcanSelect" class="form-select">
+                                <option value="">— brak urządzenia ECAN —</option>
+                                <?php foreach ($ecanDevices as $ed): ?>
+                                <option value="<?= $ed['id'] ?>">
+                                    <?= h($ed['serial_number']) ?> — <?= h($ed['manufacturer_name'] . ' ' . $ed['model_name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (empty($ecanDevices)): ?>
+                            <div class="form-text text-muted">Brak dostępnych urządzeń ECAN (nr seryjny zaczyna się od „ECAN").</div>
+                            <?php endif; ?>
+                        </div>
+
                         <div class="col-12" id="installClientSection">
                             <label class="form-label">Klient</label>
                             <!-- Klient zablokowany — pobrany ze zlecenia -->
