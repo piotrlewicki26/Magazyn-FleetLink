@@ -596,6 +596,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'devices.php?action=view&id=' . $moveDeviceId);
         }
         redirect(getBaseUrl() . 'devices.php');
+    } elseif ($postAction === 'assign_ecan_device') {
+        // Assign or remove ECAN device from the active installation of a mounted device
+        $aedDeviceId = (int)($_POST['device_id'] ?? 0);
+        $aedNewEcanId = (int)($_POST['ecan_device_id'] ?? 0) ?: null;
+        $returnTo = sanitize($_POST['return_to'] ?? 'list');
+        if (!$aedDeviceId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'devices.php'); }
+        $instStmt = $db->prepare("SELECT id, ecan_device_id FROM installations WHERE device_id=? AND status='aktywna' LIMIT 1");
+        $instStmt->execute([$aedDeviceId]);
+        $instRow = $instStmt->fetch();
+        if (!$instRow) { flashError('Brak aktywnej instalacji dla tego urządzenia.'); redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $aedDeviceId); }
+        $db->beginTransaction();
+        try {
+            $oldEcanId = $instRow['ecan_device_id'] ? (int)$instRow['ecan_device_id'] : null;
+            if ($oldEcanId && $oldEcanId !== $aedNewEcanId) {
+                $oldEcan = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+                $oldEcan->execute([$oldEcanId]);
+                $oldEcanRow = $oldEcan->fetch();
+                if ($oldEcanRow) {
+                    $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$oldEcanId]);
+                    adjustInventoryForStatusChange($db, $oldEcanRow['model_id'], $oldEcanRow['status'], 'sprawny');
+                }
+            }
+            if ($aedNewEcanId && $aedNewEcanId !== $oldEcanId) {
+                $newEcan = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+                $newEcan->execute([$aedNewEcanId]);
+                $newEcanRow = $newEcan->fetch();
+                if (!$newEcanRow) { throw new Exception('Wybrane urządzenie ECAN nie istnieje.'); }
+                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$aedNewEcanId]);
+                adjustInventoryForStatusChange($db, $newEcanRow['model_id'], $newEcanRow['status'], 'zamontowany');
+            }
+            $db->prepare("UPDATE installations SET ecan_device_id=? WHERE id=?")->execute([$aedNewEcanId, $instRow['id']]);
+            $db->commit();
+            flashSuccess('Urządzenie ECAN zostało ' . ($aedNewEcanId ? 'przypisane.' : 'odpięte.'));
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
+        if ($returnTo === 'view') redirect(getBaseUrl() . 'devices.php?action=view&id=' . $aedDeviceId);
+        redirect(getBaseUrl() . 'devices.php?action=edit&id=' . $aedDeviceId);
     }
 }
 
@@ -608,11 +647,18 @@ if ($action === 'edit' && $id) {
     $editActiveInstallation = null;
     if ($device && $device['status'] === 'zamontowany') {
         try {
-            $eiStmt = $db->prepare("SELECT i.id as inst_id, v.id as vehicle_id, v.registration FROM installations i JOIN vehicles v ON v.id=i.vehicle_id WHERE i.device_id=? AND i.status='aktywna' LIMIT 1");
+            $eiStmt = $db->prepare("SELECT i.id as inst_id, i.ecan_device_id, v.id as vehicle_id, v.registration, ed.id as ecan_id, ed.serial_number as ecan_serial, em.name as ecan_model_name FROM installations i JOIN vehicles v ON v.id=i.vehicle_id LEFT JOIN devices ed ON ed.id=i.ecan_device_id LEFT JOIN models em ON em.id=ed.model_id WHERE i.device_id=? AND i.status='aktywna' LIMIT 1");
             $eiStmt->execute([$id]);
             $editActiveInstallation = $eiStmt->fetch();
         } catch (PDOException $e) { $editActiveInstallation = null; }
     }
+    // Load available ECAN devices for assignment in edit view
+    $editEcanDevices = [];
+    try {
+        $editEcanDevices = $db->query(
+            "SELECT d.id, d.serial_number, m.name AS model_name FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE m.name LIKE 'ECAN%' AND d.status IN ('nowy','sprawny') ORDER BY m.name, d.serial_number"
+        )->fetchAll();
+    } catch (Exception $e) { $editEcanDevices = []; }
 }
 
 if ($action === 'view' && $id) {
@@ -2331,6 +2377,40 @@ function openSimEdit(deviceId, currentSim) {
                 </div>
                 <div class="col-auto">
                     <button type="submit" class="btn btn-outline-success"><i class="fas fa-save me-1"></i>Zmień rejestrację</button>
+                </div>
+            </form>
+        </div>
+        <hr>
+        <div class="mt-3">
+            <h6 class="mb-2"><i class="fas fa-microchip me-1 text-secondary"></i>Urządzenie ECAN</h6>
+            <?php if ($editActiveInstallation['ecan_id']): ?>
+            <p class="text-muted small mb-2">Aktualnie przypisany ECAN: <strong><?= h($editActiveInstallation['ecan_serial']) ?></strong> (<?= h($editActiveInstallation['ecan_model_name']) ?>).</p>
+            <?php else: ?>
+            <p class="text-muted small mb-2">Brak przypisanego urządzenia ECAN.</p>
+            <?php endif; ?>
+            <form method="POST" class="row g-2 align-items-end">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="assign_ecan_device">
+                <input type="hidden" name="device_id" value="<?= $device['id'] ?>">
+                <input type="hidden" name="return_to" value="edit">
+                <div class="col-md-6">
+                    <label class="form-label">Wybierz urządzenie ECAN</label>
+                    <select name="ecan_device_id" class="form-select">
+                        <option value="">— odepnij ECAN —</option>
+                        <?php foreach ($editEcanDevices as $ed): ?>
+                        <option value="<?= $ed['id'] ?>" <?= ($editActiveInstallation['ecan_id'] ?? 0) == $ed['id'] ? 'selected' : '' ?>>
+                            <?= h($ed['serial_number']) ?> — <?= h($ed['model_name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                        <?php if ($editActiveInstallation['ecan_id'] && empty(array_filter($editEcanDevices, fn($e) => $e['id'] == $editActiveInstallation['ecan_id']))): ?>
+                        <option value="<?= $editActiveInstallation['ecan_id'] ?>" selected>
+                            <?= h($editActiveInstallation['ecan_serial']) ?> — <?= h($editActiveInstallation['ecan_model_name']) ?> (aktualny)
+                        </option>
+                        <?php endif; ?>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-outline-secondary"><i class="fas fa-save me-1"></i>Zapisz ECAN</button>
                 </div>
             </form>
         </div>

@@ -427,9 +427,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $orderRow = $orderCheck->fetch();
         if (!$orderRow) { flashError('Zlecenie nie istnieje.'); redirect(getBaseUrl() . 'orders.php'); }
         if ($orderRow['status'] === 'archiwum') { flashError('Nie można edytować zarchiwizowanego zlecenia.'); redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId); }
-        // Only unlink the installation from the order (do not delete the installation)
-        $db->prepare("UPDATE installations SET work_order_id=NULL WHERE id=? AND work_order_id=?")
-           ->execute([$instId, $orderId]);
+        // Fetch installation details to reset related data
+        $instInfo = $db->prepare("SELECT device_id, vehicle_id, ecan_device_id FROM installations WHERE id=? AND work_order_id=?");
+        $instInfo->execute([$instId, $orderId]);
+        $instRow = $instInfo->fetch();
+        if ($instRow) {
+            $db->beginTransaction();
+            try {
+                // Unlink installation from order, clear client
+                $db->prepare("UPDATE installations SET work_order_id=NULL, client_id=NULL WHERE id=?")
+                   ->execute([$instId]);
+                // Clear vehicle registration number
+                if ($instRow['vehicle_id']) {
+                    $db->prepare("UPDATE vehicles SET registration='' WHERE id=?")
+                       ->execute([$instRow['vehicle_id']]);
+                }
+                // Reset ECAN device status back to available
+                if ($instRow['ecan_device_id']) {
+                    $ecanInfo = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+                    $ecanInfo->execute([$instRow['ecan_device_id']]);
+                    $ecanRow = $ecanInfo->fetch();
+                    if ($ecanRow) {
+                        $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$instRow['ecan_device_id']]);
+                        adjustInventoryForStatusChange($db, $ecanRow['model_id'], $ecanRow['status'], 'sprawny');
+                    }
+                    $db->prepare("UPDATE installations SET ecan_device_id=NULL WHERE id=?")->execute([$instId]);
+                }
+                // Reset device status to new/available
+                $devInfo = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+                $devInfo->execute([$instRow['device_id']]);
+                $devRow = $devInfo->fetch();
+                if ($devRow) {
+                    $db->prepare("UPDATE devices SET status='nowy' WHERE id=?")->execute([$instRow['device_id']]);
+                    adjustInventoryForStatusChange($db, $devRow['model_id'], $devRow['status'], 'nowy');
+                }
+                $db->commit();
+            } catch (Exception $e) {
+                $db->rollBack();
+                flashError('Błąd podczas odłączania urządzenia: ' . $e->getMessage());
+                redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId);
+            }
+        } else {
+            $db->prepare("UPDATE installations SET work_order_id=NULL WHERE id=? AND work_order_id=?")
+               ->execute([$instId, $orderId]);
+        }
         flashSuccess('Urządzenie zostało odłączone od zlecenia.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId);
 
@@ -486,6 +527,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $db->prepare("UPDATE installations SET work_order_id=? WHERE id=?")->execute([$newOrderId, $instId]);
         flashSuccess('Urządzenie zostało przeniesione do innego zlecenia.');
+        redirect($rdrTarget);
+
+    } elseif ($postAction === 'assign_ecan_to_installation') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $instId  = (int)($_POST['installation_id'] ?? 0);
+        $newEcanId = (int)($_POST['ecan_device_id'] ?? 0) ?: null;
+        $rdrTarget = $orderId ? getBaseUrl() . 'orders.php?action=view&id=' . $orderId : getBaseUrl() . 'orders.php';
+        if (!$instId) { flashError('Nieprawidłowe dane.'); redirect($rdrTarget); }
+        $orderCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
+        $orderCheck->execute([$orderId]);
+        $orderRow = $orderCheck->fetch();
+        if (!$orderRow || $orderRow['status'] === 'archiwum') { flashError('Nie można edytować tego zlecenia.'); redirect($rdrTarget); }
+        $instCheck = $db->prepare("SELECT ecan_device_id FROM installations WHERE id=? AND work_order_id=?");
+        $instCheck->execute([$instId, $orderId]);
+        $instRow = $instCheck->fetch();
+        if (!$instRow) { flashError('Montaż nie należy do tego zlecenia.'); redirect($rdrTarget); }
+        $db->beginTransaction();
+        try {
+            $oldEcanId = $instRow['ecan_device_id'] ? (int)$instRow['ecan_device_id'] : null;
+            // Release old ECAN device if changed
+            if ($oldEcanId && $oldEcanId !== $newEcanId) {
+                $oldEcan = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+                $oldEcan->execute([$oldEcanId]);
+                $oldEcanRow = $oldEcan->fetch();
+                if ($oldEcanRow) {
+                    $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$oldEcanId]);
+                    adjustInventoryForStatusChange($db, $oldEcanRow['model_id'], $oldEcanRow['status'], 'sprawny');
+                }
+            }
+            // Mark new ECAN device as mounted
+            if ($newEcanId && $newEcanId !== $oldEcanId) {
+                $newEcan = $db->prepare("SELECT model_id, status FROM devices WHERE id=?");
+                $newEcan->execute([$newEcanId]);
+                $newEcanRow = $newEcan->fetch();
+                if (!$newEcanRow) { throw new Exception('Wybrane urządzenie ECAN nie istnieje.'); }
+                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$newEcanId]);
+                adjustInventoryForStatusChange($db, $newEcanRow['model_id'], $newEcanRow['status'], 'zamontowany');
+            }
+            $db->prepare("UPDATE installations SET ecan_device_id=? WHERE id=?")->execute([$newEcanId, $instId]);
+            $db->commit();
+            flashSuccess('Urządzenie ECAN zostało ' . ($newEcanId ? 'przypisane.' : 'odpięte.'));
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd: ' . $e->getMessage());
+        }
         redirect($rdrTarget);
 
     } elseif ($postAction === 'complete_disassembly') {
@@ -681,19 +767,37 @@ if ($action === 'list') {
     $devStmt = $db->prepare("
         SELECT i.id as inst_id, i.installation_date, i.status as inst_status,
                i.location_in_vehicle, i.notes as inst_notes,
+               i.ecan_device_id,
                d.id as device_id, d.serial_number, d.imei, d.sim_number,
                m.name as model_name, mf.name as manufacturer_name,
-               v.registration, v.make, v.model_name as vehicle_model
+               v.registration, v.make, v.model_name as vehicle_model,
+               ed.id as ecan_id, ed.serial_number as ecan_serial, em.name as ecan_model_name
         FROM installations i
         JOIN devices d ON d.id=i.device_id
         JOIN models m ON m.id=d.model_id
         JOIN manufacturers mf ON mf.id=m.manufacturer_id
         JOIN vehicles v ON v.id=i.vehicle_id
+        LEFT JOIN devices ed ON ed.id=i.ecan_device_id
+        LEFT JOIN models em ON em.id=ed.model_id
         WHERE i.work_order_id=?
         ORDER BY i.installation_date DESC, i.id
     ");
     $devStmt->execute([$id]);
     $orderDevices = $devStmt->fetchAll();
+
+    // Available ECAN devices for assignment
+    $ecanDevicesForOrder = [];
+    try {
+        $ecanDevicesForOrder = $db->query(
+            "SELECT d.id, d.serial_number, m.name AS model_name, mf.name AS manufacturer_name
+             FROM devices d
+             JOIN models m ON m.id = d.model_id
+             JOIN manufacturers mf ON mf.id = m.manufacturer_id
+             WHERE m.name LIKE 'ECAN%'
+               AND d.status IN ('nowy','sprawny')
+             ORDER BY m.name, d.serial_number"
+        )->fetchAll();
+    } catch (Exception $e) { $ecanDevicesForOrder = []; }
 
     // Active installations not yet assigned to any order (for "add device" modal)
     $availableInstForOrder = [];
@@ -896,29 +1000,42 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
             <?php else: ?>
             <div class="table-responsive">
                 <table class="table table-sm table-hover mb-0">
-                    <thead><tr><th>Urządzenie</th><th>Pojazd</th><th>Data montażu</th><th>Status</th><?php if (!in_array($order['status'], ['archiwum']) && !empty($ordersForReassign)): ?><th></th><?php endif; ?></tr></thead>
+                    <thead><tr><th>Urządzenie</th><th>Pojazd</th><th>ECAN</th><th>Data montażu</th><th>Status</th><?php if (!in_array($order['status'], ['archiwum'])): ?><th></th><?php endif; ?></tr></thead>
                     <tbody>
                         <?php foreach ($orderDevices as $dev): ?>
                         <tr>
                             <td><?= h($dev['manufacturer_name'] . ' ' . $dev['model_name']) ?><br><small class="text-muted"><?= h($dev['serial_number']) ?></small></td>
                             <td><?= h($dev['registration']) ?></td>
+                            <td class="small">
+                                <?php if ($dev['ecan_id']): ?>
+                                <span class="text-success"><i class="fas fa-check-circle me-1"></i><?= h($dev['ecan_serial']) ?></span><br>
+                                <small class="text-muted"><?= h($dev['ecan_model_name']) ?></small>
+                                <?php else: ?>
+                                <span class="text-muted">—</span>
+                                <?php endif; ?>
+                            </td>
                             <td><?= formatDate($dev['installation_date']) ?></td>
                             <td><?= getStatusBadge($dev['inst_status'], 'installation') ?></td>
-                            <?php if (!in_array($order['status'], ['archiwum']) && !empty($ordersForReassign)): ?>
-                            <td>
-                                <form method="POST" class="d-flex gap-1 align-items-center">
-                                    <?= csrfField() ?>
-                                    <input type="hidden" name="action" value="reassign_device_order">
-                                    <input type="hidden" name="from_order_id" value="<?= $order['id'] ?>">
-                                    <input type="hidden" name="installation_id" value="<?= $dev['inst_id'] ?>">
-                                    <select name="new_order_id" class="form-select form-select-sm" style="min-width:130px" required>
-                                        <option value="">Przenieś do...</option>
-                                        <?php foreach ($ordersForReassign as $ro): ?>
-                                        <option value="<?= $ro['id'] ?>"><?= h($ro['order_number']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <button type="submit" class="btn btn-sm btn-outline-secondary flex-shrink-0" title="Zmień zlecenie"><i class="fas fa-random"></i></button>
-                                </form>
+                            <?php if (!in_array($order['status'], ['archiwum'])): ?>
+                            <td class="text-nowrap">
+                                <?php if (!empty($ordersForReassign)): ?>
+                                <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
+                                        title="Zmień zlecenie"
+                                        data-inst-id="<?= $dev['inst_id'] ?>"
+                                        data-serial="<?= h($dev['serial_number']) ?>"
+                                        onclick="openModalReassignDevice(this.dataset.instId, this.dataset.serial)">
+                                    <i class="fas fa-random"></i>
+                                </button>
+                                <?php endif; ?>
+                                <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                        title="Zmień ECAN"
+                                        data-inst-id="<?= $dev['inst_id'] ?>"
+                                        data-ecan-id="<?= (int)($dev['ecan_id'] ?? 0) ?>"
+                                        data-ecan-serial="<?= h($dev['ecan_serial'] ?? '') ?>"
+                                        data-ecan-model="<?= h($dev['ecan_model_name'] ?? '') ?>"
+                                        onclick="openModalEcanDevice(this)">
+                                    <i class="fas fa-microchip"></i>
+                                </button>
                             </td>
                             <?php endif; ?>
                         </tr>
@@ -937,6 +1054,87 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
             </div>
         </div>
     </div>
+    <!-- ECAN assign modal for use within order preview modal -->
+    <div id="modalEcanForm" class="mt-3 d-none border rounded p-3 bg-light">
+        <form method="POST" id="modalEcanAssignForm">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="assign_ecan_to_installation">
+            <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+            <input type="hidden" name="installation_id" id="modalEcanInstId" value="">
+            <div class="row g-2 align-items-end">
+                <div class="col">
+                    <label class="form-label form-label-sm mb-1"><i class="fas fa-microchip me-1 text-secondary"></i>Urządzenie ECAN</label>
+                    <select name="ecan_device_id" id="modalEcanSelect" class="form-select form-select-sm">
+                        <option value="">— odepnij ECAN —</option>
+                        <?php foreach ($ecanDevicesForOrder as $ed): ?>
+                        <option value="<?= $ed['id'] ?>"><?= h($ed['serial_number']) ?> — <?= h($ed['model_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-info text-white"><i class="fas fa-save me-1"></i>Zapisz ECAN</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalEcanForm').classList.add('d-none')">Anuluj</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    <!-- Reassign device modal for use within order preview modal -->
+    <?php if (!empty($ordersForReassign)): ?>
+    <div id="modalReassignForm" class="mt-3 d-none border rounded p-3 bg-light">
+        <form method="POST" id="modalReassignAssignForm">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="reassign_device_order">
+            <input type="hidden" name="from_order_id" value="<?= $order['id'] ?>">
+            <input type="hidden" name="installation_id" id="modalReassignInstId" value="">
+            <div class="row g-2 align-items-end">
+                <div class="col">
+                    <label class="form-label form-label-sm mb-1">Przenieś urządzenie <strong id="modalReassignSerial"></strong> do zlecenia:</label>
+                    <select name="new_order_id" id="modalReassignSelect" class="form-select form-select-sm" required>
+                        <option value="">— wybierz zlecenie —</option>
+                        <?php foreach ($ordersForReassign as $ro): ?>
+                        <option value="<?= $ro['id'] ?>"><?= h($ro['order_number']) ?> <?= $ro['company_name'] ? '— ' . h($ro['company_name']) : ($ro['contact_name'] ? '— ' . h($ro['contact_name']) : '') ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-outline-primary"><i class="fas fa-random me-1"></i>Przenieś</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalReassignForm').classList.add('d-none')">Anuluj</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    <?php endif; ?>
+    <script>
+    function openModalEcanDevice(btn) {
+        var instId = btn.dataset.instId;
+        var currentEcanId = parseInt(btn.dataset.ecanId || '0');
+        var currentEcanSerial = btn.dataset.ecanSerial || '';
+        var currentEcanModel = btn.dataset.ecanModel || '';
+        var form = document.getElementById('modalEcanForm');
+        document.getElementById('modalEcanInstId').value = instId;
+        var sel = document.getElementById('modalEcanSelect');
+        if (sel) {
+            if (currentEcanId) {
+                var exists = Array.from(sel.options).some(function(o) { return parseInt(o.value) === currentEcanId; });
+                if (!exists) {
+                    var opt = new Option(currentEcanSerial + ' — ' + currentEcanModel + ' (aktualny)', currentEcanId);
+                    sel.add(opt, 1);
+                }
+            }
+            sel.value = currentEcanId || '';
+        }
+        form.classList.remove('d-none');
+        form.scrollIntoView({behavior:'smooth', block:'nearest'});
+    }
+    function openModalReassignDevice(instId, serial) {
+        var form = document.getElementById('modalReassignForm');
+        if (!form) return;
+        document.getElementById('modalReassignInstId').value = instId;
+        document.getElementById('modalReassignSerial').textContent = serial;
+        form.classList.remove('d-none');
+        form.scrollIntoView({behavior:'smooth', block:'nearest'});
+    }
+    </script>
     <?php
     exit;
 }
@@ -1848,6 +2046,7 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                             <th>Urządzenie</th>
                             <th>Nr seryjny / IMEI</th>
                             <th>Pojazd</th>
+                            <th>ECAN</th>
                             <th>Data montażu</th>
                             <th>Status</th>
                             <th></th>
@@ -1863,6 +2062,14 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                                 <?php if ($dev['sim_number']): ?><br><small class="text-muted">SIM: <?= h($dev['sim_number']) ?></small><?php endif; ?>
                             </td>
                             <td><?= h($dev['registration']) ?><?= $dev['make'] ? '<br><small class="text-muted">' . h($dev['make']) . '</small>' : '' ?></td>
+                            <td class="small">
+                                <?php if ($dev['ecan_id']): ?>
+                                <span class="text-success"><i class="fas fa-check-circle me-1"></i><?= h($dev['ecan_serial']) ?></span><br>
+                                <small class="text-muted"><?= h($dev['ecan_model_name']) ?></small>
+                                <?php else: ?>
+                                <span class="text-muted">—</span>
+                                <?php endif; ?>
+                            </td>
                             <td><?= formatDate($dev['installation_date']) ?></td>
                             <td><?= getStatusBadge($dev['inst_status'], 'installation') ?></td>
                             <td>
@@ -1873,6 +2080,14 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                                 <button type="button" class="btn btn-sm btn-outline-info btn-action" title="Zmień nr rejestracyjny"
                                         onclick="openChangeRegModal(<?= $dev['inst_id'] ?>, <?= htmlspecialchars(json_encode($dev['registration'])) ?>, <?= $order['id'] ?>)">
                                     <i class="fas fa-hashtag"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień urządzenie ECAN"
+                                        data-inst-id="<?= $dev['inst_id'] ?>"
+                                        data-ecan-id="<?= (int)($dev['ecan_id'] ?? 0) ?>"
+                                        data-ecan-serial="<?= h($dev['ecan_serial'] ?? '') ?>"
+                                        data-ecan-model="<?= h($dev['ecan_model_name'] ?? '') ?>"
+                                        onclick="openChangeEcanModal(this)">
+                                    <i class="fas fa-microchip"></i>
                                 </button>
                                 <?php if (!empty($ordersForReassign)): ?>
                                 <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień zlecenie"
@@ -1981,6 +2196,61 @@ function openChangeRegModal(instId, currentReg, orderId) {
     new bootstrap.Modal(document.getElementById('changeRegModal')).show();
 }
 </script>
+
+<!-- Change ECAN Device Modal -->
+<div class="modal fade" id="changeEcanModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST" id="changeEcanForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="assign_ecan_to_installation">
+                <input type="hidden" name="installation_id" id="changeEcanInstId" value="">
+                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-microchip me-2 text-secondary"></i>Urządzenie ECAN</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label">Wybierz urządzenie ECAN</label>
+                    <select name="ecan_device_id" id="changeEcanSelect" class="form-select">
+                        <option value="">— odepnij ECAN —</option>
+                        <?php foreach ($ecanDevicesForOrder as $ed): ?>
+                        <option value="<?= $ed['id'] ?>"><?= h($ed['serial_number']) ?> — <?= h($ed['model_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php if (empty($ecanDevicesForOrder)): ?>
+                    <div class="form-text text-muted mt-2">Brak dostępnych urządzeń ECAN.</div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-save me-1"></i>Zapisz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openChangeEcanModal(btn) {
+    var instId = btn.dataset.instId;
+    var currentEcanId = parseInt(btn.dataset.ecanId || '0');
+    var currentEcanSerial = btn.dataset.ecanSerial || '';
+    var currentEcanModel = btn.dataset.ecanModel || '';
+    document.getElementById('changeEcanInstId').value = instId;
+    var sel = document.getElementById('changeEcanSelect');
+    if (sel) {
+        // Add current ECAN as option if it's not in the list (it might be zamontowany)
+        if (currentEcanId) {
+            var exists = Array.from(sel.options).some(function(o) { return parseInt(o.value) === currentEcanId; });
+            if (!exists) {
+                var opt = new Option(currentEcanSerial + ' — ' + currentEcanModel + ' (aktualny)', currentEcanId);
+                sel.add(opt, 1);
+            }
+        }
+        sel.value = currentEcanId || '';
+    }
+    new bootstrap.Modal(document.getElementById('changeEcanModal')).show();
+}</script>
 
 <?php if (!empty($ordersForReassign)): ?>
 <!-- Reassign Device to Different Order Modal -->
@@ -2589,7 +2859,7 @@ document.getElementById('newOrderModal').addEventListener('hidden.bs.modal', fun
 </div>
 
 <div class="modal fade" id="orderPreviewModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="orderPreviewTitle"><i class="fas fa-clipboard-list me-2"></i>Zlecenie</h5>
@@ -2619,22 +2889,30 @@ function openGroupPreviewModal(ordersJson, clientLabel) {
         'archiwum':'<span class="badge bg-secondary">Archiwum</span>'
     };
     var rows = orders.map(function(o) {
-        var st = statusLabels[o.status] || ('<span class="badge bg-secondary">'+o.status+'</span>');
+        var st = statusLabels[o.status] || ('<span class="badge bg-secondary">'+escHtml(o.status)+'</span>');
         return '<tr>'
-            + '<td class="fw-semibold"><a href="#" onclick="closeGroupOpenOrder('+o.id+','+JSON.stringify(o.order_number)+');return false;">'+escHtml(o.order_number)+'</a></td>'
+            + '<td class="fw-semibold"><a href="#" data-oid="'+o.id+'" data-onum="'+escHtml(o.order_number)+'" onclick="closeGroupOpenOrder(parseInt(this.dataset.oid),this.dataset.onum);return false;">'+escHtml(o.order_number)+'</a></td>'
             + '<td>'+escHtml(o.date)+'</td>'
             + '<td>'+escHtml(o.technician_name||'—')+'</td>'
             + '<td><span class="badge '+(o.device_count>0?'bg-success':'bg-secondary')+'">'+o.device_count+'</span></td>'
             + '<td>'+st+'</td>'
-            + '<td><button class="btn btn-sm btn-outline-primary btn-action" title="Podgląd" onclick="closeGroupOpenOrder('+o.id+','+JSON.stringify(o.order_number)+')"><i class="fas fa-eye"></i></button></td>'
+            + '<td><button class="btn btn-sm btn-outline-primary btn-action" title="Podgląd" data-oid="'+o.id+'" data-onum="'+escHtml(o.order_number)+'" onclick="closeGroupOpenOrder(parseInt(this.dataset.oid),this.dataset.onum)"><i class="fas fa-eye"></i></button></td>'
             + '</tr>';
     }).join('');
     document.getElementById('groupPreviewBody').innerHTML =
         '<table class="table table-hover mb-0">'
         + '<thead><tr><th>Nr zlecenia</th><th>Data</th><th>Technik</th><th>Urządzenia</th><th>Status</th><th>Akcje</th></tr></thead>'
         + '<tbody>'+rows+'</tbody></table>';
-    bootstrap.Modal.getInstance(document.getElementById('groupPreviewModal'))?.hide();
-    new bootstrap.Modal(document.getElementById('groupPreviewModal')).show();
+    var existing = bootstrap.Modal.getInstance(document.getElementById('groupPreviewModal'));
+    if (existing) {
+        existing.hide();
+        document.getElementById('groupPreviewModal').addEventListener('hidden.bs.modal', function openAfterHide() {
+            document.getElementById('groupPreviewModal').removeEventListener('hidden.bs.modal', openAfterHide);
+            new bootstrap.Modal(document.getElementById('groupPreviewModal')).show();
+        }, {once: true});
+    } else {
+        new bootstrap.Modal(document.getElementById('groupPreviewModal')).show();
+    }
 }
 function closeGroupOpenOrder(orderId, orderNumber) {
     var gm = bootstrap.Modal.getInstance(document.getElementById('groupPreviewModal'));
