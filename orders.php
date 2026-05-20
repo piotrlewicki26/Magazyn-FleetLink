@@ -455,6 +455,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flashSuccess('Urządzenie zostało dodane do zlecenia.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId);
 
+    } elseif ($postAction === 'reassign_device_order') {
+        $fromOrderId = (int)($_POST['from_order_id'] ?? 0);
+        $instId      = (int)($_POST['installation_id'] ?? 0);
+        $newOrderId  = (int)($_POST['new_order_id'] ?? 0);
+        $rdrTarget   = $fromOrderId ? getBaseUrl() . 'orders.php?action=view&id=' . $fromOrderId : getBaseUrl() . 'orders.php';
+        if (!$fromOrderId || !$instId || !$newOrderId) {
+            flashError('Nieprawidłowe dane.');
+            redirect($rdrTarget);
+        }
+        $fromCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
+        $fromCheck->execute([$fromOrderId]);
+        $fromRow = $fromCheck->fetch();
+        if (!$fromRow || $fromRow['status'] === 'archiwum') {
+            flashError('Nie można edytować zarchiwizowanego zlecenia.');
+            redirect($rdrTarget);
+        }
+        $newCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
+        $newCheck->execute([$newOrderId]);
+        $newRow = $newCheck->fetch();
+        if (!$newRow || $newRow['status'] === 'archiwum') {
+            flashError('Wybrane zlecenie nie istnieje lub jest zarchiwizowane.');
+            redirect($rdrTarget);
+        }
+        $instCheck = $db->prepare("SELECT id FROM installations WHERE id=? AND work_order_id=?");
+        $instCheck->execute([$instId, $fromOrderId]);
+        if (!$instCheck->fetch()) {
+            flashError('Montaż nie należy do tego zlecenia.');
+            redirect($rdrTarget);
+        }
+        $db->prepare("UPDATE installations SET work_order_id=? WHERE id=?")->execute([$newOrderId, $instId]);
+        flashSuccess('Urządzenie zostało przeniesione do innego zlecenia.');
+        redirect($rdrTarget);
+
     } elseif ($postAction === 'complete_disassembly') {
         $disDeviceId = (int)($_POST['device_id'] ?? 0);
         $disInstId   = (int)($_POST['installation_id'] ?? 0);
@@ -685,6 +718,22 @@ if ($action === 'list') {
         $availableInstForOrder = $availStmt->fetchAll();
     }
 
+    // Non-archived orders for device reassignment (excluding current order)
+    $ordersForReassign = [];
+    if ($order['status'] !== 'archiwum') {
+        $reassignStmt = $db->prepare("
+            SELECT wo.id, wo.order_number, wo.date, wo.status,
+                   c.contact_name, c.company_name
+            FROM work_orders wo
+            LEFT JOIN clients c ON c.id=wo.client_id
+            WHERE wo.status != 'archiwum' AND wo.id != ?
+            ORDER BY wo.date DESC, wo.id DESC
+            LIMIT 200
+        ");
+        $reassignStmt->execute([$id]);
+        $ordersForReassign = $reassignStmt->fetchAll();
+    }
+
 } elseif ($action === 'add') {
     // Pre-fill technician to current user
     $prefillTechId = (int)$currentUser['id'];
@@ -847,7 +896,7 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
             <?php else: ?>
             <div class="table-responsive">
                 <table class="table table-sm table-hover mb-0">
-                    <thead><tr><th>Urządzenie</th><th>Pojazd</th><th>Data montażu</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Urządzenie</th><th>Pojazd</th><th>Data montażu</th><th>Status</th><?php if (!in_array($order['status'], ['archiwum']) && !empty($ordersForReassign)): ?><th></th><?php endif; ?></tr></thead>
                     <tbody>
                         <?php foreach ($orderDevices as $dev): ?>
                         <tr>
@@ -855,6 +904,23 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                             <td><?= h($dev['registration']) ?></td>
                             <td><?= formatDate($dev['installation_date']) ?></td>
                             <td><?= getStatusBadge($dev['inst_status'], 'installation') ?></td>
+                            <?php if (!in_array($order['status'], ['archiwum']) && !empty($ordersForReassign)): ?>
+                            <td>
+                                <form method="POST" class="d-flex gap-1 align-items-center">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="reassign_device_order">
+                                    <input type="hidden" name="from_order_id" value="<?= $order['id'] ?>">
+                                    <input type="hidden" name="installation_id" value="<?= $dev['inst_id'] ?>">
+                                    <select name="new_order_id" class="form-select form-select-sm" style="min-width:130px" required>
+                                        <option value="">Przenieś do...</option>
+                                        <?php foreach ($ordersForReassign as $ro): ?>
+                                        <option value="<?= $ro['id'] ?>"><?= h($ro['order_number']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary flex-shrink-0" title="Zmień zlecenie"><i class="fas fa-random"></i></button>
+                                </form>
+                            </td>
+                            <?php endif; ?>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -1808,6 +1874,12 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                                         onclick="openChangeRegModal(<?= $dev['inst_id'] ?>, <?= htmlspecialchars(json_encode($dev['registration'])) ?>, <?= $order['id'] ?>)">
                                     <i class="fas fa-hashtag"></i>
                                 </button>
+                                <?php if (!empty($ordersForReassign)): ?>
+                                <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień zlecenie"
+                                        onclick="openReassignDeviceModal(<?= $dev['inst_id'] ?>, <?= htmlspecialchars(json_encode($dev['serial_number'])) ?>)">
+                                    <i class="fas fa-random"></i>
+                                </button>
+                                <?php endif; ?>
                                 <form method="POST" class="d-inline" onsubmit="return confirm('Czy na pewno chcesz odłączyć urządzenie <?= h($dev['serial_number']) ?> od tego zlecenia?')">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="remove_device_from_order">
@@ -1909,6 +1981,51 @@ function openChangeRegModal(instId, currentReg, orderId) {
     new bootstrap.Modal(document.getElementById('changeRegModal')).show();
 }
 </script>
+
+<?php if (!empty($ordersForReassign)): ?>
+<!-- Reassign Device to Different Order Modal -->
+<div class="modal fade" id="reassignDeviceOrderModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="reassign_device_order">
+                <input type="hidden" name="from_order_id" value="<?= $order['id'] ?>">
+                <input type="hidden" name="installation_id" id="reassignInstId" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-random me-2 text-secondary"></i>Zmień zlecenie</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3 text-muted small">Urządzenie: <strong id="reassignDeviceSerial"></strong></p>
+                    <label class="form-label required-star">Nowe zlecenie</label>
+                    <select name="new_order_id" class="form-select" required>
+                        <option value="">— wybierz zlecenie —</option>
+                        <?php foreach ($ordersForReassign as $ro): ?>
+                        <option value="<?= $ro['id'] ?>">
+                            <?= h($ro['order_number']) ?>
+                            <?php if ($ro['company_name'] || $ro['contact_name']): ?> — <?= h($ro['company_name'] ?: $ro['contact_name']) ?><?php endif; ?>
+                            (<?= formatDate($ro['date']) ?>)
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-random me-1"></i>Przenieś do zlecenia</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openReassignDeviceModal(instId, serial) {
+    document.getElementById('reassignInstId').value = instId;
+    document.getElementById('reassignDeviceSerial').textContent = serial;
+    new bootstrap.Modal(document.getElementById('reassignDeviceOrderModal')).show();
+}
+</script>
+<?php endif; ?>
 
 <!-- Edit Order Modal -->
 <div class="modal fade" id="editOrderModal" tabindex="-1">
