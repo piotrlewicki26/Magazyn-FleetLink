@@ -1104,37 +1104,6 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
         </form>
     </div>
     <?php endif; ?>
-    <script>
-    function openModalEcanDevice(btn) {
-        var instId = btn.dataset.instId;
-        var currentEcanId = parseInt(btn.dataset.ecanId || '0');
-        var currentEcanSerial = btn.dataset.ecanSerial || '';
-        var currentEcanModel = btn.dataset.ecanModel || '';
-        var form = document.getElementById('modalEcanForm');
-        document.getElementById('modalEcanInstId').value = instId;
-        var sel = document.getElementById('modalEcanSelect');
-        if (sel) {
-            if (currentEcanId) {
-                var exists = Array.from(sel.options).some(function(o) { return parseInt(o.value) === currentEcanId; });
-                if (!exists) {
-                    var opt = new Option(currentEcanSerial + ' — ' + currentEcanModel + ' (aktualny)', currentEcanId);
-                    sel.add(opt, 1);
-                }
-            }
-            sel.value = currentEcanId || '';
-        }
-        form.classList.remove('d-none');
-        form.scrollIntoView({behavior:'smooth', block:'nearest'});
-    }
-    function openModalReassignDevice(instId, serial) {
-        var form = document.getElementById('modalReassignForm');
-        if (!form) return;
-        document.getElementById('modalReassignInstId').value = instId;
-        document.getElementById('modalReassignSerial').textContent = serial;
-        form.classList.remove('d-none');
-        form.scrollIntoView({behavior:'smooth', block:'nearest'});
-    }
-    </script>
     <?php
     exit;
 }
@@ -2921,6 +2890,37 @@ function closeGroupOpenOrder(orderId, orderNumber) {
 }
 function escHtml(s) {
     return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function openModalEcanDevice(btn) {
+    var instId = btn.dataset.instId;
+    var currentEcanId = parseInt(btn.dataset.ecanId || '0');
+    var currentEcanSerial = btn.dataset.ecanSerial || '';
+    var currentEcanModel = btn.dataset.ecanModel || '';
+    var form = document.getElementById('modalEcanForm');
+    if (!form) return;
+    document.getElementById('modalEcanInstId').value = instId;
+    var sel = document.getElementById('modalEcanSelect');
+    if (sel) {
+        if (currentEcanId) {
+            var exists = Array.from(sel.options).some(function(o) { return parseInt(o.value) === currentEcanId; });
+            if (!exists) {
+                var opt = new Option(currentEcanSerial + ' — ' + currentEcanModel + ' (aktualny)', currentEcanId);
+                sel.add(opt, 1);
+            }
+        }
+        sel.value = currentEcanId || '';
+    }
+    form.classList.remove('d-none');
+    form.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+function openModalReassignDevice(instId, serial) {
+    var form = document.getElementById('modalReassignForm');
+    if (!form) return;
+    document.getElementById('modalReassignInstId').value = instId;
+    document.getElementById('modalReassignSerial').textContent = serial;
+    form.classList.remove('d-none');
+    form.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
 function openOrderModal(orderId, orderNumber) {
