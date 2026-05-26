@@ -97,9 +97,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Urządzenie i data zaplanowanego serwisu są wymagane.');
             redirect(getBaseUrl() . 'services.php?action=add');
         }
-        $serviceOrderNumber = generateServiceOrderNumber();
-        $db->prepare("INSERT INTO services (order_number, device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
-           ->execute([$serviceOrderNumber, $deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
+        $insertStmt = $db->prepare("INSERT INTO services (order_number, device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+        $inserted = false;
+        for ($attempt = 0; $attempt < 5 && !$inserted; $attempt++) {
+            $serviceOrderNumber = generateServiceOrderNumber();
+            try {
+                $insertStmt->execute([$serviceOrderNumber, $deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
+                $inserted = true;
+            } catch (PDOException $e) {
+                if ($attempt === 4) throw $e;
+            }
+        }
         $newServiceId = (int)$db->lastInsertId();
         // Record device history for "wymiana"
         if ($type === 'wymiana' && $deviceId && $replacementDeviceId) {
@@ -309,7 +317,8 @@ try {
 $services = [];
 $archiveServices = [];
 $totalServices = 0;
-$servicePerPage = 10;
+$defaultServicePerPage = 10;
+$servicePerPage = $defaultServicePerPage;
 $servicePage = 1;
 $serviceSort = 'planned_desc';
 if (in_array($action, ['list', 'archive'], true)) {
@@ -319,7 +328,8 @@ if (in_array($action, ['list', 'archive'], true)) {
     $dateFrom     = sanitize($_GET['date_from'] ?? '');
     $dateTo       = sanitize($_GET['date_to'] ?? '');
     if ($action === 'list') {
-        $servicePerPage = in_array((int)($_GET['per_page'] ?? 10), [10, 50, 100], true) ? (int)($_GET['per_page'] ?? 10) : 10;
+        $servicePerPageCandidate = (int)($_GET['per_page'] ?? $defaultServicePerPage);
+        $servicePerPage = in_array($servicePerPageCandidate, [$defaultServicePerPage, 50, 100], true) ? $servicePerPageCandidate : $defaultServicePerPage;
         $servicePage = max(1, (int)($_GET['page'] ?? 1));
         $serviceSort = sanitize($_GET['sort'] ?? 'planned_desc');
         if (!in_array($serviceSort, ['planned_desc', 'planned_asc'], true)) $serviceSort = 'planned_desc';
@@ -408,7 +418,7 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                 <div class="card-header">Szczegóły serwisu</div>
                 <div class="card-body">
                     <table class="table table-sm table-borderless">
-                        <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number'] ?? ('ZS/' . date('Y/m', strtotime($service['planned_date'] ?? 'now')) . '/' . str_pad((string)$service['id'], 4, '0', STR_PAD_LEFT))) ?></td></tr>
+                        <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number'] ?? '—') ?></td></tr>
                         <tr><th class="text-muted">Status</th><td><?= getStatusBadge($service['status'], 'service') ?></td></tr>
                         <tr><th class="text-muted">Typ</th><td><?= h(ucfirst($service['type'])) ?></td></tr>
                         <tr><th class="text-muted">Urządzenie</th><td><a href="devices.php?action=view&id=<?= $service['device_id'] ?>"><?= h($service['serial_number']) ?></a><br><small><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></small></td></tr>
@@ -615,7 +625,7 @@ $_serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
     'date_from' => $_GET['date_from'] ?? '',
     'date_to' => $_GET['date_to'] ?? '',
     'sort' => $serviceSort !== 'planned_desc' ? $serviceSort : '',
-    'per_page' => $servicePerPage !== 10 ? $servicePerPage : '',
+    'per_page' => $servicePerPage !== $defaultServicePerPage ? $servicePerPage : '',
 ])), '?');
 echo paginate($totalServices, $servicePerPage, $servicePage, $_serviceListUrl);
 ?>
@@ -983,7 +993,7 @@ echo paginate($totalServices, $servicePerPage, $servicePage, $_serviceListUrl);
 $svcClientLabel = $service['company_name'] ?: ($service['contact_name'] ?: '—');
 $svcTechName    = $service['technician_name'] ?? '—';
 $svcDate        = $service['planned_date'] ?? date('Y-m-d');
-$svcOrderNum    = $service['order_number'] ?? sprintf('ZS/%s/%s/%04d', date('Y', strtotime(!empty($svcDate) ? $svcDate : 'now')), date('m', strtotime(!empty($svcDate) ? $svcDate : 'now')), $service['id']);
+$svcOrderNum    = $service['order_number'] ?? '—';
 $svcClientAddr  = trim(($service['client_address'] ?? '') . ', ' . ($service['client_postal_code'] ?? '') . ' ' . ($service['client_city'] ?? ''), ', ');
 $svcCompanyName = '';
 $svcCompanyAddr = '';
