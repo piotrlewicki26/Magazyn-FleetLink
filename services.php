@@ -14,6 +14,8 @@ requireLogin();
 $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
+$activeTab = ($action === 'list') ? sanitize($_GET['tab'] ?? 'serwisy') : 'serwisy';
+if (!in_array($activeTab, ['serwisy', 'protokoly'])) $activeTab = 'serwisy';
 
 // Ensure 'archiwum' is allowed for service status in MySQL deployments
 try {
@@ -251,7 +253,7 @@ $svcClients = $db->query("SELECT id, contact_name, company_name FROM clients WHE
 
 $users = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
 $activeInstallations = $db->query("
-    SELECT i.id, v.registration, d.serial_number
+    SELECT i.id, v.registration, d.serial_number, d.id as device_id
     FROM installations i
     JOIN vehicles v ON v.id=i.vehicle_id
     JOIN devices d ON d.id=i.device_id
@@ -283,7 +285,8 @@ if (in_array($action, ['list', 'archive'], true)) {
         SELECT s.id, s.type, s.planned_date, s.completed_date, s.status, s.cost, s.description,
                d.serial_number, m.name as model_name, mf.name as manufacturer_name,
                u.name as technician_name,
-               v.registration, v.make
+               v.registration, v.make,
+               c.contact_name, c.company_name
         FROM services s
         JOIN devices d ON d.id=s.device_id
         JOIN models m ON m.id=d.model_id
@@ -291,6 +294,7 @@ if (in_array($action, ['list', 'archive'], true)) {
         LEFT JOIN users u ON u.id=s.technician_id
         LEFT JOIN installations inst ON inst.id=s.installation_id
         LEFT JOIN vehicles v ON v.id=inst.vehicle_id
+        LEFT JOIN clients c ON c.id=inst.client_id
         WHERE 1=1
     ";
     $params = [];
@@ -403,35 +407,36 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if (in_array($action, ['list','archive'], true)): ?>
-<ul class="nav nav-tabs mb-3">
-    <li class="nav-item">
-        <a class="nav-link <?= $action === 'list' ? 'active' : '' ?>" href="services.php">
-            <i class="fas fa-wrench me-1"></i>Serwisy
-        </a>
+<ul class="nav nav-tabs mb-3" id="serviceTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <?php if ($action === 'list'): ?>
+        <button class="nav-link <?= $activeTab === 'serwisy' ? 'active' : '' ?>" id="tab-serwisy" data-bs-toggle="tab" data-bs-target="#pane-serwisy" type="button" role="tab">
+            <i class="fas fa-wrench me-1"></i>Serwis
+        </button>
+        <?php else: ?>
+        <a class="nav-link" href="services.php"><i class="fas fa-wrench me-1"></i>Serwis</a>
+        <?php endif; ?>
     </li>
     <li class="nav-item" role="presentation">
         <a class="nav-link <?= $action === 'archive' ? 'active' : '' ?>" href="services.php?action=archive">
             <i class="fas fa-archive me-1"></i>Archiwum
         </a>
     </li>
+    <li class="nav-item" role="presentation">
+        <?php if ($action === 'list'): ?>
+        <button class="nav-link <?= $activeTab === 'protokoly' ? 'active' : '' ?>" id="tab-protokoly-s" data-bs-toggle="tab" data-bs-target="#pane-protokoly-s" type="button" role="tab">
+            <i class="fas fa-clipboard-check me-1"></i>Protokoły serwisu
+        </button>
+        <?php else: ?>
+        <a class="nav-link" href="services.php?tab=protokoly"><i class="fas fa-clipboard-check me-1"></i>Protokoły serwisu</a>
+        <?php endif; ?>
+    </li>
 </ul>
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-<ul class="nav nav-tabs mb-3" id="serviceTab" role="tablist">
-    <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="tab-serwisy" data-bs-toggle="tab" data-bs-target="#pane-serwisy" type="button" role="tab">
-            <i class="fas fa-wrench me-1"></i>Serwisy
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-protokoly-s" data-bs-toggle="tab" data-bs-target="#pane-protokoly-s" type="button" role="tab">
-            <i class="fas fa-clipboard-check me-1"></i>Protokoły serwisu
-        </button>
-    </li>
-</ul>
 <div class="tab-content">
-<div class="tab-pane fade show active" id="pane-serwisy" role="tabpanel">
+<div class="tab-pane fade <?= $activeTab === 'serwisy' ? 'show active' : '' ?>" id="pane-serwisy" role="tabpanel">
 <div class="card mb-3">
     <div class="card-body py-2">
         <form method="GET" class="row g-2">
@@ -472,7 +477,7 @@ include __DIR__ . '/includes/header.php';
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
-                <tr><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
+                <tr><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
             </thead>
             <tbody>
                 <?php foreach ($services as $svc): ?>
@@ -484,6 +489,15 @@ include __DIR__ . '/includes/header.php';
                         <br><small class="text-muted"><?= h($svc['manufacturer_name'] . ' ' . $svc['model_name']) ?></small>
                     </td>
                     <td><?= $svc['registration'] ? h($svc['registration'] . ' ' . $svc['make']) : '—' ?></td>
+                    <td class="small">
+                        <?php if ($svc['company_name']): ?>
+                        <div class="fw-semibold"><?= h($svc['company_name']) ?></div>
+                        <?php elseif ($svc['contact_name']): ?>
+                        <?= h($svc['contact_name']) ?>
+                        <?php else: ?>
+                        <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td><?= getStatusBadge($svc['status'], 'service') ?></td>
                     <td><?= $svc['cost'] > 0 ? formatMoney($svc['cost']) : '—' ?></td>
                     <td><?= h($svc['technician_name'] ?? '—') ?></td>
@@ -521,14 +535,14 @@ include __DIR__ . '/includes/header.php';
                     </td>
                 </tr>
                 <?php endforeach; ?>
-                <?php if (empty($services)): ?><tr><td colspan="8" class="text-center text-muted p-3">Brak serwisów.</td></tr><?php endif; ?>
+                <?php if (empty($services)): ?><tr><td colspan="9" class="text-center text-muted p-3">Brak serwisów.</td></tr><?php endif; ?>
             </tbody>
         </table>
     </div>
 </div>
 
 </div><!-- /pane-serwisy -->
-<div class="tab-pane fade" id="pane-protokoly-s" role="tabpanel">
+<div class="tab-pane fade <?= $activeTab === 'protokoly' ? 'show active' : '' ?>" id="pane-protokoly-s" role="tabpanel">
 <div class="card">
     <div class="card-header">Protokoły serwisowe (<?= count($serviceProtocols) ?>)</div>
     <div class="table-responsive">
@@ -602,7 +616,7 @@ include __DIR__ . '/includes/header.php';
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
-                <tr><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
+                <tr><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
             </thead>
             <tbody>
                 <?php foreach ($archiveServices as $svc): ?>
@@ -614,6 +628,15 @@ include __DIR__ . '/includes/header.php';
                         <br><small class="text-muted"><?= h($svc['manufacturer_name'] . ' ' . $svc['model_name']) ?></small>
                     </td>
                     <td><?= $svc['registration'] ? h($svc['registration'] . ' ' . $svc['make']) : '—' ?></td>
+                    <td class="small">
+                        <?php if ($svc['company_name']): ?>
+                        <div class="fw-semibold"><?= h($svc['company_name']) ?></div>
+                        <?php elseif ($svc['contact_name']): ?>
+                        <?= h($svc['contact_name']) ?>
+                        <?php else: ?>
+                        <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td><?= getStatusBadge($svc['status'], 'service') ?></td>
                     <td><?= $svc['cost'] > 0 ? formatMoney($svc['cost']) : '—' ?></td>
                     <td><?= h($svc['technician_name'] ?? '—') ?></td>
@@ -625,44 +648,12 @@ include __DIR__ . '/includes/header.php';
                     </td>
                 </tr>
                 <?php endforeach; ?>
-                <?php if (empty($archiveServices)): ?><tr><td colspan="8" class="text-center text-muted p-3">Brak zarchiwizowanych serwisów.</td></tr><?php endif; ?>
+                <?php if (empty($archiveServices)): ?><tr><td colspan="9" class="text-center text-muted p-3">Brak zarchiwizowanych serwisów.</td></tr><?php endif; ?>
             </tbody>
         </table>
     </div>
 </div>
 
-<!-- Service Preview Modal -->
-<div class="modal fade" id="servicePreviewModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="servicePreviewTitle"><i class="fas fa-wrench me-2 text-warning"></i>Serwis</h5>
-                <div class="ms-auto d-flex align-items-center gap-2 me-3" id="servicePreviewFullLink"></div>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="servicePreviewBody">
-                <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>
-            </div>
-            <div class="modal-footer">
-                <a href="#" id="servicePreviewOpenFull" class="btn btn-outline-primary btn-sm" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Pełny widok</a>
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
-            </div>
-        </div>
-    </div>
-</div>
-<script>
-function openServiceModal(serviceId) {
-    var modal = new bootstrap.Modal(document.getElementById('servicePreviewModal'));
-    document.getElementById('servicePreviewTitle').innerHTML = '<i class="fas fa-wrench me-2 text-warning"></i>Serwis #' + serviceId;
-    document.getElementById('servicePreviewOpenFull').href = 'services.php?action=view&id=' + serviceId;
-    document.getElementById('servicePreviewBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>';
-    modal.show();
-    fetch('services.php?action=view&id=' + serviceId + '&ajax=1')
-        .then(function(r) { return r.text(); })
-        .then(function(html) { document.getElementById('servicePreviewBody').innerHTML = html; })
-        .catch(function() { document.getElementById('servicePreviewBody').innerHTML = '<p class="text-danger p-3">Błąd ładowania danych serwisu.</p>'; });
-}
-</script>
 
 <?php elseif ($action === 'view' && isset($service)): ?>
 <div class="row g-3">
@@ -736,10 +727,11 @@ function openServiceModal(serviceId) {
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Powiązany montaż</label>
-                    <select name="installation_id" class="form-select">
+                    <select name="installation_id" id="editInstallSelect" class="form-select">
                         <option value="">— brak —</option>
                         <?php foreach ($activeInstallations as $inst): ?>
                         <option value="<?= $inst['id'] ?>"
+                                data-device-id="<?= $inst['device_id'] ?>"
                                 <?= ($service['installation_id'] ?? (int)($_GET['installation'] ?? 0)) == $inst['id'] ? 'selected' : '' ?>>
                             <?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?>
                         </option>
@@ -1110,6 +1102,18 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
         if (sel && sel.value) {
             searchInput.value = sel.textContent.trim();
         }
+        // Auto-select matching installation
+        var installSel = document.getElementById('editInstallSelect');
+        if (!installSel) return;
+        var deviceId = this.value;
+        var allOpts = installSel.querySelectorAll('option[data-device-id]');
+        var matching = [];
+        allOpts.forEach(function(opt) {
+            if (!deviceId || opt.dataset.deviceId == deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
+            else { opt.style.display = 'none'; }
+        });
+        if (deviceId && matching.length === 1 && !installSel.value) matching[0].selected = true;
+        else if (!deviceId) { allOpts.forEach(function(opt) { opt.style.display = ''; }); }
     });
 }());
 </script>
@@ -1166,7 +1170,8 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
                             <select name="installation_id" class="form-select">
                                 <option value="">— brak —</option>
                                 <?php foreach ($activeInstallations as $inst): ?>
-                                <option value="<?= $inst['id'] ?>"><?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?></option>
+                                <option value="<?= $inst['id'] ?>"
+                                        data-device-id="<?= $inst['device_id'] ?>"><?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -1243,7 +1248,58 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
     if (search) { search.addEventListener('input', filterSvcDevices); }
     var clientFilter = document.getElementById('svcListClientFilter');
     if (clientFilter) { clientFilter.addEventListener('change', filterSvcDevices); }
+    // Auto-select installation when device selected in modal
+    var svcListDevSel = document.getElementById('svcListDevSelect');
+    var svcListInstSel = modal.querySelector('select[name="installation_id"]');
+    if (svcListDevSel && svcListInstSel) {
+        svcListDevSel.addEventListener('change', function() {
+            var deviceId = this.value;
+            var allOpts = svcListInstSel.querySelectorAll('option[data-device-id]');
+            var matching = [];
+            allOpts.forEach(function(opt) {
+                if (!deviceId || opt.dataset.deviceId == deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
+                else { opt.style.display = 'none'; }
+            });
+            if (deviceId && matching.length === 1) svcListInstSel.value = matching[0].value;
+            else if (!deviceId) svcListInstSel.value = '';
+        });
+    }
 }());
+</script>
+<?php endif; ?>
+
+<?php if (in_array($action, ['list','archive'], true)): ?>
+<!-- Service Preview Modal (shared for list and archive) -->
+<div class="modal fade" id="servicePreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="servicePreviewTitle"><i class="fas fa-wrench me-2 text-warning"></i>Serwis</h5>
+                <div class="ms-auto d-flex align-items-center gap-2 me-3" id="servicePreviewFullLink"></div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="servicePreviewBody">
+                <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>
+            </div>
+            <div class="modal-footer">
+                <a href="#" id="servicePreviewOpenFull" class="btn btn-outline-primary btn-sm" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Pełny widok</a>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function openServiceModal(serviceId) {
+    var modal = new bootstrap.Modal(document.getElementById('servicePreviewModal'));
+    document.getElementById('servicePreviewTitle').innerHTML = '<i class="fas fa-wrench me-2 text-warning"></i>Serwis #' + serviceId;
+    document.getElementById('servicePreviewOpenFull').href = 'services.php?action=view&id=' + serviceId;
+    document.getElementById('servicePreviewBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>';
+    modal.show();
+    fetch('services.php?action=view&id=' + serviceId + '&ajax=1')
+        .then(function(r) { return r.text(); })
+        .then(function(html) { document.getElementById('servicePreviewBody').innerHTML = html; })
+        .catch(function() { document.getElementById('servicePreviewBody').innerHTML = '<p class="text-danger p-3">Błąd ładowania danych serwisu.</p>'; });
+}
 </script>
 <?php endif; ?>
 

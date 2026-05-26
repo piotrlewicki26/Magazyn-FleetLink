@@ -1271,17 +1271,15 @@ include __DIR__ . '/includes/header.php';
                         }, $groupOrders);
                         $groupOrdersModalJson = htmlspecialchars(json_encode($groupOrdersForModal), ENT_QUOTES);
                 ?>
-                <tr class="table-light fw-semibold" data-group-id="<?= h($groupRowId) ?>">
-                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')">
-                        <i class="fas fa-layer-group me-1"></i>Klient: <?= h($clientLabel) ?>
-                        <span class="badge bg-secondary ms-1"><?= count($groupOrders) ?></span>
-                        <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($groupRowId) ?>" style="font-size:.75rem"></i>
+                <tr class="table-primary" data-group-id="<?= h($groupRowId) ?>">
+                    <td colspan="5" class="py-2 fw-semibold">
+                        <i class="fas fa-building me-2 opacity-75"></i><?= h($clientLabel) ?>
+                        <span class="badge bg-primary ms-2"><?= count($groupOrders) ?> zleceń</span>
+                        <span class="badge bg-success ms-1"><?= $totalDevices ?> urządzeń</span>
                     </td>
-                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><?= h($clientLabel) ?></td>
-                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><?= count($groupOrders) ?> zleceń</td>
-                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($groupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
-                    <td></td>
-                    <td>
+                    <td class="py-2"></td>
+                    <td class="py-2"></td>
+                    <td class="py-2">
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy (modal)"
                                 data-orders="<?= $groupOrdersModalJson ?>"
                                 data-client="<?= h($clientLabel) ?>"
@@ -1308,7 +1306,7 @@ include __DIR__ . '/includes/header.php';
                     endif;
                     foreach ($groupOrders as $ord):
                 ?>
-                <tr class="<?= $isGroup ? 'ps-3 d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($groupRowId) . '"' : '' ?>>
+                <tr class="<?= $isGroup ? 'ps-3' : '' ?>" <?= $isGroup ? 'data-group="' . h($groupRowId) . '"' : '' ?>>
                     <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
                         <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
@@ -1444,17 +1442,15 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
                         }, $groupOrders);
                         $myGroupOrdersModalJson = htmlspecialchars(json_encode($myGroupOrdersForModal), ENT_QUOTES);
                 ?>
-                <tr class="table-light fw-semibold" data-group-id="<?= h($myGroupRowId) ?>">
-                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')">
-                        <i class="fas fa-layer-group me-1"></i>Klient: <?= h($clientLabel) ?>
-                        <span class="badge bg-secondary ms-1"><?= count($groupOrders) ?></span>
-                        <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($myGroupRowId) ?>" style="font-size:.75rem"></i>
+                <tr class="table-primary" data-group-id="<?= h($myGroupRowId) ?>">
+                    <td colspan="5" class="py-2 fw-semibold">
+                        <i class="fas fa-building me-2 opacity-75"></i><?= h($clientLabel) ?>
+                        <span class="badge bg-primary ms-2"><?= count($groupOrders) ?> zleceń</span>
+                        <span class="badge bg-success ms-1"><?= $totalDevices ?> urządzeń</span>
                     </td>
-                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')"><?= h($clientLabel) ?></td>
-                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')"><?= count($groupOrders) ?> zleceń</td>
-                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($myGroupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
-                    <td></td>
-                    <td>
+                    <td class="py-2"></td>
+                    <td class="py-2"></td>
+                    <td class="py-2">
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy (modal)"
                                 data-orders="<?= $myGroupOrdersModalJson ?>"
                                 data-client="<?= h($clientLabel) ?>"
@@ -1481,7 +1477,7 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
                     endif;
                     foreach ($groupOrders as $ord):
                 ?>
-                <tr class="<?= $isGroup ? 'ps-3 d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($myGroupRowId) . '"' : '' ?>>
+                <tr class="<?= $isGroup ? 'ps-3' : '' ?>" <?= $isGroup ? 'data-group="' . h($myGroupRowId) . '"' : '' ?>>
                     <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
                         <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
@@ -1616,17 +1612,15 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                         }, $groupOrders);
                         $archGroupOrdersModalJson = htmlspecialchars(json_encode($archGroupOrdersForModal), ENT_QUOTES);
                 ?>
-                <tr class="table-light fw-semibold" data-group-id="<?= h($archGroupRowId) ?>">
-                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')">
-                        <i class="fas fa-layer-group me-1"></i>Klient: <?= h($clientLabel) ?>
-                        <span class="badge bg-secondary ms-1"><?= count($groupOrders) ?></span>
-                        <i class="fas fa-chevron-down ms-2 group-toggle-icon" id="icon-<?= h($archGroupRowId) ?>" style="font-size:.75rem"></i>
+                <tr class="table-primary" data-group-id="<?= h($archGroupRowId) ?>">
+                    <td colspan="5" class="py-2 fw-semibold">
+                        <i class="fas fa-building me-2 opacity-75"></i><?= h($clientLabel) ?>
+                        <span class="badge bg-primary ms-2"><?= count($groupOrders) ?> zleceń</span>
+                        <span class="badge bg-success ms-1"><?= $totalDevices ?> urządzeń</span>
                     </td>
-                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')"><?= h($clientLabel) ?></td>
-                    <td colspan="2" class="text-muted small" style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')"><?= count($groupOrders) ?> zleceń</td>
-                    <td style="cursor:pointer" onclick="toggleGroupRows('<?= h($archGroupRowId) ?>')"><span class="badge bg-info"><?= $totalDevices ?> łącznie</span></td>
-                    <td></td>
-                    <td>
+                    <td class="py-2"></td>
+                    <td class="py-2"></td>
+                    <td class="py-2">
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy"
                                 data-orders="<?= $archGroupOrdersModalJson ?>"
                                 data-client="<?= h($clientLabel) ?>"
@@ -1653,7 +1647,7 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                     endif;
                     foreach ($groupOrders as $ord):
                 ?>
-                <tr class="<?= $isGroup ? 'ps-3 d-none' : '' ?>" <?= $isGroup ? 'data-group="' . h($archGroupRowId) . '"' : '' ?>>
+                <tr class="<?= $isGroup ? 'ps-3' : '' ?>" <?= $isGroup ? 'data-group="' . h($archGroupRowId) . '"' : '' ?>>
                     <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
                         <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">
