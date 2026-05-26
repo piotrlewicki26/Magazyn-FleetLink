@@ -140,6 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (PDOException $e) {
                     $sqlState = $e->getCode();
                     $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
+                    // 1062 = MySQL duplicate key, 1555/2067 = SQLite duplicate/unique constraint variants.
                     $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
                     if (!$isDuplicate) {
                         throw $e;
@@ -665,7 +666,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php
-$serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
+$serviceListQuery = http_build_query(array_filter([
     'search' => $_GET['search'] ?? '',
     'status' => $_GET['status'] ?? '',
     'type' => $_GET['type'] ?? '',
@@ -673,7 +674,8 @@ $serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
     'date_to' => $_GET['date_to'] ?? '',
     'sort' => $serviceSort !== 'planned_desc' ? $serviceSort : '',
     'per_page' => $servicePerPage !== $defaultServicePerPage ? $servicePerPage : '',
-], static fn($value) => $value !== '')), '?');
+], static fn($value) => $value !== ''));
+$serviceListUrl = 'services.php' . ($serviceListQuery !== '' ? '?' . $serviceListQuery : '');
 echo paginate($totalServices, $servicePerPage, $servicePage, $serviceListUrl);
 ?>
 
