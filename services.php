@@ -607,9 +607,9 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($services as $svc): ?>
                 <tr class="<?= $svc['status'] === 'zaplanowany' && $svc['planned_date'] < date('Y-m-d') ? 'table-warning' : '' ?>">
                     <td class="fw-semibold">
-                        <a href="#"
+                        <a href="javascript:void(0)"
                            aria-label="Otwórz podgląd serwisu dla zlecenia <?= h($svc['order_number']) ?>"
-                           onclick="openServiceModal(<?= (int)$svc['id'] ?>); return false;"><?= h($svc['order_number']) ?></a>
+                           onclick="openServiceModal(<?= (int)$svc['id'] ?>)"><?= h($svc['order_number']) ?></a>
                     </td>
                     <td><?= formatDate($svc['planned_date']) ?></td>
                     <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
@@ -764,9 +764,9 @@ echo paginate($totalServices, $servicePerPage, $servicePage, $serviceListUrl);
                 <?php foreach ($archiveServices as $svc): ?>
                 <tr>
                     <td class="fw-semibold">
-                        <a href="#"
+                        <a href="javascript:void(0)"
                            aria-label="Otwórz podgląd serwisu dla zlecenia <?= h($svc['order_number']) ?>"
-                           onclick="openServiceModal(<?= (int)$svc['id'] ?>); return false;"><?= h($svc['order_number']) ?></a>
+                           onclick="openServiceModal(<?= (int)$svc['id'] ?>)"><?= h($svc['order_number']) ?></a>
                     </td>
                     <td><?= formatDate($svc['planned_date']) ?></td>
                     <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
