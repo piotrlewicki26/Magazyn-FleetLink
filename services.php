@@ -75,8 +75,7 @@ try {
     $monthMaxStmt = $db->prepare("SELECT COALESCE(MAX(CAST(RIGHT(order_number, 4) AS UNSIGNED)), 0) FROM services WHERE order_number LIKE ?");
     $fillStmt = $db->prepare("UPDATE services SET order_number=? WHERE id=?");
     foreach ($missingOrderNumbers as $svcRow) {
-        $svcTimestamp = !empty($svcRow['planned_date']) ? strtotime($svcRow['planned_date']) : time();
-        if (!$svcTimestamp) $svcTimestamp = time();
+        $svcTimestamp = strtotime((string)($svcRow['planned_date'] ?? '')) ?: time();
         $svcYear = date('Y', $svcTimestamp);
         $svcMonth = date('m', $svcTimestamp);
         $svcPrefix = sprintf('%s/%s/%s/', SERVICE_ORDER_PREFIX, $svcYear, $svcMonth);
@@ -130,6 +129,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lockStmt = $db->prepare("SELECT GET_LOCK(?, 5)");
                 $lockStmt->execute([$lockName]);
                 $lockAcquired = (int)$lockStmt->fetchColumn() === 1;
+            } else {
+                // Non-MySQL drivers rely on unique-index retry handling below.
             }
             for ($attempt = 0; $attempt < 5 && !$inserted; $attempt++) {
                 $serviceOrderNumber = generateServiceOrderNumber();
@@ -672,7 +673,7 @@ $serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
     'date_to' => $_GET['date_to'] ?? '',
     'sort' => $serviceSort !== 'planned_desc' ? $serviceSort : '',
     'per_page' => $servicePerPage !== $defaultServicePerPage ? $servicePerPage : '',
-])), '?');
+], static fn($value) => $value !== '')), '?');
 echo paginate($totalServices, $servicePerPage, $servicePage, $serviceListUrl);
 ?>
 
@@ -798,7 +799,7 @@ echo paginate($totalServices, $servicePerPage, $servicePage, $serviceListUrl);
             <div class="card-header">Szczegóły serwisu</div>
             <div class="card-body">
                 <table class="table table-sm table-borderless">
-                    <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number']) ?></td></tr>
+                    <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted">Status</th><td><?= getStatusBadge($service['status'], 'service') ?></td></tr>
                     <tr><th class="text-muted">Typ</th><td><?= h(ucfirst($service['type'])) ?></td></tr>
                     <tr><th class="text-muted">Urządzenie</th><td><a href="devices.php?action=view&id=<?= $service['device_id'] ?>"><?= h($service['serial_number']) ?></a><br><small><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></small></td></tr>

@@ -189,8 +189,7 @@ if (!defined('SERVICE_ORDER_PREFIX')) {
 
 function generateServiceOrderNumber($referenceDate = null) {
     $db = getDb();
-    $timestamp = $referenceDate ? strtotime((string)$referenceDate) : time();
-    if (!$timestamp) $timestamp = time();
+    $timestamp = ($referenceDate ? strtotime((string)$referenceDate) : false) ?: time();
     $year  = date('Y', $timestamp);
     $month = date('m', $timestamp);
     $prefix = sprintf('%s/%s/%s/', SERVICE_ORDER_PREFIX, $year, $month);
