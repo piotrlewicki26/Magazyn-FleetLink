@@ -606,7 +606,9 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php foreach ($services as $svc): ?>
                 <tr class="<?= $svc['status'] === 'zaplanowany' && $svc['planned_date'] < date('Y-m-d') ? 'table-warning' : '' ?>">
-                    <td class="fw-semibold"><?= h($svc['order_number']) ?></td>
+                    <td class="fw-semibold">
+                        <a href="#" onclick="openServiceModal(<?= $svc['id'] ?>); return false;"><?= h($svc['order_number']) ?></a>
+                    </td>
                     <td><?= formatDate($svc['planned_date']) ?></td>
                     <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
                     <td>
@@ -759,7 +761,9 @@ echo paginate($totalServices, $servicePerPage, $servicePage, $serviceListUrl);
             <tbody>
                 <?php foreach ($archiveServices as $svc): ?>
                 <tr>
-                    <td class="fw-semibold"><?= h($svc['order_number']) ?></td>
+                    <td class="fw-semibold">
+                        <a href="#" onclick="openServiceModal(<?= $svc['id'] ?>); return false;"><?= h($svc['order_number']) ?></a>
+                    </td>
                     <td><?= formatDate($svc['planned_date']) ?></td>
                     <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
                     <td>
