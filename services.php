@@ -36,6 +36,39 @@ try {
     // ignore when not needed / not supported
 }
 
+// Ensure service order number column exists and backfill missing values
+try {
+    $db->query("SELECT order_number FROM services LIMIT 1");
+} catch (PDOException $e) {
+    try {
+        $db->exec("ALTER TABLE `services` ADD COLUMN `order_number` VARCHAR(30) DEFAULT NULL AFTER `id`");
+    } catch (PDOException $alterEx) { /* ignore */ }
+}
+try {
+    $idxExists = $db->query("
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'services'
+          AND INDEX_NAME = 'uq_services_order_number'
+    ")->fetchColumn();
+    if (!(int)$idxExists) {
+        $db->exec("CREATE UNIQUE INDEX `uq_services_order_number` ON `services` (`order_number`)");
+    }
+} catch (Exception $e) { /* ignore */ }
+try {
+    $missingOrderNumbers = $db->query("
+        SELECT id, planned_date
+        FROM services
+        WHERE order_number IS NULL OR order_number = ''
+        ORDER BY COALESCE(planned_date, CURDATE()) ASC, id ASC
+    ")->fetchAll();
+    $fillStmt = $db->prepare("UPDATE services SET order_number=? WHERE id=?");
+    foreach ($missingOrderNumbers as $svcRow) {
+        $svcNumber = generateServiceOrderNumber($svcRow['planned_date'] ?? null);
+        $fillStmt->execute([$svcNumber, (int)$svcRow['id']]);
+    }
+} catch (Exception $e) { /* ignore */ }
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) { flashError('Błąd bezpieczeństwa.'); redirect(getBaseUrl() . 'services.php'); }
     $postAction      = sanitize($_POST['action'] ?? '');
@@ -64,8 +97,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Urządzenie i data zaplanowanego serwisu są wymagane.');
             redirect(getBaseUrl() . 'services.php?action=add');
         }
-        $db->prepare("INSERT INTO services (device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-           ->execute([$deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
+        $serviceOrderNumber = generateServiceOrderNumber();
+        $db->prepare("INSERT INTO services (order_number, device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+           ->execute([$serviceOrderNumber, $deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
         $newServiceId = (int)$db->lastInsertId();
         // Record device history for "wymiana"
         if ($type === 'wymiana' && $deviceId && $replacementDeviceId) {
@@ -274,19 +308,24 @@ try {
 
 $services = [];
 $archiveServices = [];
+$totalServices = 0;
+$servicePerPage = 10;
+$servicePage = 1;
+$serviceSort = 'planned_desc';
 if (in_array($action, ['list', 'archive'], true)) {
     $filterStatus = sanitize($_GET['status'] ?? '');
     $filterType   = sanitize($_GET['type'] ?? '');
     $search       = sanitize($_GET['search'] ?? '');
     $dateFrom     = sanitize($_GET['date_from'] ?? '');
     $dateTo       = sanitize($_GET['date_to'] ?? '');
+    if ($action === 'list') {
+        $servicePerPage = in_array((int)($_GET['per_page'] ?? 10), [10, 50, 100], true) ? (int)($_GET['per_page'] ?? 10) : 10;
+        $servicePage = max(1, (int)($_GET['page'] ?? 1));
+        $serviceSort = sanitize($_GET['sort'] ?? 'planned_desc');
+        if (!in_array($serviceSort, ['planned_desc', 'planned_asc'], true)) $serviceSort = 'planned_desc';
+    }
 
-    $sql = "
-        SELECT s.id, s.type, s.planned_date, s.completed_date, s.status, s.cost, s.description,
-               d.serial_number, m.name as model_name, mf.name as manufacturer_name,
-               u.name as technician_name,
-               v.registration, v.make,
-               c.contact_name, c.company_name
+    $baseSql = "
         FROM services s
         JOIN devices d ON d.id=s.device_id
         JOIN models m ON m.id=d.model_id
@@ -297,30 +336,43 @@ if (in_array($action, ['list', 'archive'], true)) {
         LEFT JOIN clients c ON c.id=inst.client_id
         WHERE 1=1
     ";
+    $selectSql = "
+        SELECT s.id, s.order_number, s.type, s.planned_date, s.completed_date, s.status, s.cost, s.description,
+               d.serial_number, m.name as model_name, mf.name as manufacturer_name,
+               u.name as technician_name,
+               v.registration, v.make,
+               c.contact_name, c.company_name
+    ";
     $params = [];
     if ($action === 'archive') {
-        $sql .= " AND s.status='archiwum'";
+        $baseSql .= " AND s.status='archiwum'";
     } else {
-        $sql .= " AND s.status != 'archiwum'";
+        $baseSql .= " AND s.status != 'archiwum'";
     }
-    if ($filterStatus && $action !== 'archive') { $sql .= " AND s.status=?"; $params[] = $filterStatus; }
-    if ($filterType)   { $sql .= " AND s.type=?";   $params[] = $filterType; }
+    if ($filterStatus && $action !== 'archive') { $baseSql .= " AND s.status=?"; $params[] = $filterStatus; }
+    if ($filterType)   { $baseSql .= " AND s.type=?";   $params[] = $filterType; }
     if ($search) {
-        $sql .= " AND (d.serial_number LIKE ? OR m.name LIKE ? OR v.registration LIKE ?)";
-        $params = array_merge($params, ["%$search%","%$search%","%$search%"]);
+        $baseSql .= " AND (s.order_number LIKE ? OR d.serial_number LIKE ? OR m.name LIKE ? OR v.registration LIKE ?)";
+        $params = array_merge($params, ["%$search%","%$search%","%$search%","%$search%"]);
     }
-    if ($dateFrom) { $sql .= " AND s.planned_date >= ?"; $params[] = $dateFrom; }
-    if ($dateTo)   { $sql .= " AND s.planned_date <= ?"; $params[] = $dateTo; }
+    if ($dateFrom) { $baseSql .= " AND s.planned_date >= ?"; $params[] = $dateFrom; }
+    if ($dateTo)   { $baseSql .= " AND s.planned_date <= ?"; $params[] = $dateTo; }
     if ($action === 'archive') {
-        $sql .= " ORDER BY COALESCE(s.completed_date, s.planned_date) DESC, s.id DESC";
-    } else {
-        $sql .= " ORDER BY FIELD(s.status,'w_trakcie','zaplanowany','zakończony','anulowany','archiwum'), s.planned_date DESC, s.id DESC";
-    }
-    $stmt = $db->prepare($sql);
-    $stmt->execute($params);
-    if ($action === 'archive') {
+        $sql = $selectSql . $baseSql . " ORDER BY COALESCE(s.completed_date, s.planned_date) DESC, s.order_number DESC, s.id DESC";
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
         $archiveServices = $stmt->fetchAll();
     } else {
+        $countStmt = $db->prepare("SELECT COUNT(*) " . $baseSql);
+        $countStmt->execute($params);
+        $totalServices = (int)$countStmt->fetchColumn();
+        $serviceOffset = ($servicePage - 1) * $servicePerPage;
+        $sortSql = $serviceSort === 'planned_asc'
+            ? " ORDER BY s.planned_date ASC, s.order_number ASC, s.id ASC"
+            : " ORDER BY s.planned_date DESC, s.order_number DESC, s.id DESC";
+        $sql = $selectSql . $baseSql . $sortSql . " LIMIT ? OFFSET ?";
+        $stmt = $db->prepare($sql);
+        $stmt->execute(array_merge($params, [$servicePerPage, $serviceOffset]));
         $services = $stmt->fetchAll();
     }
 }
@@ -356,6 +408,7 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                 <div class="card-header">Szczegóły serwisu</div>
                 <div class="card-body">
                     <table class="table table-sm table-borderless">
+                        <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number'] ?? ('ZS/' . date('Y/m', strtotime($service['planned_date'] ?? 'now')) . '/' . str_pad((string)$service['id'], 4, '0', STR_PAD_LEFT))) ?></td></tr>
                         <tr><th class="text-muted">Status</th><td><?= getStatusBadge($service['status'], 'service') ?></td></tr>
                         <tr><th class="text-muted">Typ</th><td><?= h(ucfirst($service['type'])) ?></td></tr>
                         <tr><th class="text-muted">Urządzenie</th><td><a href="devices.php?action=view&id=<?= $service['device_id'] ?>"><?= h($service['serial_number']) ?></a><br><small><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></small></td></tr>
@@ -441,7 +494,7 @@ include __DIR__ . '/includes/header.php';
     <div class="card-body py-2">
         <form method="GET" class="row g-2">
             <div class="col-md-3">
-                <input type="search" name="search" class="form-control form-control-sm" placeholder="Szukaj (nr seryjny, rejestracja, model...)" value="<?= h($_GET['search'] ?? '') ?>">
+                <input type="search" name="search" class="form-control form-control-sm" placeholder="Szukaj (nr zlecenia, nr seryjny, rejestracja, model...)" value="<?= h($_GET['search'] ?? '') ?>">
             </div>
             <div class="col-md-2">
                 <select name="status" class="form-select form-select-sm">
@@ -465,6 +518,19 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-2">
                 <input type="date" name="date_to" class="form-control form-control-sm" value="<?= h($_GET['date_to'] ?? '') ?>" title="Data do">
             </div>
+            <div class="col-md-2">
+                <select name="sort" class="form-select form-select-sm">
+                    <option value="planned_desc" <?= $serviceSort === 'planned_desc' ? 'selected' : '' ?>>Data: najnowsze</option>
+                    <option value="planned_asc" <?= $serviceSort === 'planned_asc' ? 'selected' : '' ?>>Data: najstarsze</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="per_page" class="form-select form-select-sm" style="width:auto">
+                    <option value="10" <?= $servicePerPage === 10 ? 'selected' : '' ?>>10 / stronę</option>
+                    <option value="50" <?= $servicePerPage === 50 ? 'selected' : '' ?>>50 / stronę</option>
+                    <option value="100" <?= $servicePerPage === 100 ? 'selected' : '' ?>>100 / stronę</option>
+                </select>
+            </div>
             <div class="col-auto">
                 <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
                 <a href="services.php" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
@@ -473,15 +539,16 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <div class="card">
-    <div class="card-header">Serwisy (<?= count($services) ?>)</div>
+    <div class="card-header">Serwisy (<?= $totalServices ?>)</div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
-                <tr><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
+                <tr><th>Nr zlecenia</th><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
             </thead>
             <tbody>
                 <?php foreach ($services as $svc): ?>
                 <tr class="<?= $svc['status'] === 'zaplanowany' && $svc['planned_date'] < date('Y-m-d') ? 'table-warning' : '' ?>">
+                    <td class="fw-semibold"><?= h($svc['order_number']) ?></td>
                     <td><?= formatDate($svc['planned_date']) ?></td>
                     <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
                     <td>
@@ -535,11 +602,23 @@ include __DIR__ . '/includes/header.php';
                     </td>
                 </tr>
                 <?php endforeach; ?>
-                <?php if (empty($services)): ?><tr><td colspan="9" class="text-center text-muted p-3">Brak serwisów.</td></tr><?php endif; ?>
+                <?php if (empty($services)): ?><tr><td colspan="10" class="text-center text-muted p-3">Brak serwisów.</td></tr><?php endif; ?>
             </tbody>
         </table>
     </div>
 </div>
+<?php
+$_serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
+    'search' => $_GET['search'] ?? '',
+    'status' => $_GET['status'] ?? '',
+    'type' => $_GET['type'] ?? '',
+    'date_from' => $_GET['date_from'] ?? '',
+    'date_to' => $_GET['date_to'] ?? '',
+    'sort' => $serviceSort !== 'planned_desc' ? $serviceSort : '',
+    'per_page' => $servicePerPage !== 10 ? $servicePerPage : '',
+])), '?');
+echo paginate($totalServices, $servicePerPage, $servicePage, $_serviceListUrl);
+?>
 
 </div><!-- /pane-serwisy -->
 <div class="tab-pane fade <?= $activeTab === 'protokoly' ? 'show active' : '' ?>" id="pane-protokoly-s" role="tabpanel">
@@ -616,11 +695,12 @@ include __DIR__ . '/includes/header.php';
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
-                <tr><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
+                <tr><th>Nr zlecenia</th><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
             </thead>
             <tbody>
                 <?php foreach ($archiveServices as $svc): ?>
                 <tr>
+                    <td class="fw-semibold"><?= h($svc['order_number']) ?></td>
                     <td><?= formatDate($svc['planned_date']) ?></td>
                     <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
                     <td>
@@ -648,7 +728,7 @@ include __DIR__ . '/includes/header.php';
                     </td>
                 </tr>
                 <?php endforeach; ?>
-                <?php if (empty($archiveServices)): ?><tr><td colspan="9" class="text-center text-muted p-3">Brak zarchiwizowanych serwisów.</td></tr><?php endif; ?>
+                <?php if (empty($archiveServices)): ?><tr><td colspan="10" class="text-center text-muted p-3">Brak zarchiwizowanych serwisów.</td></tr><?php endif; ?>
             </tbody>
         </table>
     </div>
@@ -662,6 +742,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card-header">Szczegóły serwisu</div>
             <div class="card-body">
                 <table class="table table-sm table-borderless">
+                    <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number']) ?></td></tr>
                     <tr><th class="text-muted">Status</th><td><?= getStatusBadge($service['status'], 'service') ?></td></tr>
                     <tr><th class="text-muted">Typ</th><td><?= h(ucfirst($service['type'])) ?></td></tr>
                     <tr><th class="text-muted">Urządzenie</th><td><a href="devices.php?action=view&id=<?= $service['device_id'] ?>"><?= h($service['serial_number']) ?></a><br><small><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></small></td></tr>
@@ -902,7 +983,7 @@ include __DIR__ . '/includes/header.php';
 $svcClientLabel = $service['company_name'] ?: ($service['contact_name'] ?: '—');
 $svcTechName    = $service['technician_name'] ?? '—';
 $svcDate        = $service['planned_date'] ?? date('Y-m-d');
-$svcOrderNum    = sprintf('ZS/%s/%04d', date('Y', strtotime(!empty($svcDate) ? $svcDate : 'now')), $service['id']);
+$svcOrderNum    = $service['order_number'] ?? sprintf('ZS/%s/%s/%04d', date('Y', strtotime(!empty($svcDate) ? $svcDate : 'now')), date('m', strtotime(!empty($svcDate) ? $svcDate : 'now')), $service['id']);
 $svcClientAddr  = trim(($service['client_address'] ?? '') . ', ' . ($service['client_postal_code'] ?? '') . ' ' . ($service['client_city'] ?? ''), ', ');
 $svcCompanyName = '';
 $svcCompanyAddr = '';

@@ -183,6 +183,19 @@ function generateOrderNumber() {
     return sprintf('ZL/%s/%s/%04d', $year, $month, $count);
 }
 
+function generateServiceOrderNumber($referenceDate = null) {
+    $db = getDb();
+    $timestamp = $referenceDate ? strtotime((string)$referenceDate) : time();
+    if (!$timestamp) $timestamp = time();
+    $year  = date('Y', $timestamp);
+    $month = date('m', $timestamp);
+    $prefix = sprintf('ZS/%s/%s/', $year, $month);
+    $stmt = $db->prepare("SELECT COUNT(*) FROM services WHERE order_number LIKE ?");
+    $stmt->execute([$prefix . '%']);
+    $count = (int)$stmt->fetchColumn() + 1;
+    return sprintf('%s%04d', $prefix, $count);
+}
+
 function generateProtocolNumber($type = 'PP') {
     $db = getDb();
     $year = date('Y');
