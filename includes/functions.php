@@ -183,13 +183,17 @@ function generateOrderNumber() {
     return sprintf('ZL/%s/%s/%04d', $year, $month, $count);
 }
 
+if (!defined('SERVICE_ORDER_PREFIX')) {
+    define('SERVICE_ORDER_PREFIX', 'ZS');
+}
+
 function generateServiceOrderNumber($referenceDate = null) {
     $db = getDb();
     $timestamp = $referenceDate ? strtotime((string)$referenceDate) : time();
     if (!$timestamp) $timestamp = time();
     $year  = date('Y', $timestamp);
     $month = date('m', $timestamp);
-    $prefix = sprintf('ZS/%s/%s/', $year, $month);
+    $prefix = sprintf('%s/%s/%s/', SERVICE_ORDER_PREFIX, $year, $month);
     $stmt = $db->prepare("SELECT COALESCE(MAX(CAST(RIGHT(order_number, 4) AS UNSIGNED)), 0) FROM services WHERE order_number LIKE ?");
     $stmt->execute([$prefix . '%']);
     $nextNumber = (int)$stmt->fetchColumn() + 1;

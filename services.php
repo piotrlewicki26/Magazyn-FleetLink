@@ -36,7 +36,16 @@ try {
     // ignore when not needed / not supported
 }
 
+$servicesTableExists = false;
+try {
+    $db->query("SELECT 1 FROM services LIMIT 1");
+    $servicesTableExists = true;
+} catch (PDOException $e) {
+    $servicesTableExists = false;
+}
+
 // Ensure service order number column exists and backfill missing values
+if ($servicesTableExists) {
 try {
     $db->query("SELECT order_number FROM services LIMIT 1");
 } catch (PDOException $e) {
@@ -70,7 +79,7 @@ try {
         if (!$svcTimestamp) $svcTimestamp = time();
         $svcYear = date('Y', $svcTimestamp);
         $svcMonth = date('m', $svcTimestamp);
-        $svcPrefix = sprintf('ZS/%s/%s/', $svcYear, $svcMonth);
+        $svcPrefix = sprintf('%s/%s/%s/', SERVICE_ORDER_PREFIX, $svcYear, $svcMonth);
         $svcMonthKey = $svcYear . '-' . $svcMonth;
         if (!isset($monthCounters[$svcMonthKey])) {
             $monthMaxStmt->execute([$svcPrefix . '%']);
@@ -81,6 +90,7 @@ try {
         $fillStmt->execute([$svcNumber, (int)$svcRow['id']]);
     }
 } catch (Exception $e) { /* ignore */ }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) { flashError('Błąd bezpieczeństwa.'); redirect(getBaseUrl() . 'services.php'); }
@@ -128,7 +138,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $inserted = true;
                 } catch (PDOException $e) {
                     $sqlState = $e->getCode();
-                    if ($sqlState !== '23000' && stripos($e->getMessage(), 'duplicate') === false) {
+                    $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
+                    $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
+                    if (!$isDuplicate) {
                         throw $e;
                     }
                     if ($attempt === 4) throw $e;
@@ -652,7 +664,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php
-$_serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
+$serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
     'search' => $_GET['search'] ?? '',
     'status' => $_GET['status'] ?? '',
     'type' => $_GET['type'] ?? '',
@@ -661,7 +673,7 @@ $_serviceListUrl = rtrim('services.php?' . http_build_query(array_filter([
     'sort' => $serviceSort !== 'planned_desc' ? $serviceSort : '',
     'per_page' => $servicePerPage !== $defaultServicePerPage ? $servicePerPage : '',
 ])), '?');
-echo paginate($totalServices, $servicePerPage, $servicePage, $_serviceListUrl);
+echo paginate($totalServices, $servicePerPage, $servicePage, $serviceListUrl);
 ?>
 
 </div><!-- /pane-serwisy -->
