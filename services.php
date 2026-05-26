@@ -17,7 +17,19 @@ $id = (int)($_GET['id'] ?? 0);
 
 // Ensure 'archiwum' is allowed for service status in MySQL deployments
 try {
-    $db->exec("ALTER TABLE `services` MODIFY COLUMN `status` ENUM('zaplanowany','w_trakcie','zakończony','anulowany','archiwum') NOT NULL DEFAULT 'zaplanowany'");
+    if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+        $colType = $db->query("
+            SELECT COLUMN_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'services'
+              AND COLUMN_NAME = 'status'
+            LIMIT 1
+        ")->fetchColumn();
+        if ($colType && strpos($colType, "'archiwum'") === false) {
+            $db->exec("ALTER TABLE `services` MODIFY COLUMN `status` ENUM('zaplanowany','w_trakcie','zakończony','anulowany','archiwum') NOT NULL DEFAULT 'zaplanowany'");
+        }
+    }
 } catch (Exception $e) {
     // ignore when not needed / not supported
 }
@@ -295,7 +307,11 @@ if (in_array($action, ['list', 'archive'], true)) {
     }
     if ($dateFrom) { $sql .= " AND s.planned_date >= ?"; $params[] = $dateFrom; }
     if ($dateTo)   { $sql .= " AND s.planned_date <= ?"; $params[] = $dateTo; }
-    $sql .= " ORDER BY FIELD(s.status,'w_trakcie','zaplanowany','zakończony','anulowany','archiwum'), s.planned_date DESC, s.id DESC";
+    if ($action === 'archive') {
+        $sql .= " ORDER BY COALESCE(s.completed_date, s.planned_date) DESC, s.id DESC";
+    } else {
+        $sql .= " ORDER BY FIELD(s.status,'w_trakcie','zaplanowany','zakończony','anulowany','archiwum'), s.planned_date DESC, s.id DESC";
+    }
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     if ($action === 'archive') {
@@ -405,7 +421,7 @@ include __DIR__ . '/includes/header.php';
 <ul class="nav nav-tabs mb-3" id="serviceTab" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" id="tab-serwisy" data-bs-toggle="tab" data-bs-target="#pane-serwisy" type="button" role="tab">
-            <i class="fas fa-wrench me-1"></i>Aktywne zlecenia serwisowe
+            <i class="fas fa-wrench me-1"></i>Serwisy
         </button>
     </li>
     <li class="nav-item" role="presentation">
