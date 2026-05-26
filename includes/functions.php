@@ -190,10 +190,10 @@ function generateServiceOrderNumber($referenceDate = null) {
     $year  = date('Y', $timestamp);
     $month = date('m', $timestamp);
     $prefix = sprintf('ZS/%s/%s/', $year, $month);
-    $stmt = $db->prepare("SELECT COUNT(*) FROM services WHERE order_number LIKE ?");
+    $stmt = $db->prepare("SELECT COALESCE(MAX(CAST(RIGHT(order_number, 4) AS UNSIGNED)), 0) FROM services WHERE order_number LIKE ?");
     $stmt->execute([$prefix . '%']);
-    $count = (int)$stmt->fetchColumn() + 1;
-    return sprintf('%s%04d', $prefix, $count);
+    $nextNumber = (int)$stmt->fetchColumn() + 1;
+    return sprintf('%s%04d', $prefix, $nextNumber);
 }
 
 function generateProtocolNumber($type = 'PP') {

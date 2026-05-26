@@ -62,9 +62,22 @@ try {
         WHERE order_number IS NULL OR order_number = ''
         ORDER BY COALESCE(planned_date, CURDATE()) ASC, id ASC
     ")->fetchAll();
+    $monthCounters = [];
+    $monthMaxStmt = $db->prepare("SELECT COALESCE(MAX(CAST(RIGHT(order_number, 4) AS UNSIGNED)), 0) FROM services WHERE order_number LIKE ?");
     $fillStmt = $db->prepare("UPDATE services SET order_number=? WHERE id=?");
     foreach ($missingOrderNumbers as $svcRow) {
-        $svcNumber = generateServiceOrderNumber($svcRow['planned_date'] ?? null);
+        $svcTimestamp = !empty($svcRow['planned_date']) ? strtotime($svcRow['planned_date']) : time();
+        if (!$svcTimestamp) $svcTimestamp = time();
+        $svcYear = date('Y', $svcTimestamp);
+        $svcMonth = date('m', $svcTimestamp);
+        $svcPrefix = sprintf('ZS/%s/%s/', $svcYear, $svcMonth);
+        $svcMonthKey = $svcYear . '-' . $svcMonth;
+        if (!isset($monthCounters[$svcMonthKey])) {
+            $monthMaxStmt->execute([$svcPrefix . '%']);
+            $monthCounters[$svcMonthKey] = (int)$monthMaxStmt->fetchColumn();
+        }
+        $monthCounters[$svcMonthKey]++;
+        $svcNumber = sprintf('%s%04d', $svcPrefix, $monthCounters[$svcMonthKey]);
         $fillStmt->execute([$svcNumber, (int)$svcRow['id']]);
     }
 } catch (Exception $e) { /* ignore */ }
@@ -99,13 +112,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $insertStmt = $db->prepare("INSERT INTO services (order_number, device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
         $inserted = false;
-        for ($attempt = 0; $attempt < 5 && !$inserted; $attempt++) {
-            $serviceOrderNumber = generateServiceOrderNumber();
-            try {
-                $insertStmt->execute([$serviceOrderNumber, $deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
-                $inserted = true;
-            } catch (PDOException $e) {
-                if ($attempt === 4) throw $e;
+        $lockName = null;
+        $lockAcquired = false;
+        try {
+            if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $lockName = 'services_order_number_' . date('Y_m');
+                $lockStmt = $db->prepare("SELECT GET_LOCK(?, 5)");
+                $lockStmt->execute([$lockName]);
+                $lockAcquired = (int)$lockStmt->fetchColumn() === 1;
+            }
+            for ($attempt = 0; $attempt < 5 && !$inserted; $attempt++) {
+                $serviceOrderNumber = generateServiceOrderNumber();
+                try {
+                    $insertStmt->execute([$serviceOrderNumber, $deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
+                    $inserted = true;
+                } catch (PDOException $e) {
+                    $sqlState = $e->getCode();
+                    if ($sqlState !== '23000' && stripos($e->getMessage(), 'duplicate') === false) {
+                        throw $e;
+                    }
+                    if ($attempt === 4) throw $e;
+                }
+            }
+        } finally {
+            if ($lockAcquired && $lockName) {
+                try {
+                    $unlockStmt = $db->prepare("SELECT RELEASE_LOCK(?)");
+                    $unlockStmt->execute([$lockName]);
+                } catch (Exception $e) { /* ignore */ }
             }
         }
         $newServiceId = (int)$db->lastInsertId();
