@@ -15,6 +15,13 @@ $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
 
+// Ensure 'archiwum' is allowed for service status in MySQL deployments
+try {
+    $db->exec("ALTER TABLE `services` MODIFY COLUMN `status` ENUM('zaplanowany','w_trakcie','zakończony','anulowany','archiwum') NOT NULL DEFAULT 'zaplanowany'");
+} catch (Exception $e) {
+    // ignore when not needed / not supported
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) { flashError('Błąd bezpieczeństwa.'); redirect(getBaseUrl() . 'services.php'); }
     $postAction      = sanitize($_POST['action'] ?? '');
@@ -32,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $currentUser     = getCurrentUser();
 
     $validTypes     = ['przeglad','naprawa','wymiana','aktualizacja','inne'];
-    $validStatuses  = ['zaplanowany','w_trakcie','zakończony','anulowany'];
+    $validStatuses  = ['zaplanowany','w_trakcie','zakończony','anulowany','archiwum'];
     if (!in_array($type, $validTypes)) $type = 'przeglad';
     if (!in_array($status, $validStatuses)) $status = 'zaplanowany';
     if (!$technicianId) $technicianId = $currentUser['id'];
@@ -109,9 +116,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($postAction === 'edit') {
         $editId = (int)($_POST['id'] ?? 0);
         // Fetch old values to compare wymiana state
-        $oldSvcStmt = $db->prepare("SELECT device_id, type, replacement_device_id FROM services WHERE id=?");
+        $oldSvcStmt = $db->prepare("SELECT device_id, type, replacement_device_id, status FROM services WHERE id=?");
         $oldSvcStmt->execute([$editId]);
         $oldSvc = $oldSvcStmt->fetch() ?: [];
+        if (($oldSvc['status'] ?? '') === 'archiwum') {
+            flashError('Nie można edytować zarchiwizowanego serwisu.');
+            redirect(getBaseUrl() . 'services.php?action=archive');
+        }
         $db->prepare("UPDATE services SET device_id=?, installation_id=?, technician_id=?, type=?, replacement_device_id=?, planned_date=?, completed_date=?, status=?, description=?, resolution=?, cost=? WHERE id=?")
            ->execute([$deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost, $editId]);
         // Handle device_history for wymiana changes
@@ -140,10 +151,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif ($postAction === 'delete') {
         $delId = (int)($_POST['id'] ?? 0);
+        $delChk = $db->prepare("SELECT status FROM services WHERE id=?");
+        $delChk->execute([$delId]);
+        $delRow = $delChk->fetch();
+        if (($delRow['status'] ?? '') === 'archiwum') {
+            flashError('Nie można usuwać zarchiwizowanego serwisu.');
+            redirect(getBaseUrl() . 'services.php?action=archive');
+        }
         $db->prepare("DELETE FROM device_history WHERE service_id=?")->execute([$delId]);
         $db->prepare("DELETE FROM services WHERE id=?")->execute([$delId]);
         flashSuccess('Serwis usunięty.');
         redirect(getBaseUrl() . 'services.php');
+    } elseif ($postAction === 'change_status') {
+        $svcId = (int)($_POST['id'] ?? 0);
+        $newStatus = sanitize($_POST['new_status'] ?? '');
+        $allowedStatuses = ['zaplanowany','w_trakcie','zakończony','anulowany','archiwum'];
+        if (!$svcId || !in_array($newStatus, $allowedStatuses, true)) {
+            flashError('Nieprawidłowe dane zmiany statusu serwisu.');
+            redirect(getBaseUrl() . 'services.php');
+        }
+        $rowStmt = $db->prepare("SELECT id, device_id, status, completed_date FROM services WHERE id=?");
+        $rowStmt->execute([$svcId]);
+        $svcRow = $rowStmt->fetch();
+        if (!$svcRow) {
+            flashError('Serwis nie istnieje.');
+            redirect(getBaseUrl() . 'services.php');
+        }
+
+        $completedDate = $svcRow['completed_date'];
+        if ($newStatus === 'zakończony' && empty($completedDate)) {
+            $completedDate = date('Y-m-d');
+        }
+        $db->prepare("UPDATE services SET status=?, completed_date=? WHERE id=?")->execute([$newStatus, $completedDate, $svcId]);
+
+        if ($newStatus === 'w_trakcie') {
+            $db->prepare("UPDATE devices SET status='w_serwisie' WHERE id=?")->execute([(int)$svcRow['device_id']]);
+        } elseif (in_array($newStatus, ['zakończony','anulowany','archiwum'], true)) {
+            $db->prepare("UPDATE devices SET status='sprawny' WHERE id=? AND status='w_serwisie'")->execute([(int)$svcRow['device_id']]);
+        }
+
+        $redirectTo = $newStatus === 'archiwum' ? 'archive' : 'list';
+        flashSuccess('Status serwisu został zaktualizowany.');
+        redirect(getBaseUrl() . 'services.php?action=' . $redirectTo);
     }
 }
 
@@ -210,7 +259,8 @@ try {
 } catch (Exception $e) { $svcAvailableAccessories = []; }
 
 $services = [];
-if ($action === 'list') {
+$archiveServices = [];
+if (in_array($action, ['list', 'archive'], true)) {
     $filterStatus = sanitize($_GET['status'] ?? '');
     $filterType   = sanitize($_GET['type'] ?? '');
     $search       = sanitize($_GET['search'] ?? '');
@@ -232,7 +282,12 @@ if ($action === 'list') {
         WHERE 1=1
     ";
     $params = [];
-    if ($filterStatus) { $sql .= " AND s.status=?"; $params[] = $filterStatus; }
+    if ($action === 'archive') {
+        $sql .= " AND s.status='archiwum'";
+    } else {
+        $sql .= " AND s.status != 'archiwum'";
+    }
+    if ($filterStatus && $action !== 'archive') { $sql .= " AND s.status=?"; $params[] = $filterStatus; }
     if ($filterType)   { $sql .= " AND s.type=?";   $params[] = $filterType; }
     if ($search) {
         $sql .= " AND (d.serial_number LIKE ? OR m.name LIKE ? OR v.registration LIKE ?)";
@@ -240,10 +295,14 @@ if ($action === 'list') {
     }
     if ($dateFrom) { $sql .= " AND s.planned_date >= ?"; $params[] = $dateFrom; }
     if ($dateTo)   { $sql .= " AND s.planned_date <= ?"; $params[] = $dateTo; }
-    $sql .= " ORDER BY FIELD(s.status,'w_trakcie','zaplanowany','zakończony','anulowany'), s.planned_date";
+    $sql .= " ORDER BY FIELD(s.status,'w_trakcie','zaplanowany','zakończony','anulowany','archiwum'), s.planned_date DESC, s.id DESC";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
-    $services = $stmt->fetchAll();
+    if ($action === 'archive') {
+        $archiveServices = $stmt->fetchAll();
+    } else {
+        $services = $stmt->fetchAll();
+    }
 }
 
 // Fetch service protocols for the Protocols tab
@@ -318,18 +377,35 @@ include __DIR__ . '/includes/header.php';
 
 <div class="page-header">
     <h1><i class="fas fa-wrench me-2 text-primary"></i>Serwisy</h1>
+    <?php if (in_array($action, ['list','archive'], true)): ?>
     <?php if ($action === 'list'): ?>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#svcListAddModal"><i class="fas fa-plus me-2"></i>Nowy serwis</button>
+    <?php endif; ?>
     <?php elseif ($action !== 'print'): ?>
     <a href="services.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
     <?php endif; ?>
 </div>
 
+<?php if (in_array($action, ['list','archive'], true)): ?>
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <a class="nav-link <?= $action === 'list' ? 'active' : '' ?>" href="services.php">
+            <i class="fas fa-wrench me-1"></i>Serwisy
+        </a>
+    </li>
+    <li class="nav-item" role="presentation">
+        <a class="nav-link <?= $action === 'archive' ? 'active' : '' ?>" href="services.php?action=archive">
+            <i class="fas fa-archive me-1"></i>Archiwum
+        </a>
+    </li>
+</ul>
+<?php endif; ?>
+
 <?php if ($action === 'list'): ?>
 <ul class="nav nav-tabs mb-3" id="serviceTab" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" id="tab-serwisy" data-bs-toggle="tab" data-bs-target="#pane-serwisy" type="button" role="tab">
-            <i class="fas fa-wrench me-1"></i>Serwisy
+            <i class="fas fa-wrench me-1"></i>Aktywne zlecenia serwisowe
         </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -399,6 +475,24 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-sm btn-outline-info btn-action"
                                 onclick="openServiceModal(<?= $svc['id'] ?>)"
                                 title="Podgląd"><i class="fas fa-eye"></i></button>
+                        <?php if (!in_array($svc['status'], ['zakończony','anulowany','archiwum'], true)): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Oznaczyć serwis #<?= $svc['id'] ?> jako zakończony?')">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="change_status">
+                            <input type="hidden" name="id" value="<?= $svc['id'] ?>">
+                            <input type="hidden" name="new_status" value="zakończony">
+                            <button type="submit" class="btn btn-sm btn-outline-success btn-action" title="Zakończ serwis"><i class="fas fa-check"></i></button>
+                        </form>
+                        <?php endif; ?>
+                        <?php if ($svc['status'] !== 'archiwum'): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść serwis #<?= $svc['id'] ?> do archiwum?')">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="change_status">
+                            <input type="hidden" name="id" value="<?= $svc['id'] ?>">
+                            <input type="hidden" name="new_status" value="archiwum">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary btn-action" title="Archiwizuj serwis"><i class="fas fa-archive"></i></button>
+                        </form>
+                        <?php endif; ?>
                         <a href="services.php?action=edit&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
                         <a href="services.php?action=print&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie serwisowe"><i class="fas fa-print"></i></a>
                         <form method="POST" class="d-inline">
@@ -458,6 +552,69 @@ include __DIR__ . '/includes/header.php';
 </div><!-- /pane-protokoly-s -->
 </div><!-- /tab-content -->
 
+<?php elseif ($action === 'archive'): ?>
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2">
+            <input type="hidden" name="action" value="archive">
+            <div class="col-md-3">
+                <input type="search" name="search" class="form-control form-control-sm" placeholder="Szukaj (nr seryjny, rejestracja, model...)" value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-md-2">
+                <select name="type" class="form-select form-select-sm">
+                    <option value="">Wszystkie typy</option>
+                    <?php foreach (['przeglad','naprawa','wymiana','aktualizacja','inne'] as $t): ?>
+                    <option value="<?= $t ?>" <?= ($_GET['type'] ?? '') === $t ? 'selected' : '' ?>><?= ucfirst($t) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_from" class="form-control form-control-sm" value="<?= h($_GET['date_from'] ?? '') ?>" title="Data od">
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_to" class="form-control form-control-sm" value="<?= h($_GET['date_to'] ?? '') ?>" title="Data do">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="services.php?action=archive" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header"><i class="fas fa-archive me-2"></i>Archiwum zleceń serwisowych (<?= count($archiveServices) ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($archiveServices as $svc): ?>
+                <tr>
+                    <td><?= formatDate($svc['planned_date']) ?></td>
+                    <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
+                    <td>
+                        <a href="#" onclick="openServiceModal(<?= $svc['id'] ?>); return false;"><?= h($svc['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($svc['manufacturer_name'] . ' ' . $svc['model_name']) ?></small>
+                    </td>
+                    <td><?= $svc['registration'] ? h($svc['registration'] . ' ' . $svc['make']) : '—' ?></td>
+                    <td><?= getStatusBadge($svc['status'], 'service') ?></td>
+                    <td><?= $svc['cost'] > 0 ? formatMoney($svc['cost']) : '—' ?></td>
+                    <td><?= h($svc['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="openServiceModal(<?= $svc['id'] ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
+                        <a href="services.php?action=print&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie serwisowe"><i class="fas fa-print"></i></a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($archiveServices)): ?><tr><td colspan="8" class="text-center text-muted p-3">Brak zarchiwizowanych serwisów.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <!-- Service Preview Modal -->
 <div class="modal fade" id="servicePreviewModal" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw">
@@ -515,7 +672,9 @@ function openServiceModal(serviceId) {
                 <?php endif; ?>
             </div>
             <div class="card-footer d-flex gap-2">
+                <?php if ($service['status'] !== 'archiwum'): ?>
                 <a href="services.php?action=edit&id=<?= $service['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                <?php endif; ?>
                 <a href="services.php?action=print&id=<?= $service['id'] ?>" class="btn btn-sm btn-outline-dark"><i class="fas fa-print me-1"></i>Drukuj zlecenie</a>
                 <a href="protocols.php?action=add&service=<?= $service['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
             </div>

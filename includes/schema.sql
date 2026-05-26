@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS `services` (
   `replacement_device_id` INT UNSIGNED DEFAULT NULL,
   `planned_date` DATE DEFAULT NULL,
   `completed_date` DATE DEFAULT NULL,
-  `status` ENUM('zaplanowany','w_trakcie','zakończony','anulowany') NOT NULL DEFAULT 'zaplanowany',
+  `status` ENUM('zaplanowany','w_trakcie','zakończony','anulowany','archiwum') NOT NULL DEFAULT 'zaplanowany',
   `description` TEXT DEFAULT NULL,
   `resolution` TEXT DEFAULT NULL,
   `cost` DECIMAL(10,2) DEFAULT 0.00,

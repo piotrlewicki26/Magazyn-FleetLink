@@ -111,6 +111,7 @@ function getStatusBadge($status, $type = 'device') {
             'w_trakcie'   => ['warning', 'W trakcie'],
             'zakończony'  => ['success', 'Zakończony'],
             'anulowany'   => ['secondary', 'Anulowany'],
+            'archiwum'    => ['dark', 'Archiwum'],
         ],
         'offer' => [
             'robocza'    => ['secondary', 'Robocza'],
