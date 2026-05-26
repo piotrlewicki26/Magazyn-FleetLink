@@ -1109,7 +1109,7 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
         var allOpts = installSel.querySelectorAll('option[data-device-id]');
         var matching = [];
         allOpts.forEach(function(opt) {
-            if (!deviceId || opt.dataset.deviceId == deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
+            if (!deviceId || opt.dataset.deviceId === deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
             else { opt.style.display = 'none'; }
         });
         if (deviceId && matching.length === 1 && !installSel.value) matching[0].selected = true;
@@ -1257,7 +1257,7 @@ $typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana'
             var allOpts = svcListInstSel.querySelectorAll('option[data-device-id]');
             var matching = [];
             allOpts.forEach(function(opt) {
-                if (!deviceId || opt.dataset.deviceId == deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
+                if (!deviceId || opt.dataset.deviceId === deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
                 else { opt.style.display = 'none'; }
             });
             if (deviceId && matching.length === 1) svcListInstSel.value = matching[0].value;
