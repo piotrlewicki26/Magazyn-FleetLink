@@ -15,6 +15,81 @@ $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
 
+function ensureDeviceConfigFilesTable(PDO $db): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+    try {
+        $db->query("SELECT 1 FROM device_config_files LIMIT 1");
+        return;
+    } catch (Exception $e) {}
+
+    $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+    if ($driver === 'sqlite') {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS device_config_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_id INTEGER NOT NULL,
+                firmware_version TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                stored_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                uploaded_by INTEGER DEFAULT NULL,
+                uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+    } else {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS `device_config_files` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `model_id` INT UNSIGNED NOT NULL,
+                `firmware_version` VARCHAR(100) NOT NULL,
+                `original_name` VARCHAR(255) NOT NULL,
+                `stored_name` VARCHAR(255) NOT NULL,
+                `file_path` VARCHAR(500) NOT NULL,
+                `uploaded_by` INT UNSIGNED DEFAULT NULL,
+                `uploaded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_cfg_model` (`model_id`),
+                CONSTRAINT `fk_cfg_model` FOREIGN KEY (`model_id`) REFERENCES `models`(`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_cfg_user` FOREIGN KEY (`uploaded_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+}
+
+$uploadsBaseDir = __DIR__ . '/Uploads';
+$uploadsConfigsDir = $uploadsBaseDir . '/configurations';
+
+if ($action === 'config_download' && $id > 0) {
+    requireLogin();
+    ensureDeviceConfigFilesTable($db);
+    $fStmt = $db->prepare("SELECT id, original_name, stored_name, file_path FROM device_config_files WHERE id=?");
+    $fStmt->execute([$id]);
+    $fileRow = $fStmt->fetch();
+    if (!$fileRow) {
+        flashError('Plik konfiguracji nie istnieje.');
+        redirect(getBaseUrl() . 'devices.php?action=configs');
+    }
+    $fullPath = $fileRow['file_path'];
+    $realPath = realpath($fullPath ?: '');
+    $allowedRoot = realpath($uploadsBaseDir);
+    $normalizedReal = $realPath ? str_replace('\\', '/', $realPath) : '';
+    $normalizedRoot = $allowedRoot ? rtrim(str_replace('\\', '/', $allowedRoot), '/') . '/' : '';
+    if (!$normalizedReal || !$normalizedRoot || substr($normalizedReal . '/', 0, strlen($normalizedRoot)) !== $normalizedRoot || !is_file($realPath)) {
+        flashError('Plik nie jest dostępny na serwerze.');
+        redirect(getBaseUrl() . 'devices.php?action=configs');
+    }
+    $downloadName = $fileRow['original_name'] ?: $fileRow['stored_name'];
+    $downloadName = preg_replace('/[^a-zA-Z0-9._-]+/', '_', (string)$downloadName);
+    header('Content-Description: File Transfer');
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $downloadName . '"');
+    header('Content-Length: ' . filesize($realPath));
+    readfile($realPath);
+    exit;
+}
+
 // Handle POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -22,6 +97,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'devices.php');
     }
     $postAction    = sanitize($_POST['action'] ?? '');
+
+    if ($postAction === 'upload_config_file') {
+        if (!isAdmin()) { flashError('Dodawanie plików konfiguracji jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'devices.php?action=configs'); }
+        ensureDeviceConfigFilesTable($db);
+        $cfgModelId = (int)($_POST['model_id'] ?? 0);
+        $cfgVersion = sanitize($_POST['firmware_version'] ?? '');
+        if (!$cfgModelId || $cfgVersion === '') {
+            flashError('Wybierz model i podaj wersję oprogramowania.');
+            redirect(getBaseUrl() . 'devices.php?action=configs');
+        }
+        if (empty($_FILES['config_file']['tmp_name'])) {
+            flashError('Wybierz plik konfiguracji do wgrania.');
+            redirect(getBaseUrl() . 'devices.php?action=configs');
+        }
+        if (!is_dir($uploadsConfigsDir)) {
+            @mkdir($uploadsConfigsDir, 0755, true);
+        }
+        $origName = basename((string)($_FILES['config_file']['name'] ?? 'config.bin'));
+        $safeOrig = preg_replace('/[^a-zA-Z0-9._-]+/', '_', $origName);
+        $ext = strtolower(pathinfo($safeOrig, PATHINFO_EXTENSION));
+        $allowedExt = ['cfg','conf','txt','xml','json','bin'];
+        if ($ext && !in_array($ext, $allowedExt, true)) {
+            flashError('Niedozwolone rozszerzenie pliku konfiguracji.');
+            redirect(getBaseUrl() . 'devices.php?action=configs');
+        }
+        $detectedMime = '';
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo) {
+                $detectedMime = (string)finfo_file($finfo, $_FILES['config_file']['tmp_name']);
+                finfo_close($finfo);
+            }
+        }
+        $allowedMimes = ['text/plain','application/json','application/xml','text/xml','application/octet-stream','application/x-empty'];
+        if ($detectedMime !== '' && !in_array($detectedMime, $allowedMimes, true)) {
+            flashError('Nieprawidłowy typ pliku konfiguracji.');
+            redirect(getBaseUrl() . 'devices.php?action=configs');
+        }
+        try {
+            $randomSuffix = bin2hex(random_bytes(4));
+        } catch (Exception $e) {
+            $randomSuffix = substr(md5((string)microtime(true)), 0, 8);
+        }
+        $stored = 'cfg_' . $cfgModelId . '_' . date('Ymd_His') . '_' . $randomSuffix . ($ext ? '.' . $ext : '');
+        $target = $uploadsConfigsDir . '/' . $stored;
+        if (!move_uploaded_file($_FILES['config_file']['tmp_name'], $target)) {
+            flashError('Błąd zapisu pliku. Sprawdź uprawnienia katalogu Uploads.');
+            redirect(getBaseUrl() . 'devices.php?action=configs');
+        }
+        $u = getCurrentUser();
+        $db->prepare("INSERT INTO device_config_files (model_id, firmware_version, original_name, stored_name, file_path, uploaded_by) VALUES (?,?,?,?,?,?)")
+           ->execute([$cfgModelId, $cfgVersion, $safeOrig, $stored, $target, (int)($u['id'] ?? 0)]);
+        flashSuccess('Plik konfiguracji został zapisany.');
+        redirect(getBaseUrl() . 'devices.php?action=configs&model=' . $cfgModelId);
+    }
+
     $modelId       = (int)($_POST['model_id'] ?? 0);
     $serialNumber  = sanitize($_POST['serial_number'] ?? '');
     $imei          = sanitize($_POST['imei'] ?? '');
@@ -49,7 +180,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $oldSimRow = $db->prepare("SELECT sim_number FROM devices WHERE id=?");
         $oldSimRow->execute([$simEditId]);
         $oldSimRec = $oldSimRow->fetch();
-        $db->prepare("UPDATE devices SET sim_number=? WHERE id=?")->execute([$newSim ?: null, $simEditId]);
+        $actor = getCurrentUser();
+        updateDeviceFieldsWithHistory($db, $simEditId, ['sim_number' => ($newSim ?: null)], (int)($actor['id'] ?? 0), 'sim_edit', $simEditId);
         // Sync sim_cards
         if (!empty($newSim)) {
             try {
@@ -153,12 +285,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         // Fetch old status and old sim_number for inventory/SIM sync
-        $oldRow = $db->prepare("SELECT model_id, status, sim_number FROM devices WHERE id=?");
+        $oldRow = $db->prepare("SELECT model_id, serial_number, imei, sim_number, status FROM devices WHERE id=?");
         $oldRow->execute([$editId]);
         $oldDevice = $oldRow->fetch();
         try {
             $stmt = $db->prepare("UPDATE devices SET model_id=?, serial_number=?, imei=?, sim_number=?, ble_id=?, major=?, minor=?, mac_address=?, status=?, purchase_date=?, purchase_price=?, sale_date=?, lease_end_date=?, notes=? WHERE id=?");
             $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes, $editId]);
+            if ($oldDevice) {
+                logDeviceFieldChange($db, $editId, 'model_id', $oldDevice['model_id'] ?? null, $modelId, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
+                logDeviceFieldChange($db, $editId, 'status', $oldDevice['status'] ?? null, $status, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
+                logDeviceFieldChange($db, $editId, 'sim_number', $oldDevice['sim_number'] ?? null, $simNumber ?: null, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
+                logDeviceFieldChange($db, $editId, 'serial_number', $oldDevice['serial_number'] ?? null, $serialNumber, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
+                logDeviceFieldChange($db, $editId, 'imei', $oldDevice['imei'] ?? null, $imei ?: null, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
+            }
             // Auto-adjust inventory on status change
             if ($oldDevice) {
                 adjustInventoryForStatusChange($db, $modelId, $oldDevice['status'], $status);
@@ -351,8 +490,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Update device status and optionally SIM number
             $prevStatus = $devRow['status'];
             if ($instSimNumber !== '') {
-                $db->prepare("UPDATE devices SET status='zamontowany', sim_number=? WHERE id=?")
-                   ->execute([$instSimNumber, $instDeviceId]);
+                updateDeviceFieldsWithHistory($db, $instDeviceId, ['status' => 'zamontowany', 'sim_number' => $instSimNumber], (int)$currentUser['id'], 'device_install', $instWorkOrderId ?: null);
                 // Sync sim_cards
                 try {
                     $exSim = $db->prepare("SELECT id FROM sim_cards WHERE device_id=? LIMIT 1");
@@ -371,7 +509,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 } catch (PDOException $e) {}
             } else {
-                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$instDeviceId]);
+                updateDeviceFieldsWithHistory($db, $instDeviceId, ['status' => 'zamontowany'], (int)$currentUser['id'], 'device_install', $instWorkOrderId ?: null);
             }
             adjustInventoryForStatusChange($db, $devRow['model_id'], $prevStatus, 'zamontowany');
 
@@ -382,7 +520,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $ecanRow->execute([$instEcanId]);
                     $ecanDev = $ecanRow->fetch();
                     if ($ecanDev) {
-                        $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$instEcanId]);
+                        updateDeviceFieldsWithHistory($db, (int)$instEcanId, ['status' => 'zamontowany'], (int)$currentUser['id'], 'ecan_assign', $instWorkOrderId ?: null);
                         adjustInventoryForStatusChange($db, $ecanDev['model_id'], $ecanDev['status'], 'zamontowany');
                     }
                 } catch (PDOException $e) {}
@@ -614,7 +752,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $oldEcan->execute([$oldEcanId]);
                 $oldEcanRow = $oldEcan->fetch();
                 if ($oldEcanRow) {
-                    $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$oldEcanId]);
+                    updateDeviceFieldsWithHistory($db, (int)$oldEcanId, ['status' => 'sprawny'], (int)(getCurrentUser()['id'] ?? 0), 'ecan_assign', $instRow['id']);
                     adjustInventoryForStatusChange($db, $oldEcanRow['model_id'], $oldEcanRow['status'], 'sprawny');
                 }
             }
@@ -623,7 +761,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newEcan->execute([$aedNewEcanId]);
                 $newEcanRow = $newEcan->fetch();
                 if (!$newEcanRow) { throw new Exception('Wybrane urządzenie ECAN nie istnieje.'); }
-                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$aedNewEcanId]);
+                updateDeviceFieldsWithHistory($db, (int)$aedNewEcanId, ['status' => 'zamontowany'], (int)(getCurrentUser()['id'] ?? 0), 'ecan_assign', $instRow['id']);
                 adjustInventoryForStatusChange($db, $newEcanRow['model_id'], $newEcanRow['status'], 'zamontowany');
             }
             $db->prepare("UPDATE installations SET ecan_device_id=? WHERE id=?")->execute([$aedNewEcanId, $instRow['id']]);
@@ -724,6 +862,22 @@ if ($action === 'view' && $id) {
     ");
     $histStmt->execute([$id]);
     $deviceHistory = $histStmt->fetchAll();
+
+    // Detailed device field change history (who/when/from->to)
+    $deviceChangeLog = [];
+    try {
+        ensureDeviceChangeLogTable($db);
+        $chgStmt = $db->prepare("
+            SELECT dcl.*, u.name as changed_by_name
+            FROM device_change_log dcl
+            LEFT JOIN users u ON u.id=dcl.changed_by_user_id
+            WHERE dcl.device_id=?
+            ORDER BY dcl.changed_at DESC, dcl.id DESC
+            LIMIT 300
+        ");
+        $chgStmt->execute([$id]);
+        $deviceChangeLog = $chgStmt->fetchAll();
+    } catch (Exception $e) { $deviceChangeLog = []; }
 }
 
 // Models for select (with device counts for filter tiles)
@@ -740,6 +894,29 @@ $models = $db->query("
 $modelNameMap = [];
 foreach ($models as $m) {
     $modelNameMap[(int)$m['id']] = $m['name'];
+}
+
+$configFiles = [];
+$configFilterModel = (int)($_GET['model'] ?? 0);
+if ($action === 'configs') {
+    ensureDeviceConfigFilesTable($db);
+    $cfgSql = "
+        SELECT cf.*, m.name as model_name, mf.name as manufacturer_name, u.name as uploaded_by_name
+        FROM device_config_files cf
+        JOIN models m ON m.id=cf.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        LEFT JOIN users u ON u.id=cf.uploaded_by
+        WHERE 1=1
+    ";
+    $cfgParams = [];
+    if ($configFilterModel > 0) {
+        $cfgSql .= " AND cf.model_id=?";
+        $cfgParams[] = $configFilterModel;
+    }
+    $cfgSql .= " ORDER BY mf.name, m.name, cf.firmware_version DESC, cf.uploaded_at DESC";
+    $cfgStmt = $db->prepare($cfgSql);
+    $cfgStmt->execute($cfgParams);
+    $configFiles = $cfgStmt->fetchAll();
 }
 
 
@@ -890,6 +1067,7 @@ include __DIR__ . '/includes/header.php';
         <button type="button" class="btn btn-primary" onclick="openAddDeviceModal()"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</button>
         <a href="device_import.php" class="btn btn-outline-secondary"><i class="fas fa-file-import me-2"></i>Importuj</a>
         <?php endif; ?>
+        <a href="devices.php?action=configs" class="btn btn-outline-primary"><i class="fas fa-file-code me-2"></i>Konfiguracje</a>
     </div>
     <?php else: ?>
     <a href="devices.php" id="backToListBtn" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
@@ -1978,6 +2156,96 @@ function openSimEdit(deviceId, currentSim) {
 <?php endif; ?>
 </script>
 
+<?php elseif ($action === 'configs'): ?>
+<div class="card mb-3">
+    <div class="card-header"><i class="fas fa-file-code me-2 text-primary"></i>Pliki konfiguracyjne urządzeń</div>
+    <div class="card-body">
+        <?php if (isAdmin()): ?>
+        <form method="POST" enctype="multipart/form-data" class="row g-2 align-items-end">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="upload_config_file">
+            <div class="col-md-4">
+                <label class="form-label form-label-sm required-star">Model urządzenia</label>
+                <select name="model_id" class="form-select form-select-sm" required>
+                    <option value="">— wybierz model —</option>
+                    <?php foreach ($models as $m): ?>
+                    <option value="<?= (int)$m['id'] ?>" <?= $configFilterModel === (int)$m['id'] ? 'selected' : '' ?>>
+                        <?= h($m['manufacturer_name'] . ' ' . $m['name']) ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label form-label-sm required-star">Wersja oprogramowania</label>
+                <input type="text" name="firmware_version" class="form-control form-control-sm" placeholder="np. 4.12.0" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label form-label-sm required-star">Plik</label>
+                <input type="file" name="config_file" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-sm btn-primary w-100"><i class="fas fa-upload me-1"></i>Wgraj</button>
+            </div>
+        </form>
+        <hr>
+        <?php endif; ?>
+        <form method="GET" class="row g-2 align-items-end">
+            <input type="hidden" name="action" value="configs">
+            <div class="col-md-4">
+                <label class="form-label form-label-sm">Filtr modelu</label>
+                <select name="model" class="form-select form-select-sm">
+                    <option value="">Wszystkie modele</option>
+                    <?php foreach ($models as $m): ?>
+                    <option value="<?= (int)$m['id'] ?>" <?= $configFilterModel === (int)$m['id'] ? 'selected' : '' ?>>
+                        <?= h($m['manufacturer_name'] . ' ' . $m['name']) ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-outline-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="devices.php?action=configs" class="btn btn-sm btn-outline-secondary">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header">Lista plików (<?= count($configFiles) ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th>Wersja FW</th>
+                    <th>Nazwa pliku</th>
+                    <th>Dodano</th>
+                    <th>Przez</th>
+                    <th>Akcje</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($configFiles as $cf): ?>
+                <tr>
+                    <td><?= h($cf['manufacturer_name'] . ' ' . $cf['model_name']) ?></td>
+                    <td><span class="badge bg-secondary"><?= h($cf['firmware_version']) ?></span></td>
+                    <td><?= h($cf['original_name']) ?></td>
+                    <td><?= formatDateTime($cf['uploaded_at']) ?></td>
+                    <td><?= h($cf['uploaded_by_name'] ?? '—') ?></td>
+                    <td>
+                        <a class="btn btn-sm btn-outline-primary" href="devices.php?action=config_download&id=<?= (int)$cf['id'] ?>">
+                            <i class="fas fa-download"></i>
+                        </a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($configFiles)): ?>
+                <tr><td colspan="6" class="text-center text-muted p-3">Brak plików konfiguracji dla wybranego filtra.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <?php elseif ($action === 'view' && isset($device)): ?>
 <?php if ($device['status'] === 'do_demontazu'): ?>
 <div class="alert alert-warning d-flex align-items-center gap-2 mb-3">
@@ -2181,7 +2449,25 @@ function openSimEdit(deviceId, currentSim) {
             ];
         }
 
-        // 5. Sale event
+        // 5. Detailed field change log (who/when/what: from -> to)
+        foreach ($deviceChangeLog as $chg) {
+            $who = $chg['changed_by_name'] ? ' przez ' . h($chg['changed_by_name']) : '';
+            $sourceLabel = $chg['source_type'] ? ' [' . h($chg['source_type']) . ']' : '';
+            $oldVal = ($chg['old_value'] === null || $chg['old_value'] === '') ? '—' : h($chg['old_value']);
+            $newVal = ($chg['new_value'] === null || $chg['new_value'] === '') ? '—' : h($chg['new_value']);
+            $timeline[] = [
+                'date'   => date('Y-m-d', strtotime((string)$chg['changed_at'])),
+                'sort'   => date('Y-m-d H:i:s', strtotime((string)$chg['changed_at'])),
+                'type'   => 'zmiana',
+                'icon'   => 'fas fa-pen text-primary',
+                'label'  => 'Zmiana pola: ' . h($chg['field_name']) . $sourceLabel,
+                'detail' => 'Zmieniono z: ' . $oldVal . ' → ' . $newVal . $who . ' (' . formatDateTime($chg['changed_at']) . ')',
+                'link'   => '',
+                'badge'  => '<span class="badge bg-primary">Zmiana</span>',
+            ];
+        }
+
+        // 6. Sale event
         if (!empty($device['sale_date'])) {
             $timeline[] = [
                 'date'   => $device['sale_date'],

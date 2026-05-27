@@ -403,7 +403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$devRow) { throw new Exception('Urządzenie nie istnieje.'); }
             if ($devRow['status'] === 'do_demontazu') { throw new Exception('Urządzenie jest już oznaczone do demontażu.'); }
             $oldStatus = $devRow['status'];
-            $db->prepare("UPDATE devices SET status='do_demontazu' WHERE id=?")->execute([$disDeviceId]);
+            updateDeviceFieldsWithHistory($db, (int)$disDeviceId, ['status' => 'do_demontazu'], (int)$currentUser['id'], 'order_disassembly_mark', null);
             adjustInventoryForStatusChange($db, $devRow['model_id'], $oldStatus, 'do_demontazu');
             if ($disNotes || $disTechnicianId) {
                 $db->prepare("UPDATE installations SET technician_id=?, notes=CONCAT(COALESCE(notes,''), IF(notes IS NULL OR notes='', '', '\n'), ?) WHERE device_id=? AND status='aktywna'")
@@ -448,7 +448,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $ecanInfo->execute([$instRow['ecan_device_id']]);
                     $ecanRow = $ecanInfo->fetch();
                     if ($ecanRow) {
-                        $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$instRow['ecan_device_id']]);
+                        updateDeviceFieldsWithHistory($db, (int)$instRow['ecan_device_id'], ['status' => 'sprawny'], (int)$currentUser['id'], 'order_remove_device', $orderId);
                         adjustInventoryForStatusChange($db, $ecanRow['model_id'], $ecanRow['status'], 'sprawny');
                     }
                     $db->prepare("UPDATE installations SET ecan_device_id=NULL WHERE id=?")->execute([$instId]);
@@ -458,7 +458,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $devInfo->execute([$instRow['device_id']]);
                 $devRow = $devInfo->fetch();
                 if ($devRow) {
-                    $db->prepare("UPDATE devices SET status='nowy' WHERE id=?")->execute([$instRow['device_id']]);
+                    updateDeviceFieldsWithHistory($db, (int)$instRow['device_id'], ['status' => 'nowy'], (int)$currentUser['id'], 'order_remove_device', $orderId);
                     adjustInventoryForStatusChange($db, $devRow['model_id'], $devRow['status'], 'nowy');
                 }
                 $db->commit();
@@ -552,7 +552,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $oldEcan->execute([$oldEcanId]);
                 $oldEcanRow = $oldEcan->fetch();
                 if ($oldEcanRow) {
-                    $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$oldEcanId]);
+                    updateDeviceFieldsWithHistory($db, (int)$oldEcanId, ['status' => 'sprawny'], (int)$currentUser['id'], 'order_ecan_assign', $orderId);
                     adjustInventoryForStatusChange($db, $oldEcanRow['model_id'], $oldEcanRow['status'], 'sprawny');
                 }
             }
@@ -562,7 +562,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newEcan->execute([$newEcanId]);
                 $newEcanRow = $newEcan->fetch();
                 if (!$newEcanRow) { throw new Exception('Wybrane urządzenie ECAN nie istnieje.'); }
-                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$newEcanId]);
+                updateDeviceFieldsWithHistory($db, (int)$newEcanId, ['status' => 'zamontowany'], (int)$currentUser['id'], 'order_ecan_assign', $orderId);
                 adjustInventoryForStatusChange($db, $newEcanRow['model_id'], $newEcanRow['status'], 'zamontowany');
             }
             $db->prepare("UPDATE installations SET ecan_device_id=? WHERE id=?")->execute([$newEcanId, $instId]);
@@ -590,7 +590,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE device_id=? AND status='aktywna'")->execute([$disDate, $disDeviceId]);
             }
-            $db->prepare("UPDATE devices SET status='sprawny' WHERE id=?")->execute([$disDeviceId]);
+            updateDeviceFieldsWithHistory($db, (int)$disDeviceId, ['status' => 'sprawny'], (int)$currentUser['id'], 'order_disassembly_complete', $disInstId ?: null);
             adjustInventoryForStatusChange($db, $devRow['model_id'], $devRow['status'], 'sprawny');
             $db->commit();
             flashSuccess('Demontaż zakończony. Urządzenie jest teraz dostępne do ponownego montażu.');
@@ -1245,24 +1245,26 @@ include __DIR__ . '/includes/header.php';
             </thead>
             <tbody>
                 <?php
-                // Group orders by client_id (all orders of same client together)
+                // Group orders by date; day header is shown only when day has 2+ orders
+                $minItemsForDayGrouping = 2;
+                $noDateGroupKey = '__no_date__';
                 $groupedOrders = [];
                 foreach ($orders as $ord) {
-                    $groupKey = $ord['client_id'] ?? '0';
+                    $groupKey = $ord['date'] ?? $noDateGroupKey;
                     if (!isset($groupedOrders[$groupKey])) {
-                        $groupedOrders[$groupKey] = ['orders' => [], 'client_id' => $ord['client_id']];
+                        $groupedOrders[$groupKey] = ['orders' => [], 'date' => $ord['date'] ?? null];
                     }
                     $groupedOrders[$groupKey]['orders'][] = $ord;
                 }
                 $groupIdx = 0;
                 foreach ($groupedOrders as $gKey => $group):
                     $groupOrders = $group['orders'];
-                    $isGroup = count($groupOrders) > 1;
+                    $isGroup = count($groupOrders) >= $minItemsForDayGrouping;
                     if ($isGroup):
                         // Group header row
                         $groupIdx++;
                         $firstOrd = $groupOrders[0];
-                        $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
+                        $groupDateLabel = !empty($firstOrd['date']) ? formatDate($firstOrd['date']) : 'Brak daty';
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
                         $groupRowId = 'grp' . $groupIdx;
                         $groupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
@@ -1273,7 +1275,7 @@ include __DIR__ . '/includes/header.php';
                 ?>
                 <tr class="table-primary" data-group-id="<?= h($groupRowId) ?>">
                     <td colspan="5" class="py-2 fw-semibold">
-                        <i class="fas fa-building me-2 opacity-75"></i><?= h($clientLabel) ?>
+                        <i class="fas fa-calendar-day me-2 opacity-75"></i><?= h($groupDateLabel) ?>
                         <span class="badge bg-primary ms-2"><?= count($groupOrders) ?> zleceń</span>
                         <span class="badge bg-success ms-1"><?= $totalDevices ?> urządzeń</span>
                     </td>
@@ -1282,7 +1284,7 @@ include __DIR__ . '/includes/header.php';
                     <td class="py-2">
                         <button type="button" class="btn btn-sm btn-outline-primary btn-action" title="Podgląd grupy (modal)"
                                 data-orders="<?= $groupOrdersModalJson ?>"
-                                data-client="<?= h($clientLabel) ?>"
+                                data-client="<?= h('Data: ' . $groupDateLabel) ?>"
                                 onclick="openGroupPreviewModal(this.dataset.orders, this.dataset.client)">
                             <i class="fas fa-eye"></i>
                         </button>
@@ -1305,8 +1307,13 @@ include __DIR__ . '/includes/header.php';
                 <?php
                     endif;
                     foreach ($groupOrders as $ord):
+                        $today = date('Y-m-d');
+                        $tomorrow = date('Y-m-d', strtotime('+1 day'));
+                        $isDelayed = !empty($ord['date']) && $ord['date'] < $today && $ord['status'] !== 'w_trakcie';
+                        $isNear = !empty($ord['date']) && in_array($ord['date'], [$today, $tomorrow], true);
+                        $rowAlertClass = $isDelayed ? 'table-danger' : ($isNear ? 'table-warning' : '');
                 ?>
-                <tr class="<?= $isGroup ? 'ps-3' : '' ?>" <?= $isGroup ? 'data-group="' . h($groupRowId) . '"' : '' ?>>
+                <tr class="<?= trim(($isGroup ? 'ps-3 ' : '') . $rowAlertClass) ?>" <?= $isGroup ? 'data-group="' . h($groupRowId) . '"' : '' ?>>
                     <td class="fw-semibold <?= $isGroup ? 'ps-4' : '' ?>">
                         <?= $isGroup ? '<span class="text-muted me-1">↳</span>' : '' ?>
                         <a href="#" onclick="openOrderModal(<?= $ord['id'] ?>, <?= htmlspecialchars(json_encode($ord['order_number']), ENT_QUOTES) ?>); return false;">

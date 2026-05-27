@@ -75,6 +75,7 @@ try {
                     </a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php"><i class="fas fa-list me-2"></i>Lista urządzeń</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php?action=configs"><i class="fas fa-file-code me-2"></i>Konfiguracje</a></li>
                         <?php if (isAdmin()): ?>
                         <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#navDevAddModal"><i class="fas fa-plus me-2"></i>Dodaj urządzenie</button></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>device_import.php"><i class="fas fa-file-import me-2"></i>Importuj urządzenia</a></li>
@@ -1149,4 +1150,3 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 </script>
-

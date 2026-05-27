@@ -30,97 +30,109 @@ $totalServiceRevenue = 0.0;
 $offerStatsData      = ['total' => 0, 'accepted' => 0, 'total_value' => 0, 'accepted_value' => 0];
 $deviceStatusMap     = [];
 $statsError          = null;
+$statsFailureCount   = 0;
+$totalStatsQueries   = 8;
+// Consider stats page degraded when at least half of key queries fail.
+$criticalFailureThreshold = (int)ceil($totalStatsQueries / 2);
+$dbDriver            = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+$isSqlite            = $dbDriver === 'sqlite';
+$monthInstallExpr    = $isSqlite ? "strftime('%m', installation_date)" : "DATE_FORMAT(installation_date,'%m')";
+$monthServiceExpr    = $isSqlite ? "strftime('%m', planned_date)" : "DATE_FORMAT(planned_date,'%m')";
+$yearInstallCond     = $isSqlite ? "strftime('%Y', installation_date) = ?" : "YEAR(installation_date) = ?";
+$yearServiceCond     = $isSqlite ? "strftime('%Y', planned_date) = ?" : "YEAR(planned_date) = ?";
+$yearCompletedCond   = $isSqlite ? "strftime('%Y', completed_date) = ?" : "YEAR(completed_date) = ?";
+$yearCreatedCond     = $isSqlite ? "strftime('%Y', created_at) = ?" : "YEAR(created_at) = ?";
+$yearParam           = (string)$year;
 
 try {
-// Installations by month
-$installsByMonth = $db->prepare("
-    SELECT DATE_FORMAT(installation_date,'%m') as month, COUNT(*) as count
-    FROM installations
-    WHERE YEAR(installation_date) = ?
-    GROUP BY month
-    ORDER BY month
-");
-$installsByMonth->execute([$year]);
-foreach ($installsByMonth->fetchAll() as $row) {
-    $installsByMonthData[(int)$row['month']] = (int)$row['count'];
-}
+    $installsByMonth = $db->prepare("
+        SELECT {$monthInstallExpr} as month, COUNT(*) as count
+        FROM installations
+        WHERE {$yearInstallCond}
+        GROUP BY month
+        ORDER BY month
+    ");
+    $installsByMonth->execute([$yearParam]);
+    foreach ($installsByMonth->fetchAll() as $row) {
+        $installsByMonthData[(int)$row['month']] = (int)$row['count'];
+    }
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics installsByMonth failed: ' . $e->getMessage()); }
 
-// Services by month
-$servicesByMonth = $db->prepare("
-    SELECT DATE_FORMAT(planned_date,'%m') as month, COUNT(*) as count
-    FROM services
-    WHERE YEAR(planned_date) = ? AND status = 'zakończony'
-    GROUP BY month
-    ORDER BY month
-");
-$servicesByMonth->execute([$year]);
-foreach ($servicesByMonth->fetchAll() as $row) {
-    $servicesByMonthData[(int)$row['month']] = (int)$row['count'];
-}
+try {
+    $servicesByMonth = $db->prepare("
+        SELECT {$monthServiceExpr} as month, COUNT(*) as count
+        FROM services
+        WHERE {$yearServiceCond} AND status = 'zakończony'
+        GROUP BY month
+        ORDER BY month
+    ");
+    $servicesByMonth->execute([$yearParam]);
+    foreach ($servicesByMonth->fetchAll() as $row) {
+        $servicesByMonthData[(int)$row['month']] = (int)$row['count'];
+    }
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics servicesByMonth failed: ' . $e->getMessage()); }
 
-// Top devices by installations
-$topDevices = $db->query("
-    SELECT mf.name as manufacturer, m.name as model, COUNT(i.id) as install_count
-    FROM installations i
-    JOIN devices d ON d.id=i.device_id
-    JOIN models m ON m.id=d.model_id
-    JOIN manufacturers mf ON mf.id=m.manufacturer_id
-    GROUP BY m.id
-    ORDER BY install_count DESC
-    LIMIT 10
-")->fetchAll();
+try {
+    $topDevices = $db->query("
+        SELECT mf.name as manufacturer, m.name as model, COUNT(i.id) as install_count
+        FROM installations i
+        JOIN devices d ON d.id=i.device_id
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        GROUP BY m.id
+        ORDER BY install_count DESC
+        LIMIT 10
+    ")->fetchAll();
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics topDevices failed: ' . $e->getMessage()); }
 
-// Services by type
-$servicesByType = $db->query("
-    SELECT type, COUNT(*) as count FROM services GROUP BY type ORDER BY count DESC
-")->fetchAll();
+try {
+    $servicesByType = $db->query("SELECT type, COUNT(*) as count FROM services GROUP BY type ORDER BY count DESC")->fetchAll();
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics servicesByType failed: ' . $e->getMessage()); }
 
-// Top technicians
-$topTechs = $db->query("
-    SELECT u.name, 
-           COUNT(DISTINCT i.id) as installs,
-           COUNT(DISTINCT s.id) as services
-    FROM users u
-    LEFT JOIN installations i ON i.technician_id=u.id
-    LEFT JOIN services s ON s.technician_id=u.id AND s.status='zakończony'
-    GROUP BY u.id
-    HAVING installs > 0 OR services > 0
-    ORDER BY (installs + services) DESC
-")->fetchAll();
+try {
+    $topTechs = $db->query("
+        SELECT u.name,
+               COUNT(DISTINCT i.id) as installs,
+               COUNT(DISTINCT s.id) as services
+        FROM users u
+        LEFT JOIN installations i ON i.technician_id=u.id
+        LEFT JOIN services s ON s.technician_id=u.id AND s.status='zakończony'
+        GROUP BY u.id
+        HAVING installs > 0 OR services > 0
+        ORDER BY (installs + services) DESC
+    ")->fetchAll();
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics topTechs failed: ' . $e->getMessage()); }
 
-// Revenue from services this year
-$serviceRevenue = $db->prepare("
-    SELECT SUM(cost) as total FROM services
-    WHERE YEAR(completed_date)=? AND status='zakończony'
-");
-$serviceRevenue->execute([$year]);
-$totalServiceRevenue = (float)($serviceRevenue->fetchColumn() ?? 0);
+try {
+    $serviceRevenue = $db->prepare("
+        SELECT SUM(cost) as total FROM services
+        WHERE {$yearCompletedCond} AND status='zakończony'
+    ");
+    $serviceRevenue->execute([$yearParam]);
+    $totalServiceRevenue = (float)($serviceRevenue->fetchColumn() ?? 0);
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics serviceRevenue failed: ' . $e->getMessage()); }
 
-// Offer statistics
 try {
     $offerStats = $db->prepare("
-        SELECT 
+        SELECT
             COUNT(*) as total,
             SUM(CASE WHEN status='zaakceptowana' THEN 1 ELSE 0 END) as accepted,
             SUM(total_gross) as total_value,
             SUM(CASE WHEN status='zaakceptowana' THEN total_gross ELSE 0 END) as accepted_value
-        FROM offers WHERE YEAR(created_at)=?
+        FROM offers WHERE {$yearCreatedCond}
     ");
-    $offerStats->execute([$year]);
+    $offerStats->execute([$yearParam]);
     $offerRow = $offerStats->fetch();
     if ($offerRow) $offerStatsData = $offerRow;
-} catch (Exception $e) {
-    // offers table may not exist – silently skip
-}
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics offerStats failed: ' . $e->getMessage()); }
 
-// Active devices count
-$deviceStats = $db->query("
-    SELECT status, COUNT(*) as count FROM devices GROUP BY status
-")->fetchAll();
-foreach ($deviceStats as $row) $deviceStatusMap[$row['status']] = $row['count'];
+try {
+    $deviceStats = $db->query("SELECT status, COUNT(*) as count FROM devices GROUP BY status")->fetchAll();
+    foreach ($deviceStats as $row) $deviceStatusMap[$row['status']] = $row['count'];
+} catch (Exception $e) { $statsFailureCount++; error_log('statistics deviceStats failed: ' . $e->getMessage()); }
 
-} catch (Exception $e) {
-    $statsError = $e->getMessage();
+if ($statsFailureCount > 0 && $statsFailureCount >= $criticalFailureThreshold) {
+    $statsError = 'Część zapytań statystycznych nie została wykonana.';
 }
 
 $activePage = 'statistics';

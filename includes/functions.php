@@ -11,6 +11,109 @@ function sanitize($str) {
     return trim(strip_tags((string)$str));
 }
 
+function ensureDeviceChangeLogTable(PDO $db): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+    try {
+        $db->query("SELECT 1 FROM device_change_log LIMIT 1");
+        return;
+    } catch (Exception $e) {}
+
+    $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+    if ($driver === 'sqlite') {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS device_change_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id INTEGER NOT NULL,
+                changed_by_user_id INTEGER DEFAULT NULL,
+                source_type TEXT DEFAULT NULL,
+                source_id INTEGER DEFAULT NULL,
+                field_name TEXT NOT NULL,
+                old_value TEXT DEFAULT NULL,
+                new_value TEXT DEFAULT NULL,
+                changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_device_change_log_device ON device_change_log(device_id, changed_at DESC)");
+    } else {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS `device_change_log` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `device_id` INT UNSIGNED NOT NULL,
+                `changed_by_user_id` INT UNSIGNED DEFAULT NULL,
+                `source_type` VARCHAR(50) DEFAULT NULL,
+                `source_id` INT UNSIGNED DEFAULT NULL,
+                `field_name` VARCHAR(100) NOT NULL,
+                `old_value` TEXT DEFAULT NULL,
+                `new_value` TEXT DEFAULT NULL,
+                `changed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_device_change_log_device` (`device_id`, `changed_at`),
+                CONSTRAINT `fk_device_change_log_device` FOREIGN KEY (`device_id`) REFERENCES `devices`(`id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_device_change_log_user` FOREIGN KEY (`changed_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+}
+
+function logDeviceFieldChange(PDO $db, int $deviceId, string $fieldName, $oldValue, $newValue, ?int $changedByUserId = null, string $sourceType = 'manual', ?int $sourceId = null): void {
+    $oldNorm = $oldValue === null ? null : (string)$oldValue;
+    $newNorm = $newValue === null ? null : (string)$newValue;
+    if ($oldValue === $newValue) return;
+    if (is_numeric($oldNorm) && is_numeric($newNorm) && (float)$oldNorm === (float)$newNorm) return;
+    if ($oldNorm === $newNorm) return;
+
+    try {
+        ensureDeviceChangeLogTable($db);
+        $stmt = $db->prepare("
+            INSERT INTO device_change_log (device_id, changed_by_user_id, source_type, source_id, field_name, old_value, new_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([
+            $deviceId,
+            $changedByUserId ?: null,
+            $sourceType,
+            $sourceId,
+            $fieldName,
+            $oldNorm,
+            $newNorm
+        ]);
+    } catch (Exception $e) {
+        // non-fatal history logging
+    }
+}
+
+function updateDeviceFieldsWithHistory(PDO $db, int $deviceId, array $changes, ?int $changedByUserId = null, string $sourceType = 'manual', ?int $sourceId = null): bool {
+    if (empty($changes)) return true;
+    $beforeStmt = $db->prepare("SELECT * FROM devices WHERE id=? LIMIT 1");
+    $beforeStmt->execute([$deviceId]);
+    $before = $beforeStmt->fetch();
+    if (!$before) return false;
+
+    $setParts = [];
+    $params = [];
+    foreach ($changes as $field => $value) {
+        $setParts[] = $field . "=?";
+        $params[] = $value;
+    }
+    $params[] = $deviceId;
+    $sql = "UPDATE devices SET " . implode(',', $setParts) . " WHERE id=?";
+    $db->prepare($sql)->execute($params);
+
+    $afterStmt = $db->prepare("SELECT * FROM devices WHERE id=? LIMIT 1");
+    $afterStmt->execute([$deviceId]);
+    $after = $afterStmt->fetch();
+    if (!$after) return true;
+
+    foreach (array_keys($changes) as $field) {
+        $oldValue = $before[$field] ?? null;
+        $newValue = $after[$field] ?? null;
+        logDeviceFieldChange($db, $deviceId, (string)$field, $oldValue, $newValue, $changedByUserId, $sourceType, $sourceId);
+    }
+    return true;
+}
+
 function redirect($url) {
     header('Location: ' . $url);
     exit;
@@ -421,6 +524,24 @@ function getEmailTemplateDefaults() {
   <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Technik</strong></td><td style="padding:6px 10px">{{TECHNICIAN}}</td></tr>
   <tr><td style="padding:6px 10px;color:#555"><strong>Status</strong></td><td style="padding:6px 10px">{{STATUS}}</td></tr>
   <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Opis</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
+</table>
+<p>Szczegóły dostępne są w panelu systemu.</p>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'service_updated' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#fd7e14;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}} &mdash; Zmienione zlecenie serwisowe</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
+<p>Witaj <strong>{{SENDER_NAME}}</strong>,</p>
+<p>Zlecenie serwisowe zostało zaktualizowane.</p>
+<table style="border-collapse:collapse;width:100%;margin:12px 0">
+  <tr><td style="padding:6px 10px;color:#555;width:40%"><strong>Nr zlecenia</strong></td><td style="padding:6px 10px">{{ORDER_NUMBER}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Urządzenie</strong></td><td style="padding:6px 10px">{{DEVICE}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Technik</strong></td><td style="padding:6px 10px">{{TECHNICIAN}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Zmienione pola</strong></td><td style="padding:6px 10px">{{CHANGES}}</td></tr>
 </table>
 <p>Szczegóły dostępne są w panelu systemu.</p>
 <br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>

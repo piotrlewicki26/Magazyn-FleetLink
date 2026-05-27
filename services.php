@@ -12,6 +12,22 @@ date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
 
 $db = getDb();
+
+function sendServiceEmailToAllUsers(PDO $db, string $subject, string $body): void {
+    try {
+        $allUsersStmt = $db->prepare("SELECT name, email FROM users WHERE email IS NOT NULL AND email <> ''");
+        $allUsersStmt->execute();
+        foreach ($allUsersStmt->fetchAll() as $u) {
+            try {
+                sendAppEmail($u['email'], $u['name'] ?? '', $subject, $body);
+            } catch (Exception $e) {
+                error_log('service email send failed to ' . ($u['email'] ?? '') . ': ' . $e->getMessage());
+            }
+        }
+    } catch (Exception $e) {
+        error_log('service email recipients load failed: ' . $e->getMessage());
+    }
+}
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
 $activeTab = ($action === 'list') ? sanitize($_GET['tab'] ?? 'serwisy') : 'serwisy';
@@ -166,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         // Update device status if in service
         if ($status === 'w_trakcie') {
-            $db->prepare("UPDATE devices SET status='w_serwisie' WHERE id=?")->execute([$deviceId]);
+            updateDeviceFieldsWithHistory($db, (int)$deviceId, ['status' => 'w_serwisie'], (int)$currentUser['id'], 'service_add', $newServiceId);
         }
         // Process accessory pickups submitted with the service form
         $svcAccIds   = array_map('intval', (array)($_POST['svc_acc'] ?? []));
@@ -184,11 +200,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         flashSuccess('Serwis zarejestrowany pomyślnie.');
-        // Send notification email to the current user
-        if (!empty($currentUser['email'])) {
+        // Send notification email to all users with e-mail
+        if ($newServiceId > 0) {
             try {
                 $svcTypeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
                 $svcStatusLabels = ['zaplanowany'=>'Zaplanowany','w_trakcie'=>'W trakcie','zakończony'=>'Zakończony','anulowany'=>'Anulowany'];
+                $orderLabel = '';
+                try {
+                    $oStmt = $db->prepare("SELECT order_number FROM services WHERE id=?");
+                    $oStmt->execute([$newServiceId]);
+                    $orderLabel = (string)($oStmt->fetchColumn() ?? '');
+                } catch (Exception $e) {}
                 $devLabel = '';
                 if ($deviceId) {
                     $dRow = $db->prepare("SELECT d.serial_number, m.name as model_name, mf.name as manufacturer FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.id=?");
@@ -204,6 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($tInfo) $techName = $tInfo['name'];
                 }
                 $body = getEmailTemplate('service_created', [
+                    'ORDER_NUMBER' => $orderLabel ?: '—',
                     'SERVICE_TYPE' => $svcTypeLabels[$type] ?? $type,
                     'DEVICE'       => $devLabel ?: '—',
                     'DATE'         => $plannedDate ? date('d.m.Y', strtotime($plannedDate)) : '—',
@@ -212,7 +235,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'DESCRIPTION'  => $description ?: '—',
                     'SENDER_NAME'  => $currentUser['name'],
                 ]);
-                sendAppEmail($currentUser['email'], $currentUser['name'], 'Nowy serwis — FleetLink System GPS', $body);
+                sendServiceEmailToAllUsers($db, 'Nowy serwis' . ($orderLabel ? ' ' . $orderLabel : '') . ' — FleetLink System GPS', $body);
             } catch (Exception $emailEx) { /* non-fatal */ }
         }
         redirect(getBaseUrl() . 'services.php?action=view&id=' . $newServiceId);
@@ -220,7 +243,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($postAction === 'edit') {
         $editId = (int)($_POST['id'] ?? 0);
         // Fetch old values to compare wymiana state
-        $oldSvcStmt = $db->prepare("SELECT device_id, type, replacement_device_id, status FROM services WHERE id=?");
+        $oldSvcStmt = $db->prepare("SELECT order_number, device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost FROM services WHERE id=?");
         $oldSvcStmt->execute([$editId]);
         $oldSvc = $oldSvcStmt->fetch() ?: [];
         if (($oldSvc['status'] ?? '') === 'archiwum') {
@@ -246,10 +269,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         // Update device status
         if ($status === 'w_trakcie') {
-            $db->prepare("UPDATE devices SET status='w_serwisie' WHERE id=?")->execute([$deviceId]);
+            updateDeviceFieldsWithHistory($db, (int)$deviceId, ['status' => 'w_serwisie'], (int)$currentUser['id'], 'service_edit', $editId);
         } elseif ($status === 'zakończony') {
-            $db->prepare("UPDATE devices SET status='sprawny' WHERE id=? AND status='w_serwisie'")->execute([$deviceId]);
+            updateDeviceFieldsWithHistory($db, (int)$deviceId, ['status' => 'sprawny'], (int)$currentUser['id'], 'service_edit', $editId);
         }
+        // Mail notification: edited service with changed fields
+        try {
+            $svcTypeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+            $svcStatusLabels = ['zaplanowany'=>'Zaplanowany','w_trakcie'=>'W trakcie','zakończony'=>'Zakończony','anulowany'=>'Anulowany','archiwum'=>'Archiwum'];
+            $changeMap = [
+                'device_id' => 'Urządzenie',
+                'installation_id' => 'Montaż',
+                'technician_id' => 'Technik',
+                'type' => 'Typ',
+                'replacement_device_id' => 'Urządzenie zastępcze',
+                'planned_date' => 'Data planowana',
+                'completed_date' => 'Data realizacji',
+                'status' => 'Status',
+                'description' => 'Opis',
+                'resolution' => 'Rozwiązanie',
+                'cost' => 'Koszt',
+            ];
+            $newValues = [
+                'device_id' => $deviceId,
+                'installation_id' => $installationId,
+                'technician_id' => $technicianId,
+                'type' => $type,
+                'replacement_device_id' => $replacementDeviceId,
+                'planned_date' => $plannedDate,
+                'completed_date' => $completedDate,
+                'status' => $status,
+                'description' => $description,
+                'resolution' => $resolution,
+                'cost' => $cost,
+            ];
+            $changes = [];
+            foreach ($changeMap as $field => $label) {
+                $oldVal = (string)($oldSvc[$field] ?? '');
+                $newVal = (string)($newValues[$field] ?? '');
+                if ($field === 'type') {
+                    $oldVal = $svcTypeLabels[$oldVal] ?? $oldVal;
+                    $newVal = $svcTypeLabels[$newVal] ?? $newVal;
+                } elseif ($field === 'status') {
+                    $oldVal = $svcStatusLabels[$oldVal] ?? $oldVal;
+                    $newVal = $svcStatusLabels[$newVal] ?? $newVal;
+                } elseif (in_array($field, ['planned_date', 'completed_date'], true)) {
+                    $oldVal = $oldVal ? date('d.m.Y', strtotime($oldVal)) : '—';
+                    $newVal = $newVal ? date('d.m.Y', strtotime($newVal)) : '—';
+                } elseif ($field === 'cost') {
+                    $oldVal = $oldVal !== '' ? formatMoney((float)$oldVal) : '0,00 zł';
+                    $newVal = $newVal !== '' ? formatMoney((float)$newVal) : '0,00 zł';
+                }
+                if ($oldVal !== $newVal) {
+                    $changes[] = $label . ': ' . $oldVal . ' → ' . $newVal;
+                }
+            }
+            if (!empty($changes)) {
+                $devLabel = '';
+                $dRow = $db->prepare("SELECT d.serial_number, m.name as model_name, mf.name as manufacturer FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.id=?");
+                $dRow->execute([$deviceId]);
+                $dInfo = $dRow->fetch();
+                if ($dInfo) $devLabel = $dInfo['manufacturer'] . ' ' . $dInfo['model_name'] . ' — ' . $dInfo['serial_number'];
+                $techName = $currentUser['name'];
+                if ($technicianId) {
+                    $tRow = $db->prepare("SELECT name FROM users WHERE id=?");
+                    $tRow->execute([$technicianId]);
+                    $tInfo = $tRow->fetch();
+                    if ($tInfo) $techName = $tInfo['name'];
+                }
+                $body = getEmailTemplate('service_updated', [
+                    'ORDER_NUMBER' => $oldSvc['order_number'] ?? '—',
+                    'DEVICE'       => $devLabel ?: '—',
+                    'TECHNICIAN'   => $techName,
+                    'CHANGES'      => implode(' • ', $changes),
+                    'SENDER_NAME'  => $currentUser['name'],
+                ]);
+                sendServiceEmailToAllUsers($db, 'Zmienione zlecenie serwisowe ' . ($oldSvc['order_number'] ?? '') . ' — FleetLink System GPS', $body);
+            }
+        } catch (Exception $emailEx) { /* non-fatal */ }
         flashSuccess('Serwis zaktualizowany.');
         redirect(getBaseUrl() . 'services.php?action=view&id=' . $editId);
 
@@ -274,7 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Nieprawidłowe dane zmiany statusu serwisu.');
             redirect(getBaseUrl() . 'services.php');
         }
-        $rowStmt = $db->prepare("SELECT id, device_id, status, completed_date FROM services WHERE id=?");
+        $rowStmt = $db->prepare("SELECT id, order_number, device_id, status, completed_date FROM services WHERE id=?");
         $rowStmt->execute([$svcId]);
         $svcRow = $rowStmt->fetch();
         if (!$svcRow) {
@@ -289,10 +386,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare("UPDATE services SET status=?, completed_date=? WHERE id=?")->execute([$newStatus, $completedDate, $svcId]);
 
         if ($newStatus === 'w_trakcie') {
-            $db->prepare("UPDATE devices SET status='w_serwisie' WHERE id=?")->execute([(int)$svcRow['device_id']]);
+            updateDeviceFieldsWithHistory($db, (int)$svcRow['device_id'], ['status' => 'w_serwisie'], (int)$currentUser['id'], 'service_status_change', $svcId);
         } elseif (in_array($newStatus, ['zakończony','anulowany','archiwum'], true)) {
-            $db->prepare("UPDATE devices SET status='sprawny' WHERE id=? AND status='w_serwisie'")->execute([(int)$svcRow['device_id']]);
+            updateDeviceFieldsWithHistory($db, (int)$svcRow['device_id'], ['status' => 'sprawny'], (int)$currentUser['id'], 'service_status_change', $svcId);
         }
+
+        try {
+            if (($svcRow['status'] ?? '') !== $newStatus) {
+                $svcStatusLabels = ['zaplanowany'=>'Zaplanowany','w_trakcie'=>'W trakcie','zakończony'=>'Zakończony','anulowany'=>'Anulowany','archiwum'=>'Archiwum'];
+                $body = getEmailTemplate('service_updated', [
+                    'ORDER_NUMBER' => $svcRow['order_number'] ?? '—',
+                    'DEVICE'       => '—',
+                    'TECHNICIAN'   => $currentUser['name'],
+                    'CHANGES'      => 'Status: ' . ($svcStatusLabels[$svcRow['status']] ?? $svcRow['status']) . ' → ' . ($svcStatusLabels[$newStatus] ?? $newStatus),
+                    'SENDER_NAME'  => $currentUser['name'],
+                ]);
+                sendServiceEmailToAllUsers($db, 'Zmienione zlecenie serwisowe ' . ($svcRow['order_number'] ?? '') . ' — FleetLink System GPS', $body);
+            }
+        } catch (Exception $emailEx) { /* non-fatal */ }
 
         $redirectTo = $newStatus === 'archiwum' ? 'archive' : 'list';
         flashSuccess('Status serwisu został zaktualizowany.');
@@ -604,8 +715,33 @@ include __DIR__ . '/includes/header.php';
                 <tr><th>Nr zlecenia</th><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
             </thead>
             <tbody>
-                <?php foreach ($services as $svc): ?>
-                <tr class="<?= $svc['status'] === 'zaplanowany' && $svc['planned_date'] < date('Y-m-d') ? 'table-warning' : '' ?>">
+                <?php
+                $minItemsForDayGrouping = 2;
+                $servicesByDay = [];
+                foreach ($services as $svc) {
+                    $dayKey = $svc['planned_date'] ?: 'brak_daty';
+                    $servicesByDay[$dayKey][] = $svc;
+                }
+                foreach ($servicesByDay as $dayKey => $dayServices):
+                    $isGroupedByDay = count($dayServices) >= $minItemsForDayGrouping;
+                    if ($isGroupedByDay):
+                ?>
+                <tr class="table-light">
+                    <td colspan="10" class="fw-semibold small">
+                        <i class="fas fa-calendar-day me-1 text-warning"></i>
+                        <?= $dayKey === 'brak_daty' ? 'Brak daty' : formatDate($dayKey) ?>
+                        <span class="badge bg-secondary ms-2"><?= count($dayServices) ?> zleceń</span>
+                    </td>
+                </tr>
+                <?php endif; ?>
+                <?php foreach ($dayServices as $svc):
+                    $today = date('Y-m-d');
+                    $tomorrow = date('Y-m-d', strtotime('+1 day'));
+                    $isDelayed = !empty($svc['planned_date']) && $svc['planned_date'] < $today && $svc['status'] !== 'w_trakcie';
+                    $isNear = !empty($svc['planned_date']) && in_array($svc['planned_date'], [$today, $tomorrow], true);
+                    $rowClass = $isDelayed ? 'table-danger' : ($isNear ? 'table-warning' : '');
+                ?>
+                <tr class="<?= $rowClass ?>">
                     <td class="fw-semibold">
                         <button type="button"
                                 class="btn btn-link p-0 align-baseline"
@@ -664,7 +800,7 @@ include __DIR__ . '/includes/header.php';
                         </form>
                     </td>
                 </tr>
-                <?php endforeach; ?>
+                <?php endforeach; endforeach; ?>
                 <?php if (empty($services)): ?><tr><td colspan="10" class="text-center text-muted p-3">Brak serwisów.</td></tr><?php endif; ?>
             </tbody>
         </table>
