@@ -143,8 +143,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $newOrderId = 0;
         $insertStmt = $db->prepare("INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, created_by) VALUES (?,?,?,?,?,?,?,?)");
         try {
+            $maxInsertAttempts = 5;
             $inserted = false;
-            for ($attempt = 0; $attempt < 5 && !$inserted; $attempt++) {
+            for ($attempt = 0; $attempt < $maxInsertAttempts && !$inserted; $attempt++) {
                 $orderNumber = generateOrderNumber($orderDate ?: null);
                 try {
                     $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $currentUser['id']]);
@@ -153,8 +154,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (PDOException $e) {
                     $sqlState = $e->getCode();
                     $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
+                    // 1062 = MySQL duplicate key, 1555/2067 = SQLite duplicate/unique constraint variants.
                     $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
-                    if (!$isDuplicate || $attempt === 4) {
+                    if (!$isDuplicate || $attempt === ($maxInsertAttempts - 1)) {
                         throw $e;
                     }
                 }
