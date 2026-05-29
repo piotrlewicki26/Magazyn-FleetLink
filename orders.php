@@ -139,19 +139,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'orders.php?action=add');
         }
 
-        $orderNumber = generateOrderNumber();
-
-        $db->prepare("INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, created_by) VALUES (?,?,?,?,?,?,?,?)")
-           ->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $currentUser['id']]);
-        $newOrderId = (int)$db->lastInsertId();
+        $orderNumber = '';
+        $newOrderId = 0;
+        $insertStmt = $db->prepare("INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, created_by) VALUES (?,?,?,?,?,?,?,?)");
+        try {
+            $inserted = false;
+            for ($attempt = 0; $attempt < 5 && !$inserted; $attempt++) {
+                $orderNumber = generateOrderNumber($orderDate ?: null);
+                try {
+                    $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $currentUser['id']]);
+                    $inserted = true;
+                    $newOrderId = (int)$db->lastInsertId();
+                } catch (PDOException $e) {
+                    $sqlState = $e->getCode();
+                    $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
+                    $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
+                    if (!$isDuplicate || $attempt === 4) {
+                        throw $e;
+                    }
+                }
+            }
+        } catch (Exception $createEx) {
+            if ($isAjax) {
+                header('Content-Type: application/json');
+                echo json_encode(['error' => 'Nie udało się utworzyć zlecenia. Spróbuj ponownie.']);
+                exit;
+            }
+            flashError('Nie udało się utworzyć zlecenia. Spróbuj ponownie.');
+            redirect(getBaseUrl() . 'orders.php?action=add');
+        }
 
         // Send email notification to all users
+        $techData = [];
+        $clientLabel = '—';
         try {
             $techStmt = $db->prepare("SELECT name, email FROM users WHERE id=? LIMIT 1");
             $techStmt->execute([$techId]);
             $techData = $techStmt->fetch();
-
-            $clientLabel = '—';
             if ($clientId) {
                 $clientStmt = $db->prepare("SELECT contact_name, company_name FROM clients WHERE id=? LIMIT 1");
                 $clientStmt->execute([$clientId]);

@@ -276,14 +276,16 @@ function generateOfferNumber() {
     return sprintf('OF/%s/%s/%04d', $year, $month, $count);
 }
 
-function generateOrderNumber() {
+function generateOrderNumber($referenceDate = null) {
     $db = getDb();
-    $year  = date('Y');
-    $month = date('m');
-    $stmt  = $db->prepare("SELECT COUNT(*) FROM work_orders WHERE YEAR(created_at) = ? AND MONTH(created_at) = ?");
-    $stmt->execute([$year, $month]);
-    $count = (int)$stmt->fetchColumn() + 1;
-    return sprintf('ZL/%s/%s/%04d', $year, $month, $count);
+    $timestamp = ($referenceDate ? strtotime((string)$referenceDate) : false) ?: time();
+    $year  = date('Y', $timestamp);
+    $month = date('m', $timestamp);
+    $prefix = sprintf('ZL/%s/%s/', $year, $month);
+    $stmt  = $db->prepare("SELECT COALESCE(MAX(CAST(RIGHT(order_number, 4) AS UNSIGNED)), 0) FROM work_orders WHERE order_number LIKE ?");
+    $stmt->execute([$prefix . '%']);
+    $nextNumber = (int)$stmt->fetchColumn() + 1;
+    return sprintf('%s%04d', $prefix, $nextNumber);
 }
 
 if (!defined('SERVICE_ORDER_PREFIX')) {
