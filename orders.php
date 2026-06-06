@@ -10,10 +10,6 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/functions.php';
 
-if (!defined('MOUNTED_DEVICES_DISPLAY_LIMIT')) {
-    define('MOUNTED_DEVICES_DISPLAY_LIMIT', 500);
-}
-
 date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
 
@@ -667,6 +663,7 @@ $archiveOrders = [];
 $archiveTotalOrders = 0;
 $mountedDevices = [];
 $mountedDevicesTotal = 0;
+$mountedDevicesDisplayLimit = 500;
 
 if ($action === 'list') {
     $filterStatus = sanitize($_GET['status'] ?? '');
@@ -729,7 +726,7 @@ if ($action === 'list') {
         ORDER BY i.installation_date DESC, i.id DESC
         LIMIT ?
     ");
-    $mountedStmt->execute([MOUNTED_DEVICES_DISPLAY_LIMIT]);
+    $mountedStmt->execute([$mountedDevicesDisplayLimit]);
     $mountedDevices = $mountedStmt->fetchAll();
 
 } elseif ($action === 'my') {
@@ -1427,7 +1424,7 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
 
 <div class="card mt-3">
     <div class="card-header">
-        <span><i class="fas fa-microchip me-2"></i>Lista zamontowanych urządzeń (wyświetlone: <?= count($mountedDevices) ?>, łącznie: <?= $mountedDevicesTotal ?>, limit: <?= MOUNTED_DEVICES_DISPLAY_LIMIT ?>)</span>
+        <span><i class="fas fa-microchip me-2"></i>Lista zamontowanych urządzeń (<?= $mountedDevicesTotal ?>)</span>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -1466,6 +1463,11 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
             </tbody>
         </table>
     </div>
+    <?php if ($mountedDevicesTotal > count($mountedDevices)): ?>
+    <div class="card-footer py-2 text-muted small">
+        Wyświetlono pierwsze <?= count($mountedDevices) ?> rekordów.
+    </div>
+    <?php endif; ?>
 </div>
 
 <?php elseif ($action === 'my'): ?>
