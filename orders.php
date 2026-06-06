@@ -41,7 +41,7 @@ try {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
         try {
-            $db->exec("ALTER TABLE `installations` ADD COLUMN IF NOT EXISTS `work_order_id` INT UNSIGNED DEFAULT NULL AFTER `batch_id`");
+            $db->exec("ALTER TABLE `installations` ADD COLUMN IF NOT EXISTS `work_order_id` INT UNSIGNED DEFAULT NULL");
         } catch (PDOException $ex2) { /* column may already exist */ }
     } catch (PDOException $migEx) { /* ignore */ }
 }
@@ -56,7 +56,7 @@ try {
     $db->query("SELECT work_order_id FROM installations LIMIT 1");
 } catch (PDOException $e) {
     try {
-        $db->exec("ALTER TABLE `installations` ADD COLUMN `work_order_id` INT UNSIGNED DEFAULT NULL AFTER `batch_id`");
+        $db->exec("ALTER TABLE `installations` ADD COLUMN `work_order_id` INT UNSIGNED DEFAULT NULL");
     } catch (PDOException $ex) { /* ignore */ }
 }
 

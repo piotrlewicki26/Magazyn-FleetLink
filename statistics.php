@@ -50,7 +50,7 @@ try {
     $db->query("SELECT work_order_id FROM installations LIMIT 1");
 } catch (PDOException $e) {
     try {
-        $db->exec("ALTER TABLE `installations` ADD COLUMN `work_order_id` INT UNSIGNED DEFAULT NULL AFTER `batch_id`");
+        $db->exec("ALTER TABLE `installations` ADD COLUMN `work_order_id` INT UNSIGNED DEFAULT NULL");
     } catch (PDOException $ex) { /* ignore */ }
 }
 

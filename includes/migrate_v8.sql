@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS `work_orders` (
 
 -- Add work_order_id column to installations
 ALTER TABLE `installations`
-  ADD COLUMN IF NOT EXISTS `work_order_id` INT UNSIGNED DEFAULT NULL AFTER `batch_id`;
+  ADD COLUMN IF NOT EXISTS `work_order_id` INT UNSIGNED DEFAULT NULL;
 
 -- Add FK for work_order_id (ignore error if already exists)
 -- Use a stored procedure to add it safely
