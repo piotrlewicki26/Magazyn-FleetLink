@@ -31,6 +31,13 @@ function initDarkMode() {
 document.addEventListener('DOMContentLoaded', function () {
     initDarkMode();
 
+    // Ensure navbar dropdown toggles are initialized on every page
+    if (typeof bootstrap !== 'undefined' && bootstrap.Dropdown) {
+        document.querySelectorAll('.navbar [data-bs-toggle="dropdown"]').forEach(function (el) {
+            bootstrap.Dropdown.getOrCreateInstance(el);
+        });
+    }
+
     // Auto-dismiss flash messages after 5 seconds
     setTimeout(function () {
         document.querySelectorAll('.alert.alert-success, .alert.alert-info').forEach(function (el) {
