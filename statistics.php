@@ -110,6 +110,15 @@ function statsResolveReportNotes(array $row): string
 }
 
 /**
+ * Return device label used in report views and exports.
+ */
+function statsResolveDeviceLabel(array $row): string
+{
+    $deviceLabel = trim((string)($row['manufacturer_name'] ?? '') . ' ' . (string)($row['model_name'] ?? ''));
+    return $deviceLabel !== '' ? $deviceLabel : '—';
+}
+
+/**
  * Prepare export payload from monthly report rows.
  */
 function statsBuildExportRows(array $rows): array
@@ -335,8 +344,9 @@ function statsGetMonthlyReportClients(PDO $db, string $startDate, string $endDat
                 ci.id AS client_id,
                 COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) AS client_name
             FROM installations i
-            JOIN clients ci ON ci.id = i.client_id
+            LEFT JOIN clients ci ON ci.id = i.client_id
             WHERE i.installation_date >= ? AND i.installation_date < ?
+              AND ci.id IS NOT NULL
             GROUP BY ci.id, COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
             ORDER BY client_name
         ";
@@ -560,7 +570,7 @@ include __DIR__ . '/includes/header.php';
 <div class="page-header">
     <div>
         <h1><i class="fas fa-chart-bar me-2 text-primary"></i>Statystyki</h1>
-        <p class="text-muted mb-0">Przebudowany widok statystyk z raportem montaży miesięcznych i eksportem do pliku.</p>
+        <p class="text-muted mb-0">Zestawienie montaży, serwisów, ofert i statusów urządzeń.</p>
     </div>
     <form method="GET" class="d-flex gap-2 align-items-center flex-wrap">
         <input type="hidden" name="report_month" value="<?= h($reportMonth) ?>">
@@ -719,7 +729,7 @@ include __DIR__ . '/includes/header.php';
                         <td><?= $row['installation_date'] ? formatDate($row['installation_date']) : '—' ?></td>
                         <td><?= h(statsResolveClientName($row)) ?></td>
                         <td><?= h($row['vehicle_registration'] ?: '—') ?></td>
-                        <td><?= h(trim(($row['manufacturer_name'] ?? '') . ' ' . ($row['model_name'] ?? ''))) ?: '—' ?></td>
+                        <td><?= h(statsResolveDeviceLabel($row)) ?></td>
                         <td class="fw-semibold"><?= h($row['serial_number'] ?: '—') ?></td>
                         <td><?= h($row['technician_name'] ?: '—') ?></td>
                         <td><?= h($row['order_number'] ?: '—') ?></td>
