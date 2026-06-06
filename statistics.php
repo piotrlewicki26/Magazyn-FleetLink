@@ -80,11 +80,35 @@ function getMonthlyInstallReportRows(PDO $db, string $startDate, string $endDate
 }
 
 /**
+ * Convert 1-based column index to XLSX column letter.
+ */
+function columnIndexToLetter(int $index): string
+{
+    $colLetter = '';
+    while ($index > 0) {
+        $rem = ($index - 1) % 26;
+        $colLetter = chr(65 + $rem) . $colLetter;
+        $index = (int)(($index - 1) / 26);
+    }
+    return $colLetter;
+}
+
+/**
+ * Sanitize month token used in exported file names.
+ */
+function normalizeReportMonthToken(string $monthValue): string
+{
+    return preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $monthValue)
+        ? str_replace('-', '_', $monthValue)
+        : date('Y_m');
+}
+
+/**
  * Export report data to CSV.
  */
 function exportMonthlyReportCsv(array $rows, string $monthValue): void
 {
-    $filename = 'raport_montaze_' . str_replace('-', '_', $monthValue) . '_' . date('Y-m-d_His') . '.csv';
+    $filename = 'raport_montaze_' . normalizeReportMonthToken($monthValue) . '_' . date('Y-m-d_His') . '.csv';
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     echo "\xEF\xBB\xBF";
@@ -110,7 +134,7 @@ function exportMonthlyReportCsv(array $rows, string $monthValue): void
  */
 function exportMonthlyReportXlsx(array $rows, string $monthValue): void
 {
-    $filename = 'raport_montaze_' . str_replace('-', '_', $monthValue) . '_' . date('Y-m-d_His') . '.xlsx';
+    $filename = 'raport_montaze_' . normalizeReportMonthToken($monthValue) . '_' . date('Y-m-d_His') . '.xlsx';
     $xmlEsc = static fn($v) => htmlspecialchars((string)$v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
 
     $allRows = [[
@@ -148,13 +172,7 @@ function exportMonthlyReportXlsx(array $rows, string $monthValue): void
     foreach ($allRows as $ri => $row) {
         $wsRows .= '<row r="' . ($ri + 1) . '">';
         foreach ($row as $ci => $cellVal) {
-            $colLetter = '';
-            $n = $ci + 1;
-            while ($n > 0) {
-                $rem = ($n - 1) % 26;
-                $colLetter = chr(65 + $rem) . $colLetter;
-                $n = (int)(($n - 1) / 26);
-            }
+            $colLetter = columnIndexToLetter($ci + 1);
             $idx = $getSSIdx((string)$cellVal);
             $wsRows .= '<c r="' . $colLetter . ($ri + 1) . '" t="s"><v>' . $idx . '</v></c>';
         }
@@ -203,25 +221,30 @@ function exportMonthlyReportXlsx(array $rows, string $monthValue): void
         . '</Relationships>';
 
     $tmpFile = tempnam(sys_get_temp_dir(), 'fleetlink_monthly_report_');
-    $zip = new ZipArchive();
-    if ($zip->open($tmpFile, ZipArchive::OVERWRITE) !== true) {
-        header('HTTP/1.1 500 Internal Server Error');
-        exit('Nie można wygenerować pliku XLSX.');
+    try {
+        $zip = new ZipArchive();
+        if ($zip->open($tmpFile, ZipArchive::OVERWRITE) !== true) {
+            header('HTTP/1.1 500 Internal Server Error');
+            exit('Nie można wygenerować pliku XLSX.');
+        }
+
+        $zip->addFromString('[Content_Types].xml', $contentTypes);
+        $zip->addFromString('_rels/.rels', $relsRoot);
+        $zip->addFromString('xl/workbook.xml', $workbookXml);
+        $zip->addFromString('xl/_rels/workbook.xml.rels', $workbookRels);
+        $zip->addFromString('xl/worksheets/sheet1.xml', $worksheetXml);
+        $zip->addFromString('xl/sharedStrings.xml', $sharedStringsXml);
+        $zip->close();
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . filesize($tmpFile));
+        readfile($tmpFile);
+    } finally {
+        if (is_file($tmpFile)) {
+            unlink($tmpFile);
+        }
     }
-
-    $zip->addFromString('[Content_Types].xml', $contentTypes);
-    $zip->addFromString('_rels/.rels', $relsRoot);
-    $zip->addFromString('xl/workbook.xml', $workbookXml);
-    $zip->addFromString('xl/_rels/workbook.xml.rels', $workbookRels);
-    $zip->addFromString('xl/worksheets/sheet1.xml', $worksheetXml);
-    $zip->addFromString('xl/sharedStrings.xml', $sharedStringsXml);
-    $zip->close();
-
-    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Content-Length: ' . filesize($tmpFile));
-    readfile($tmpFile);
-    unlink($tmpFile);
 }
 
 $year = (int)($_GET['year'] ?? date('Y'));
@@ -264,7 +287,7 @@ try {
 
     $monthlyReportRows = getMonthlyInstallReportRows($db, $reportMonthStart, $reportMonthEnd, $reportClientId);
 } catch (Exception $e) {
-    $monthlyReportError = 'Nie udało się przygotować raportu miesięcznego.';
+    $monthlyReportError = 'Nie udało się przygotować raportu miesięcznego. Sprawdź konfigurację danych lub skontaktuj się z administratorem.';
     error_log('statistics monthlyReport failed: ' . $e->getMessage());
 }
 
@@ -305,7 +328,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
         }
         exit;
     } catch (Exception $e) {
-        flashError('Nie udało się wygenerować eksportu raportu.');
+        flashError('Nie udało się wygenerować eksportu raportu. Spróbuj ponownie lub skontaktuj się z administratorem.');
         error_log('statistics monthlyReport export failed: ' . $e->getMessage());
         redirect(getBaseUrl() . 'statistics.php?year=' . urlencode((string)$year) . '&report_month=' . urlencode($reportMonth) . '&report_client_id=' . urlencode((string)($reportClientId ?? 0)));
     }
