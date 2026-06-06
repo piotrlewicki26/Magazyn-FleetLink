@@ -70,9 +70,9 @@ try {
                     </a>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['manufacturers','models','devices','sim_cards']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['manufacturers','models','devices','sim_cards']) ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-microchip me-1"></i>Urządzenia
-                    </a>
+                    </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php"><i class="fas fa-list me-2"></i>Lista urządzeń</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>devices.php?action=configs"><i class="fas fa-file-code me-2"></i>Konfiguracje</a></li>
@@ -89,9 +89,9 @@ try {
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'inventory' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'inventory' ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-warehouse me-1"></i>Magazyn
-                    </a>
+                    </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php"><i class="fas fa-microchip me-2"></i>Urządzenia</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>inventory.php?action=accessories"><i class="fas fa-toolbox me-2"></i>Akcesoria</a></li>
@@ -99,18 +99,18 @@ try {
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'clients' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'clients' ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-users me-1"></i>Klienci
-                    </a>
+                    </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>clients.php"><i class="fas fa-list me-2"></i>Lista klientów</a></li>
                         <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#navClientAddModal"><i class="fas fa-user-plus me-2"></i>Dodaj klienta</button></li>
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['orders','installations']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['orders','installations']) ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-clipboard-list me-1"></i>Zlecenia
-                    </a>
+                    </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php"><i class="fas fa-list me-2"></i>Lista zleceń</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=add"><i class="fas fa-plus me-2"></i>Nowe zlecenie</a></li>
@@ -121,9 +121,9 @@ try {
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'services' ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'services' ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-wrench me-1"></i>Serwisy
-                    </a>
+                    </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>services.php"><i class="fas fa-list me-2"></i>Lista serwisów</a></li>
                         <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#navSvcAddModal"><i class="fas fa-plus me-2"></i>Nowy serwis</button></li>
@@ -137,9 +137,9 @@ try {
                     </a>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['offers','offer_generator']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['offers','offer_generator']) ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-file-invoice-dollar me-1"></i>Oferty
-                    </a>
+                    </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offers.php"><i class="fas fa-list me-2"></i>Lista ofert</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>offer_generator.php" target="_blank"><i class="fas fa-magic me-2"></i>Generator ofert GPS</a></li>
@@ -192,9 +192,9 @@ try {
                 ];
                 ?>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+                    <button type="button" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
                         <i class="fas fa-sitemap me-1"></i>Schematy
-                    </a>
+                    </button>
                     <ul class="dropdown-menu" style="max-height:80vh;overflow-y:auto">
                         <?php foreach ($navSchemas as $schemaIdx => $schema): $schemaId = 'schemaPass' . $schemaIdx; ?>
                         <li>
@@ -218,9 +218,9 @@ try {
                 </li>
                 <?php if (isAdmin()): ?>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['users','settings','email']) ? 'active' : '' ?>" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['users','settings','email']) ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-cog me-1"></i>Admin
-                    </a>
+                    </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>users.php"><i class="fas fa-users-cog me-2"></i>Użytkownicy</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>email.php"><i class="fas fa-envelope me-2"></i>Wyślij e-mail</a></li>

@@ -486,24 +486,29 @@ try {
     $mountedCountStmt->execute(['aktywna']);
     $mountedDevicesTotal = (int)$mountedCountStmt->fetchColumn();
 
-    $mountedStmt = $db->prepare("
+    $mountedSql = "
         SELECT i.id AS installation_id, i.installation_date,
                d.serial_number,
                m.name AS model_name, mf.name AS manufacturer_name,
-               wo.order_number, wo.notes AS order_notes,
-               COALESCE(c.company_name, oc.company_name) AS client_company_name,
-               COALESCE(c.contact_name, oc.contact_name) AS client_contact_name
+               " . ($includeWorkOrders
+                    ? "wo.order_number, wo.notes AS order_notes,
+                       COALESCE(c.company_name, oc.company_name) AS client_company_name,
+                       COALESCE(c.contact_name, oc.contact_name) AS client_contact_name"
+                    : "NULL AS order_number, NULL AS order_notes,
+                       c.company_name AS client_company_name,
+                       c.contact_name AS client_contact_name") . "
         FROM installations i
         JOIN devices d ON d.id=i.device_id
         JOIN models m ON m.id=d.model_id
         JOIN manufacturers mf ON mf.id=m.manufacturer_id
         LEFT JOIN clients c ON c.id=i.client_id
-        LEFT JOIN work_orders wo ON wo.id=i.work_order_id
-        LEFT JOIN clients oc ON oc.id=wo.client_id
+        " . ($includeWorkOrders ? "LEFT JOIN work_orders wo ON wo.id=i.work_order_id
+        LEFT JOIN clients oc ON oc.id=wo.client_id" : "") . "
         WHERE i.status='aktywna'
         ORDER BY i.installation_date DESC, i.id DESC
         LIMIT ?
-    ");
+    ";
+    $mountedStmt = $db->prepare($mountedSql);
     $mountedStmt->execute([$mountedDevicesDisplayLimit]);
     $mountedDevices = $mountedStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
