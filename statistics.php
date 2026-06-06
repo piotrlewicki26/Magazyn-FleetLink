@@ -372,6 +372,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
 
 $monthlyReportTotal = count($monthlyReportRows);
 $monthlyReportUniqueClients = count(array_unique(array_map(static fn($row) => resolveClientName($row), $monthlyReportRows)));
+$monthlyReportEmptyMessage = $monthlyReportError
+    ? 'Brak danych raportu. Spróbuj ponownie po odświeżeniu strony.'
+    : 'Brak montaży dla wybranych filtrów.';
 
 // ─── Initialise all variables with safe defaults ──────────────────────────
 $installsByMonthData = array_fill(1, 12, 0);
@@ -605,7 +608,7 @@ include __DIR__ . '/includes/header.php';
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($monthlyReportRows)): ?>
-                    <tr><td colspan="6" class="text-center text-muted py-4"><?= $monthlyReportError ? 'Brak danych raportu. Spróbuj ponownie po odświeżeniu strony.' : 'Brak montaży dla wybranych filtrów.' ?></td></tr>
+                    <tr><td colspan="6" class="text-center text-muted py-4"><?= h($monthlyReportEmptyMessage) ?></td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
