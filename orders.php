@@ -1427,7 +1427,7 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
 
 <div class="card mt-3">
     <div class="card-header">
-        <span><i class="fas fa-microchip me-2"></i>Lista zamontowanych urządzeń (<?= count($mountedDevices) ?> z <?= $mountedDevicesTotal ?>, max <?= MOUNTED_DEVICES_DISPLAY_LIMIT ?>)</span>
+        <span><i class="fas fa-microchip me-2"></i>Lista zamontowanych urządzeń (wyświetlone: <?= count($mountedDevices) ?>, łącznie: <?= $mountedDevicesTotal ?>, limit: <?= MOUNTED_DEVICES_DISPLAY_LIMIT ?>)</span>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
