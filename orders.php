@@ -703,6 +703,7 @@ if ($action === 'list') {
     $listStmt->execute(array_merge($params, [$perPage, $offset]));
     $orders = $listStmt->fetchAll();
 
+    $mountedListLimit = 500;
     $mountedStmt = $db->prepare("
         SELECT i.id as installation_id, i.installation_date,
                d.serial_number,
@@ -719,8 +720,9 @@ if ($action === 'list') {
         LEFT JOIN clients oc ON oc.id=wo.client_id
         WHERE i.status='aktywna'
         ORDER BY i.installation_date DESC, i.id DESC
+        LIMIT ?
     ");
-    $mountedStmt->execute();
+    $mountedStmt->execute([$mountedListLimit]);
     $mountedDevices = $mountedStmt->fetchAll();
 
 } elseif ($action === 'my') {
@@ -1434,9 +1436,17 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
             </thead>
             <tbody>
                 <?php foreach ($mountedDevices as $md): ?>
+                <?php
+                    $mountedClientLabel = '—';
+                    if (!empty($md['client_company_name'])) {
+                        $mountedClientLabel = $md['client_company_name'];
+                    } elseif (!empty($md['client_contact_name'])) {
+                        $mountedClientLabel = $md['client_contact_name'];
+                    }
+                ?>
                 <tr>
                     <td><?= formatDate($md['installation_date']) ?></td>
-                    <td><?= h($md['client_company_name'] ?: $md['client_contact_name'] ?? '—') ?></td>
+                    <td><?= h($mountedClientLabel) ?></td>
                     <td><?= h($md['manufacturer_name'] . ' ' . $md['model_name']) ?></td>
                     <td><?= h($md['serial_number']) ?></td>
                     <td><?= h($md['order_number'] ?? '—') ?></td>
