@@ -703,7 +703,7 @@ if ($action === 'list') {
     $listStmt->execute(array_merge($params, [$perPage, $offset]));
     $orders = $listStmt->fetchAll();
 
-    $mountedStmt = $db->query("
+    $mountedStmt = $db->prepare("
         SELECT i.id as installation_id, i.installation_date,
                d.serial_number,
                m.name as model_name, mf.name as manufacturer_name,
@@ -720,6 +720,7 @@ if ($action === 'list') {
         WHERE i.status='aktywna'
         ORDER BY i.installation_date DESC, i.id DESC
     ");
+    $mountedStmt->execute();
     $mountedDevices = $mountedStmt->fetchAll();
 
 } elseif ($action === 'my') {
