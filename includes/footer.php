@@ -28,6 +28,10 @@ if (!defined('IN_APP')) {
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
 <script src="<?= getBaseUrl() ?>assets/js/app.js"></script>
-<?php if (!empty($pageEndScripts)) echo $pageEndScripts; ?>
+<?php
+// $pageEndScripts may be set by individual pages (trusted developer-written HTML/JS only,
+// never user input) to inject page-specific scripts after the shared libraries are loaded.
+if (!empty($pageEndScripts)) echo $pageEndScripts;
+?>
 </body>
 </html>

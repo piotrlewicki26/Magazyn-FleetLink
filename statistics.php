@@ -950,6 +950,8 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <?php
+// Capture chart.js + Chart() init into $pageEndScripts so it loads after Bootstrap and app.js.
+// footer.php outputs this buffer just before </body> via the $pageEndScripts convention.
 ob_start();
 ?>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
