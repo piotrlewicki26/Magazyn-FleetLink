@@ -151,10 +151,10 @@ try {
                         <i class="fas fa-chart-bar me-1"></i>Statystyki
                     </button>
                     <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php"><i class="fas fa-chart-bar me-2"></i>Zestawienie roczne</a></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php#monthly-report"><i class="fas fa-file-alt me-2"></i>Raport miesięczny</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php?tab=yearly"><i class="fas fa-chart-bar me-2"></i>Zestawienie roczne</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php?tab=monthly"><i class="fas fa-file-alt me-2"></i>Raport miesięczny</a></li>
                         <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php#devices-section"><i class="fas fa-microchip me-2"></i>Zamontowane urządzenia</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php?tab=devices"><i class="fas fa-microchip me-2"></i>Zamontowane urządzenia</a></li>
                     </ul>
                 </li>
                 <?php endif; ?>
