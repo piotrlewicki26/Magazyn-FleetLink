@@ -661,9 +661,6 @@ $myOrders = [];
 $myTotalOrders = 0;
 $archiveOrders = [];
 $archiveTotalOrders = 0;
-$mountedDevices = [];
-$mountedDevicesTotal = 0;
-$mountedDevicesDisplayLimit = 500;
 
 if ($action === 'list') {
     $filterStatus = sanitize($_GET['status'] ?? '');
@@ -704,30 +701,6 @@ if ($action === 'list') {
     $listStmt = $db->prepare($listSql);
     $listStmt->execute(array_merge($params, [$perPage, $offset]));
     $orders = $listStmt->fetchAll();
-
-    $mountedCountStmt = $db->prepare("SELECT COUNT(*) FROM installations WHERE status=?");
-    $mountedCountStmt->execute(['aktywna']);
-    $mountedDevicesTotal = (int)$mountedCountStmt->fetchColumn();
-    $mountedStmt = $db->prepare("
-        SELECT i.id as installation_id, i.installation_date,
-               d.serial_number,
-               m.name as model_name, mf.name as manufacturer_name,
-               wo.order_number, wo.notes as order_notes,
-               COALESCE(c.company_name, oc.company_name) as client_company_name,
-               COALESCE(c.contact_name, oc.contact_name) as client_contact_name
-        FROM installations i
-        JOIN devices d ON d.id=i.device_id
-        JOIN models m ON m.id=d.model_id
-        JOIN manufacturers mf ON mf.id=m.manufacturer_id
-        LEFT JOIN clients c ON c.id=i.client_id
-        LEFT JOIN work_orders wo ON wo.id=i.work_order_id
-        LEFT JOIN clients oc ON oc.id=wo.client_id
-        WHERE i.status='aktywna'
-        ORDER BY i.installation_date DESC, i.id DESC
-        LIMIT ?
-    ");
-    $mountedStmt->execute([$mountedDevicesDisplayLimit]);
-    $mountedDevices = $mountedStmt->fetchAll();
 
 } elseif ($action === 'my') {
     $mySearch = sanitize($_GET['search'] ?? '');
@@ -1421,54 +1394,6 @@ include __DIR__ . '/includes/header.php';
 $_listUrl = rtrim('orders.php?' . http_build_query(array_filter(['search' => $_GET['search'] ?? '', 'status' => $_GET['status'] ?? '', 'technician' => $_GET['technician'] ?? '', 'per_page' => $perPage != 10 ? $perPage : ''])), '?');
 echo paginate($totalOrders, $perPage, $page, $_listUrl);
 ?>
-
-<div class="card mt-3">
-    <div class="card-header">
-        <span><i class="fas fa-microchip me-2"></i>Lista zamontowanych urządzeń (<?= $mountedDevicesTotal ?>)</span>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0">
-            <thead>
-                <tr>
-                    <th>Data montażu</th>
-                    <th>Klient</th>
-                    <th>Producent / model</th>
-                    <th>Numer seryjny</th>
-                    <th>Numer zlecenia</th>
-                    <th>Uwagi ze zlecenia</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($mountedDevices as $md): ?>
-                <?php
-                    $mountedClientLabel = '—';
-                    if (!empty($md['client_company_name'])) {
-                        $mountedClientLabel = $md['client_company_name'];
-                    } elseif (!empty($md['client_contact_name'])) {
-                        $mountedClientLabel = $md['client_contact_name'];
-                    }
-                ?>
-                <tr>
-                    <td><?= formatDate($md['installation_date']) ?></td>
-                    <td><?= h($mountedClientLabel) ?></td>
-                    <td><?= h($md['manufacturer_name'] . ' ' . $md['model_name']) ?></td>
-                    <td><?= h($md['serial_number']) ?></td>
-                    <td><?= h($md['order_number'] ?? '—') ?></td>
-                    <td class="text-muted small"><?= h($md['order_notes'] ?? '—') ?></td>
-                </tr>
-                <?php endforeach; ?>
-                <?php if (empty($mountedDevices)): ?>
-                <tr><td colspan="6" class="text-center text-muted py-3">Brak aktywnie zamontowanych urządzeń.</td></tr>
-                <?php endif; ?>
-            </tbody>
-        </table>
-    </div>
-    <?php if ($mountedDevicesTotal > count($mountedDevices)): ?>
-    <div class="card-footer py-2 text-muted small">
-        Wyświetlono pierwsze <?= count($mountedDevices) ?> rekordów.
-    </div>
-    <?php endif; ?>
-</div>
 
 <?php elseif ($action === 'my'): ?>
 <!-- ── MOJE ZLECENIA ──────────────────────────────────────────────── -->

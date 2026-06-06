@@ -425,6 +425,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
 $monthlyReportRows = [];
 $monthlyReportClients = [];
 $monthlyReportError = null;
+$mountedDevices = [];
+$mountedDevicesTotal = 0;
+$mountedDevicesDisplayLimit = 500;
 try {
     $monthlyReportClients = statsGetMonthlyReportClients($db, $reportMonthStartValue, $reportMonthEndValue, $includeWorkOrders);
     $monthlyReportRows = statsGetMonthlyReportRows($db, $reportMonthStartValue, $reportMonthEndValue, $reportClientId, $includeWorkOrders);
@@ -460,6 +463,37 @@ $monthlyReportSummary = [
     'unique_technicians' => count($uniqueMonthlyTechnicians),
 ];
 $monthlyReportEmptyMessage = $monthlyReportError ?: 'Brak montaży dla wybranych filtrów.';
+$statsWarnings = [];
+
+try {
+    $mountedCountStmt = $db->prepare("SELECT COUNT(*) FROM installations WHERE status=?");
+    $mountedCountStmt->execute(['aktywna']);
+    $mountedDevicesTotal = (int)$mountedCountStmt->fetchColumn();
+
+    $mountedStmt = $db->prepare("
+        SELECT i.id AS installation_id, i.installation_date,
+               d.serial_number,
+               m.name AS model_name, mf.name AS manufacturer_name,
+               wo.order_number, wo.notes AS order_notes,
+               COALESCE(c.company_name, oc.company_name) AS client_company_name,
+               COALESCE(c.contact_name, oc.contact_name) AS client_contact_name
+        FROM installations i
+        JOIN devices d ON d.id=i.device_id
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        LEFT JOIN clients c ON c.id=i.client_id
+        LEFT JOIN work_orders wo ON wo.id=i.work_order_id
+        LEFT JOIN clients oc ON oc.id=wo.client_id
+        WHERE i.status='aktywna'
+        ORDER BY i.installation_date DESC, i.id DESC
+        LIMIT ?
+    ");
+    $mountedStmt->execute([$mountedDevicesDisplayLimit]);
+    $mountedDevices = $mountedStmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać listy zamontowanych urządzeń.';
+    error_log('statistics mounted devices failed: ' . $e->getMessage());
+}
 
 $installsByMonthData = array_fill(1, 12, 0);
 $servicesByMonthData = array_fill(1, 12, 0);
@@ -469,7 +503,6 @@ $topTechnicians = [];
 $totalServiceRevenue = 0.0;
 $offerStats = ['total' => 0, 'accepted' => 0, 'total_value' => 0.0, 'accepted_value' => 0.0];
 $deviceStatuses = [];
-$statsWarnings = [];
 
 $monthInstallExpr = $isSqlite ? "CAST(strftime('%m', installation_date) AS INTEGER)" : 'MONTH(installation_date)';
 $monthServiceExpr = $isSqlite ? "CAST(strftime('%m', completed_date) AS INTEGER)" : 'MONTH(completed_date)';
@@ -748,6 +781,54 @@ include __DIR__ . '/includes/header.php';
             </table>
         </div>
     </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold">
+        <i class="fas fa-microchip me-2 text-primary"></i>Lista zamontowanych urządzeń (<?= $mountedDevicesTotal ?>)
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Data montażu</th>
+                    <th>Klient</th>
+                    <th>Producent / model</th>
+                    <th>Numer seryjny</th>
+                    <th>Numer zlecenia</th>
+                    <th>Uwagi ze zlecenia</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($mountedDevices as $md): ?>
+                <?php
+                    $mountedClientLabel = '—';
+                    if (!empty($md['client_company_name'])) {
+                        $mountedClientLabel = $md['client_company_name'];
+                    } elseif (!empty($md['client_contact_name'])) {
+                        $mountedClientLabel = $md['client_contact_name'];
+                    }
+                ?>
+                <tr>
+                    <td><?= formatDate($md['installation_date']) ?></td>
+                    <td><?= h($mountedClientLabel) ?></td>
+                    <td><?= h($md['manufacturer_name'] . ' ' . $md['model_name']) ?></td>
+                    <td class="fw-semibold"><?= h($md['serial_number']) ?></td>
+                    <td><?= h($md['order_number'] ?? '—') ?></td>
+                    <td class="small text-muted" style="min-width: 240px;"><?= h($md['order_notes'] ?? '—') ?></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (!$mountedDevices): ?>
+                <tr><td colspan="6" class="text-center text-muted py-4">Brak aktywnie zamontowanych urządzeń.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php if ($mountedDevicesTotal > count($mountedDevices)): ?>
+    <div class="card-footer py-2 text-muted small">
+        Wyświetlono pierwsze <?= count($mountedDevices) ?> rekordów.
+    </div>
+    <?php endif; ?>
 </div>
 
 <div class="row g-3 mb-4">
