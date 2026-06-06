@@ -10,6 +10,10 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/functions.php';
 
+if (!defined('MOUNTED_DEVICES_DISPLAY_LIMIT')) {
+    define('MOUNTED_DEVICES_DISPLAY_LIMIT', 500);
+}
+
 date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
 
@@ -703,7 +707,6 @@ if ($action === 'list') {
     $listStmt->execute(array_merge($params, [$perPage, $offset]));
     $orders = $listStmt->fetchAll();
 
-    $mountedListLimit = 500;
     $mountedStmt = $db->prepare("
         SELECT i.id as installation_id, i.installation_date,
                d.serial_number,
@@ -722,7 +725,7 @@ if ($action === 'list') {
         ORDER BY i.installation_date DESC, i.id DESC
         LIMIT ?
     ");
-    $mountedStmt->execute([$mountedListLimit]);
+    $mountedStmt->execute([MOUNTED_DEVICES_DISPLAY_LIMIT]);
     $mountedDevices = $mountedStmt->fetchAll();
 
 } elseif ($action === 'my') {
