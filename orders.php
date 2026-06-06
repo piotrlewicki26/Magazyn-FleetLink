@@ -666,6 +666,7 @@ $myTotalOrders = 0;
 $archiveOrders = [];
 $archiveTotalOrders = 0;
 $mountedDevices = [];
+$mountedDevicesTotal = 0;
 
 if ($action === 'list') {
     $filterStatus = sanitize($_GET['status'] ?? '');
@@ -707,6 +708,7 @@ if ($action === 'list') {
     $listStmt->execute(array_merge($params, [$perPage, $offset]));
     $orders = $listStmt->fetchAll();
 
+    $mountedDevicesTotal = (int)$db->query("SELECT COUNT(*) FROM installations WHERE status='aktywna'")->fetchColumn();
     $mountedStmt = $db->prepare("
         SELECT i.id as installation_id, i.installation_date,
                d.serial_number,
@@ -1423,7 +1425,7 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
 
 <div class="card mt-3">
     <div class="card-header">
-        <span><i class="fas fa-microchip me-2"></i>Lista zamontowanych urządzeń (<?= count($mountedDevices) ?>)</span>
+        <span><i class="fas fa-microchip me-2"></i>Lista zamontowanych urządzeń (<?= count($mountedDevices) ?> z <?= (int)$mountedDevicesTotal ?>)</span>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
