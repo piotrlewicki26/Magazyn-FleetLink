@@ -18,6 +18,42 @@ if (!isAdmin()) {
 
 $db = getDb();
 
+// Auto-migration: ensure work_orders table and work_order_id column exist.
+// This mirrors the migration in orders.php so statistics.php works even if
+// the user has never visited the orders page.
+try {
+    $db->query("SELECT 1 FROM work_orders LIMIT 1");
+} catch (PDOException $e) {
+    try {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS `work_orders` (
+              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              `order_number` VARCHAR(30) NOT NULL UNIQUE,
+              `date` DATE NOT NULL,
+              `client_id` INT UNSIGNED DEFAULT NULL,
+              `installation_address` VARCHAR(255) DEFAULT NULL,
+              `technician_id` INT UNSIGNED DEFAULT NULL,
+              `status` ENUM('nowe','w_trakcie','zakonczone','anulowane','archiwum') NOT NULL DEFAULT 'nowe',
+              `notes` TEXT DEFAULT NULL,
+              `created_by` INT UNSIGNED DEFAULT NULL,
+              `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              FOREIGN KEY (`client_id`) REFERENCES `clients`(`id`) ON DELETE SET NULL,
+              FOREIGN KEY (`technician_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+              FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    } catch (PDOException $migEx) { /* ignore */ }
+}
+try {
+    $db->query("SELECT work_order_id FROM installations LIMIT 1");
+} catch (PDOException $e) {
+    try {
+        $db->exec("ALTER TABLE `installations` ADD COLUMN `work_order_id` INT UNSIGNED DEFAULT NULL AFTER `batch_id`");
+    } catch (PDOException $ex) { /* ignore */ }
+}
+
 /**
  * Return user-friendly client display name.
  */
@@ -354,9 +390,9 @@ $criticalFailureThreshold = (int)ceil($totalStatsQueries / 2);
 $dbDriver            = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
 $isSqlite            = $dbDriver === 'sqlite';
 $monthInstallExpr    = $isSqlite ? "strftime('%m', installation_date)" : "DATE_FORMAT(installation_date,'%m')";
-$monthServiceExpr    = $isSqlite ? "strftime('%m', planned_date)" : "DATE_FORMAT(planned_date,'%m')";
+$monthServiceExpr    = $isSqlite ? "strftime('%m', completed_date)" : "DATE_FORMAT(completed_date,'%m')";
 $yearInstallCond     = $isSqlite ? "strftime('%Y', installation_date) = ?" : "YEAR(installation_date) = ?";
-$yearServiceCond     = $isSqlite ? "strftime('%Y', planned_date) = ?" : "YEAR(planned_date) = ?";
+$yearServiceCond     = $isSqlite ? "strftime('%Y', completed_date) = ?" : "YEAR(completed_date) = ?";
 $yearCompletedCond   = $isSqlite ? "strftime('%Y', completed_date) = ?" : "YEAR(completed_date) = ?";
 $yearCreatedCond     = $isSqlite ? "strftime('%Y', created_at) = ?" : "YEAR(created_at) = ?";
 $yearParam           = (string)$year;
