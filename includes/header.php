@@ -146,10 +146,16 @@ try {
                     </ul>
                 </li>
                 <?php if (isAdmin()): ?>
-                <li class="nav-item">
-                    <a class="nav-link <?= ($activePage ?? '') === 'statistics' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>statistics.php">
+                <li class="nav-item dropdown">
+                    <button type="button" class="nav-link dropdown-toggle <?= ($activePage ?? '') === 'statistics' ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-chart-bar me-1"></i>Statystyki
-                    </a>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php"><i class="fas fa-chart-bar me-2"></i>Zestawienie roczne</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php#monthly-report"><i class="fas fa-file-alt me-2"></i>Raport miesięczny</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php#devices-section"><i class="fas fa-microchip me-2"></i>Zamontowane urządzenia</a></li>
+                    </ul>
                 </li>
                 <?php endif; ?>
                 <li class="nav-item">

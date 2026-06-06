@@ -667,7 +667,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="card border-0 shadow-sm mb-4">
+<div id="monthly-report" class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
             <div class="fw-semibold"><i class="fas fa-file-alt me-2 text-primary"></i>Raport montaży za miesiąc</div>
@@ -788,7 +788,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div class="card border-0 shadow-sm mb-4">
+<div id="devices-section" class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white fw-semibold">
         <i class="fas fa-microchip me-2 text-primary"></i>Lista zamontowanych urządzeń (<?= $mountedDevicesTotal ?>)
     </div>
