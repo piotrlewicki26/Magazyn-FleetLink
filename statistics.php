@@ -21,12 +21,25 @@ $dbDriver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
 $isSqlite = $dbDriver === 'sqlite';
 
 /**
+ * Return a whitelisted identifier.
+ */
+function statsAllowedIdentifier(string $value, array $allowedValues): ?string
+{
+    return in_array($value, $allowedValues, true) ? $value : null;
+}
+
+/**
  * Return whether a table is available.
  */
 function statsTableExists(PDO $db, string $table): bool
 {
     try {
-        $db->query("SELECT 1 FROM `{$table}` LIMIT 1");
+        $allowedTable = statsAllowedIdentifier($table, ['work_orders', 'installations']);
+        if ($allowedTable === null) {
+            return false;
+        }
+
+        $db->query("SELECT 1 FROM `{$allowedTable}` LIMIT 1");
         return true;
     } catch (Throwable $e) {
         return false;
@@ -39,7 +52,13 @@ function statsTableExists(PDO $db, string $table): bool
 function statsColumnExists(PDO $db, string $table, string $column): bool
 {
     try {
-        $db->query("SELECT `{$column}` FROM `{$table}` LIMIT 1");
+        $allowedTable = statsAllowedIdentifier($table, ['installations']);
+        $allowedColumn = statsAllowedIdentifier($column, ['work_order_id']);
+        if ($allowedTable === null || $allowedColumn === null) {
+            return false;
+        }
+
+        $db->query("SELECT `{$allowedColumn}` FROM `{$allowedTable}` LIMIT 1");
         return true;
     } catch (Throwable $e) {
         return false;
@@ -401,11 +420,31 @@ try {
     error_log('statistics monthly report failed: ' . $e->getMessage());
 }
 
+$uniqueMonthlyClients = [];
+$uniqueMonthlyDevices = [];
+$uniqueMonthlyTechnicians = [];
+foreach ($monthlyReportRows as $monthlyReportRow) {
+    $clientName = statsResolveClientName($monthlyReportRow);
+    if ($clientName !== '—') {
+        $uniqueMonthlyClients[$clientName] = true;
+    }
+
+    $serialNumber = trim((string)($monthlyReportRow['serial_number'] ?? ''));
+    if ($serialNumber !== '') {
+        $uniqueMonthlyDevices[$serialNumber] = true;
+    }
+
+    $technicianName = trim((string)($monthlyReportRow['technician_name'] ?? ''));
+    if ($technicianName !== '') {
+        $uniqueMonthlyTechnicians[$technicianName] = true;
+    }
+}
+
 $monthlyReportSummary = [
     'total_installations' => count($monthlyReportRows),
-    'unique_clients' => count(array_unique(array_map(static fn(array $row): string => statsResolveClientName($row), $monthlyReportRows))),
-    'unique_devices' => count(array_unique(array_map(static fn(array $row): string => (string)($row['serial_number'] ?? ''), $monthlyReportRows))),
-    'unique_technicians' => count(array_filter(array_unique(array_map(static fn(array $row): string => trim((string)($row['technician_name'] ?? '')), $monthlyReportRows)))),
+    'unique_clients' => count($uniqueMonthlyClients),
+    'unique_devices' => count($uniqueMonthlyDevices),
+    'unique_technicians' => count($uniqueMonthlyTechnicians),
 ];
 $monthlyReportEmptyMessage = $monthlyReportError ?: 'Brak montaży dla wybranych filtrów.';
 
