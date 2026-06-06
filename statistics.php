@@ -17,153 +17,106 @@ if (!isAdmin()) {
 }
 
 $db = getDb();
+$dbDriver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+$isSqlite = $dbDriver === 'sqlite';
 
-// Auto-migration: ensure work_orders table and work_order_id column exist.
-// This mirrors the migration in orders.php so statistics.php works even if
-// the user has never visited the orders page.
-try {
-    $db->query("SELECT 1 FROM work_orders LIMIT 1");
-} catch (PDOException $e) {
+/**
+ * Return whether a table is available.
+ */
+function statsTableExists(PDO $db, string $table): bool
+{
     try {
-        $db->exec("
-            CREATE TABLE IF NOT EXISTS `work_orders` (
-              `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-              `order_number` VARCHAR(30) NOT NULL UNIQUE,
-              `date` DATE NOT NULL,
-              `client_id` INT UNSIGNED DEFAULT NULL,
-              `installation_address` VARCHAR(255) DEFAULT NULL,
-              `technician_id` INT UNSIGNED DEFAULT NULL,
-              `status` ENUM('nowe','w_trakcie','zakonczone','anulowane','archiwum') NOT NULL DEFAULT 'nowe',
-              `notes` TEXT DEFAULT NULL,
-              `created_by` INT UNSIGNED DEFAULT NULL,
-              `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-              PRIMARY KEY (`id`),
-              FOREIGN KEY (`client_id`) REFERENCES `clients`(`id`) ON DELETE SET NULL,
-              FOREIGN KEY (`technician_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
-              FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ");
-    } catch (PDOException $migEx) { /* ignore */ }
-}
-try {
-    $db->query("SELECT work_order_id FROM installations LIMIT 1");
-} catch (PDOException $e) {
-    try {
-        $db->exec("ALTER TABLE `installations` ADD COLUMN `work_order_id` INT UNSIGNED DEFAULT NULL");
-    } catch (PDOException $ex) { /* ignore */ }
+        $db->query("SELECT 1 FROM `{$table}` LIMIT 1");
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
 }
 
 /**
- * Return user-friendly client display name.
+ * Return whether a column is available.
  */
-function resolveClientName(array $row): string
+function statsColumnExists(PDO $db, string $table, string $column): bool
+{
+    try {
+        $db->query("SELECT `{$column}` FROM `{$table}` LIMIT 1");
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * Return a client name from report row.
+ */
+function statsResolveClientName(array $row): string
 {
     $workOrderCompany = trim((string)($row['wo_company_name'] ?? ''));
+    if ($workOrderCompany !== '') {
+        return $workOrderCompany;
+    }
+
     $workOrderContact = trim((string)($row['wo_contact_name'] ?? ''));
-    $workOrderName = $workOrderCompany !== '' ? $workOrderCompany : $workOrderContact;
-    if ($workOrderName !== '') {
-        return $workOrderName;
+    if ($workOrderContact !== '') {
+        return $workOrderContact;
     }
 
     $installationCompany = trim((string)($row['inst_company_name'] ?? ''));
+    if ($installationCompany !== '') {
+        return $installationCompany;
+    }
+
     $installationContact = trim((string)($row['inst_contact_name'] ?? ''));
-    $installationName = $installationCompany !== '' ? $installationCompany : $installationContact;
-    if ($installationName !== '') {
-        return $installationName;
+    if ($installationContact !== '') {
+        return $installationContact;
     }
 
     return '—';
 }
 
 /**
- * Fetch monthly installations report rows with optional client filtering.
+ * Combine notes visible in monthly report.
  */
-function getMonthlyInstallReportRows(PDO $db, string $startDate, string $endDate, ?int $clientId = null, bool $canUseWorkOrders = true): array
+function statsResolveReportNotes(array $row): string
 {
-    if ($canUseWorkOrders) {
-        $sql = "
-            SELECT i.id as installation_id,
-                   i.installation_date,
-                   d.serial_number,
-                   m.name as model_name,
-                   mf.name as manufacturer_name,
-                   wo.order_number,
-                   wo.notes as work_order_notes,
-                   i.notes as installation_notes,
-                   wo.client_id as wo_client_id,
-                   i.client_id as inst_client_id,
-                   cwo.company_name as wo_company_name,
-                   cwo.contact_name as wo_contact_name,
-                   ci.company_name as inst_company_name,
-                   ci.contact_name as inst_contact_name
-            FROM installations i
-            JOIN devices d ON d.id = i.device_id
-            JOIN models m ON m.id = d.model_id
-            JOIN manufacturers mf ON mf.id = m.manufacturer_id
-            LEFT JOIN work_orders wo ON wo.id = i.work_order_id
-            LEFT JOIN clients cwo ON cwo.id = wo.client_id
-            LEFT JOIN clients ci ON ci.id = i.client_id
-            WHERE i.installation_date >= ? AND i.installation_date < ?
-        ";
-    } else {
-        $sql = "
-            SELECT i.id as installation_id,
-                   i.installation_date,
-                   d.serial_number,
-                   m.name as model_name,
-                   mf.name as manufacturer_name,
-                   NULL as order_number,
-                   i.notes as work_order_notes,
-                   i.notes as installation_notes,
-                   NULL as wo_client_id,
-                   i.client_id as inst_client_id,
-                   NULL as wo_company_name,
-                   NULL as wo_contact_name,
-                   ci.company_name as inst_company_name,
-                   ci.contact_name as inst_contact_name
-            FROM installations i
-            JOIN devices d ON d.id = i.device_id
-            JOIN models m ON m.id = d.model_id
-            JOIN manufacturers mf ON mf.id = m.manufacturer_id
-            LEFT JOIN clients ci ON ci.id = i.client_id
-            WHERE i.installation_date >= ? AND i.installation_date < ?
-        ";
-    }
-    $params = [$startDate, $endDate];
-
-    if ($clientId) {
-        $sql .= $canUseWorkOrders
-            ? " AND COALESCE(wo.client_id, i.client_id) = ?"
-            : " AND i.client_id = ?";
-        $params[] = $clientId;
+    $notes = [];
+    foreach (['work_order_notes', 'installation_notes'] as $field) {
+        $value = trim((string)($row[$field] ?? ''));
+        if ($value !== '' && !in_array($value, $notes, true)) {
+            $notes[] = $value;
+        }
     }
 
-    $sql .= " ORDER BY i.installation_date DESC, mf.name, m.name, d.serial_number";
-
-    $stmt = $db->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->fetchAll();
+    return $notes ? implode("\n—\n", $notes) : '—';
 }
 
 /**
- * Return whether work order joins can be used in statistics report queries.
+ * Prepare export payload from monthly report rows.
  */
-function canUseWorkOrdersInStats(PDO $db): bool
+function statsBuildExportRows(array $rows): array
 {
-    try {
-        $db->query("SELECT 1 FROM work_orders LIMIT 1");
-        $db->query("SELECT work_order_id FROM installations LIMIT 1");
-        return true;
-    } catch (PDOException $e) {
-        return false;
+    $exportRows = [];
+    foreach ($rows as $row) {
+        $exportRows[] = [
+            $row['installation_date'] ? formatDate($row['installation_date']) : '',
+            statsResolveClientName($row),
+            trim((string)($row['vehicle_registration'] ?? '')) ?: '—',
+            trim((string)($row['manufacturer_name'] ?? '')),
+            trim((string)($row['model_name'] ?? '')),
+            trim((string)($row['serial_number'] ?? '')),
+            trim((string)($row['technician_name'] ?? '')) ?: '—',
+            trim((string)($row['order_number'] ?? '')) ?: '—',
+            statsResolveReportNotes($row),
+        ];
     }
+
+    return $exportRows;
 }
 
 /**
  * Convert 1-based column index to XLSX column letter.
  */
-function columnIndexToLetter(int $index): string
+function statsColumnIndexToLetter(int $index): string
 {
     $colLetter = '';
     while ($index > 0) {
@@ -171,13 +124,14 @@ function columnIndexToLetter(int $index): string
         $colLetter = chr(65 + $rem) . $colLetter;
         $index = (int)(($index - 1) / 26);
     }
+
     return $colLetter;
 }
 
 /**
  * Sanitize month token used in exported file names.
  */
-function normalizeReportMonthToken(string $monthValue): string
+function statsNormalizeReportMonthToken(string $monthValue): string
 {
     return preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $monthValue)
         ? str_replace('-', '_', $monthValue)
@@ -187,106 +141,74 @@ function normalizeReportMonthToken(string $monthValue): string
 /**
  * Export report data to CSV.
  */
-function exportMonthlyReportCsv(array $rows, string $monthValue): void
+function statsExportMonthlyReportCsv(array $rows, string $monthValue): void
 {
-    $filename = 'raport_montaze_' . normalizeReportMonthToken($monthValue) . '_' . date('Y-m-d_His') . '.csv';
+    $filename = 'raport_montaze_' . statsNormalizeReportMonthToken($monthValue) . '_' . date('Y-m-d_His') . '.csv';
+    $out = fopen('php://output', 'w');
+
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     echo "\xEF\xBB\xBF";
 
-    $out = fopen('php://output', 'w');
-    fputcsv($out, ['Data montażu', 'Klient', 'Producent', 'Model', 'Nr seryjny', 'Nr zlecenia', 'Uwagi ze zlecenia'], ';');
-    foreach ($rows as $row) {
-        fputcsv($out, [
-            $row['installation_date'] ? formatDate($row['installation_date']) : '',
-            resolveClientName($row),
-            $row['manufacturer_name'] ?? '',
-            $row['model_name'] ?? '',
-            $row['serial_number'] ?? '',
-            $row['order_number'] ?? '',
-            $row['work_order_notes'] ?? '',
-        ], ';');
+    fputcsv($out, ['Data montażu', 'Klient', 'Pojazd', 'Producent', 'Model', 'Nr seryjny', 'Technik', 'Nr zlecenia', 'Uwagi'], ';');
+    foreach (statsBuildExportRows($rows) as $row) {
+        fputcsv($out, $row, ';');
     }
+
     fclose($out);
 }
 
 /**
  * Export report data to XLSX.
  */
-function exportMonthlyReportXlsx(array $rows, string $monthValue): void
+function statsExportMonthlyReportXlsx(array $rows, string $monthValue): void
 {
-    $filename = 'raport_montaze_' . normalizeReportMonthToken($monthValue) . '_' . date('Y-m-d_His') . '.xlsx';
+    $filename = 'raport_montaze_' . statsNormalizeReportMonthToken($monthValue) . '_' . date('Y-m-d_His') . '.xlsx';
     $xmlEsc = static fn($v) => htmlspecialchars((string)$v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-
-    $allRows = [[
-        'Data montażu',
-        'Klient',
-        'Producent',
-        'Model',
-        'Nr seryjny',
-        'Nr zlecenia',
-        'Uwagi ze zlecenia',
-    ]];
-    foreach ($rows as $row) {
-        $allRows[] = [
-            $row['installation_date'] ? formatDate($row['installation_date']) : '',
-            resolveClientName($row),
-            $row['manufacturer_name'] ?? '',
-            $row['model_name'] ?? '',
-            $row['serial_number'] ?? '',
-            $row['order_number'] ?? '',
-            $row['work_order_notes'] ?? '',
-        ];
-    }
+    $allRows = array_merge([
+        ['Data montażu', 'Klient', 'Pojazd', 'Producent', 'Model', 'Nr seryjny', 'Technik', 'Nr zlecenia', 'Uwagi'],
+    ], statsBuildExportRows($rows));
 
     $sharedStrings = [];
-    $ssMap = [];
-    $getSSIdx = static function (string $value) use (&$sharedStrings, &$ssMap): int {
-        if (!array_key_exists($value, $ssMap)) {
-            $ssMap[$value] = count($sharedStrings);
+    $sharedStringsIndex = [];
+    $sharedStringId = static function (string $value) use (&$sharedStrings, &$sharedStringsIndex): int {
+        if (!array_key_exists($value, $sharedStringsIndex)) {
+            $sharedStringsIndex[$value] = count($sharedStrings);
             $sharedStrings[] = $value;
         }
-        return $ssMap[$value];
+
+        return $sharedStringsIndex[$value];
     };
 
-    $wsRows = '';
-    foreach ($allRows as $ri => $row) {
-        $wsRows .= '<row r="' . ($ri + 1) . '">';
-        foreach ($row as $ci => $cellVal) {
-            $colLetter = columnIndexToLetter($ci + 1);
-            $idx = $getSSIdx((string)$cellVal);
-            $wsRows .= '<c r="' . $colLetter . ($ri + 1) . '" t="s"><v>' . $idx . '</v></c>';
+    $sheetRows = '';
+    foreach ($allRows as $rowIndex => $row) {
+        $sheetRows .= '<row r="' . ($rowIndex + 1) . '">';
+        foreach ($row as $columnIndex => $cellValue) {
+            $columnLetter = statsColumnIndexToLetter($columnIndex + 1);
+            $sharedStringIndex = $sharedStringId((string)$cellValue);
+            $sheetRows .= '<c r="' . $columnLetter . ($rowIndex + 1) . '" t="s"><v>' . $sharedStringIndex . '</v></c>';
         }
-        $wsRows .= '</row>';
+        $sheetRows .= '</row>';
     }
 
-    $ssItems = '';
-    foreach ($sharedStrings as $s) {
-        $ssItems .= '<si><t xml:space="preserve">' . $xmlEsc($s) . '</t></si>';
+    $sharedStringItems = '';
+    foreach ($sharedStrings as $value) {
+        $sharedStringItems .= '<si><t xml:space="preserve">' . $xmlEsc($value) . '</t></si>';
     }
 
     $worksheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
-        . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        . '<sheetData>' . $wsRows . '</sheetData></worksheet>';
-
+        . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        . '<sheetData>' . $sheetRows . '</sheetData></worksheet>';
     $sharedStringsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        . '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
-        . ' count="' . count($sharedStrings) . '" uniqueCount="' . count($sharedStrings) . '">'
-        . $ssItems . '</sst>';
-
+        . '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' . count($sharedStrings) . '" uniqueCount="' . count($sharedStrings) . '">' . $sharedStringItems . '</sst>';
     $workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
-        . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        . '<sheets><sheet name="Raport montaży" sheetId="1" r:id="rId1"/></sheets>'
-        . '</workbook>';
-
+        . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        . '<sheets><sheet name="Raport montaży" sheetId="1" r:id="rId1"/></sheets></workbook>';
     $workbookRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
         . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
         . '</Relationships>';
-
     $contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
         . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -295,13 +217,12 @@ function exportMonthlyReportXlsx(array $rows, string $monthValue): void
         . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
         . '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
         . '</Types>';
-
-    $relsRoot = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    $rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
         . '</Relationships>';
 
-    $tmpFile = tempnam(sys_get_temp_dir(), 'fleetlink_monthly_report_');
+    $tmpFile = tempnam(sys_get_temp_dir(), 'fleetlink_stats_report_');
     try {
         $zip = new ZipArchive();
         if ($zip->open($tmpFile, ZipArchive::OVERWRITE) !== true) {
@@ -310,7 +231,7 @@ function exportMonthlyReportXlsx(array $rows, string $monthValue): void
         }
 
         $zip->addFromString('[Content_Types].xml', $contentTypes);
-        $zip->addFromString('_rels/.rels', $relsRoot);
+        $zip->addFromString('_rels/.rels', $rootRels);
         $zip->addFromString('xl/workbook.xml', $workbookXml);
         $zip->addFromString('xl/_rels/workbook.xml.rels', $workbookRels);
         $zip->addFromString('xl/worksheets/sheet1.xml', $worksheetXml);
@@ -328,34 +249,59 @@ function exportMonthlyReportXlsx(array $rows, string $monthValue): void
     }
 }
 
-$year = (int)($_GET['year'] ?? date('Y'));
-$reportMonth = sanitize($_GET['report_month'] ?? date('Y-m'));
-if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $reportMonth)) {
-    $reportMonth = date('Y-m');
+/**
+ * Fetch monthly installation report rows.
+ */
+function statsGetMonthlyReportRows(PDO $db, string $startDate, string $endDate, ?int $clientId, bool $includeWorkOrders): array
+{
+    $sql = "
+        SELECT
+            i.id AS installation_id,
+            i.installation_date,
+            i.status AS installation_status,
+            i.notes AS installation_notes,
+            d.serial_number,
+            m.name AS model_name,
+            mf.name AS manufacturer_name,
+            v.registration AS vehicle_registration,
+            u.name AS technician_name,
+            ci.company_name AS inst_company_name,
+            ci.contact_name AS inst_contact_name,
+            " . ($includeWorkOrders ? "wo.order_number, wo.notes AS work_order_notes, cwo.company_name AS wo_company_name, cwo.contact_name AS wo_contact_name, COALESCE(cwo.id, ci.id) AS effective_client_id" : "NULL AS order_number, NULL AS work_order_notes, NULL AS wo_company_name, NULL AS wo_contact_name, ci.id AS effective_client_id") . "
+        FROM installations i
+        JOIN devices d ON d.id = i.device_id
+        JOIN models m ON m.id = d.model_id
+        JOIN manufacturers mf ON mf.id = m.manufacturer_id
+        LEFT JOIN vehicles v ON v.id = i.vehicle_id
+        LEFT JOIN users u ON u.id = i.technician_id
+        LEFT JOIN clients ci ON ci.id = i.client_id
+        " . ($includeWorkOrders ? "LEFT JOIN work_orders wo ON wo.id = i.work_order_id LEFT JOIN clients cwo ON cwo.id = wo.client_id" : "") . "
+        WHERE i.installation_date >= ? AND i.installation_date < ?
+    ";
+
+    $params = [$startDate, $endDate];
+    if ($clientId !== null) {
+        $sql .= " AND " . ($includeWorkOrders ? "COALESCE(wo.client_id, i.client_id) = ?" : "i.client_id = ?");
+        $params[] = $clientId;
+    }
+
+    $sql .= ' ORDER BY i.installation_date DESC, vehicle_registration ASC, serial_number ASC';
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
-$reportClientId = (int)($_GET['report_client_id'] ?? 0);
-$reportClientId = $reportClientId > 0 ? $reportClientId : null;
 
-$reportMonthStart = $reportMonth . '-01';
-$reportMonthStartDate = DateTimeImmutable::createFromFormat('Y-m-d', $reportMonthStart);
-if (!$reportMonthStartDate) {
-    $reportMonthStartDate = new DateTimeImmutable(date('Y-m-01'));
-    $reportMonth = $reportMonthStartDate->format('Y-m');
-}
-$reportMonthStart = $reportMonthStartDate->format('Y-m-01');
-$reportMonthEnd = $reportMonthStartDate->modify('+1 month')->format('Y-m-01');
-$reportMonthLabel = ucfirst(formatDate($reportMonthStart, 'F Y'));
-
-$canUseWorkOrdersInStats = canUseWorkOrdersInStats($db);
-$monthlyReportClients = [];
-$monthlyReportRows = [];
-$monthlyReportError = null;
-
-try {
-    if ($canUseWorkOrdersInStats) {
-        $clientsStmt = $db->prepare("
-            SELECT COALESCE(cwo.id, ci.id) as client_id,
-                   COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) as client_name
+/**
+ * Fetch client list for monthly report filter.
+ */
+function statsGetMonthlyReportClients(PDO $db, string $startDate, string $endDate, bool $includeWorkOrders): array
+{
+    $sql = $includeWorkOrders
+        ? "
+            SELECT
+                COALESCE(cwo.id, ci.id) AS client_id,
+                COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) AS client_name
             FROM installations i
             LEFT JOIN work_orders wo ON wo.id = i.work_order_id
             LEFT JOIN clients cwo ON cwo.id = wo.client_id
@@ -364,27 +310,43 @@ try {
               AND COALESCE(cwo.id, ci.id) IS NOT NULL
             GROUP BY COALESCE(cwo.id, ci.id), COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
             ORDER BY client_name
-        ");
-    } else {
-        $clientsStmt = $db->prepare("
-            SELECT ci.id as client_id,
-                   COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) as client_name
+        "
+        : "
+            SELECT
+                ci.id AS client_id,
+                COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) AS client_name
             FROM installations i
-            LEFT JOIN clients ci ON ci.id = i.client_id
+            JOIN clients ci ON ci.id = i.client_id
             WHERE i.installation_date >= ? AND i.installation_date < ?
-              AND ci.id IS NOT NULL
             GROUP BY ci.id, COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
             ORDER BY client_name
-        ");
-    }
-    $clientsStmt->execute([$reportMonthStart, $reportMonthEnd]);
-    $monthlyReportClients = $clientsStmt->fetchAll();
+        ";
 
-    $monthlyReportRows = getMonthlyInstallReportRows($db, $reportMonthStart, $reportMonthEnd, $reportClientId, $canUseWorkOrdersInStats);
-} catch (Exception $e) {
-    $monthlyReportError = 'Nie udało się przygotować raportu miesięcznego. Sprawdź konfigurację danych lub skontaktuj się z administratorem.';
-    error_log('statistics monthlyReport failed: ' . $e->getMessage());
+    $stmt = $db->prepare($sql);
+    $stmt->execute([$startDate, $endDate]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
+$year = (int)($_GET['year'] ?? date('Y'));
+$reportMonth = sanitize($_GET['report_month'] ?? date('Y-m'));
+if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $reportMonth)) {
+    $reportMonth = date('Y-m');
+}
+$reportClientId = (int)($_GET['report_client_id'] ?? 0);
+$reportClientId = $reportClientId > 0 ? $reportClientId : null;
+
+$reportMonthStart = DateTimeImmutable::createFromFormat('Y-m-d', $reportMonth . '-01');
+if (!$reportMonthStart) {
+    $reportMonthStart = new DateTimeImmutable(date('Y-m-01'));
+    $reportMonth = $reportMonthStart->format('Y-m');
+}
+$reportMonthStartValue = $reportMonthStart->format('Y-m-01');
+$reportMonthEndValue = $reportMonthStart->modify('+1 month')->format('Y-m-01');
+$reportMonthLabel = ucfirst(formatDate($reportMonthStartValue, 'F Y'));
+
+$hasWorkOrdersTable = statsTableExists($db, 'work_orders');
+$hasWorkOrderColumn = statsColumnExists($db, 'installations', 'work_order_id');
+$includeWorkOrders = $hasWorkOrdersTable && $hasWorkOrderColumn;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'export_monthly_installations') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -393,162 +355,163 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
     }
 
     $exportFormat = sanitize($_POST['format'] ?? 'csv');
-    if (!in_array($exportFormat, ['csv', 'xlsx'], true)) {
-        $exportFormat = 'csv';
-    }
-
     $exportMonth = sanitize($_POST['report_month'] ?? date('Y-m'));
     if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $exportMonth)) {
         $exportMonth = date('Y-m');
     }
+
     $exportClientId = (int)($_POST['report_client_id'] ?? 0);
     $exportClientId = $exportClientId > 0 ? $exportClientId : null;
-
-    $exportStartDate = $exportMonth . '-01';
-    $exportStartDateObj = DateTimeImmutable::createFromFormat('Y-m-d', $exportStartDate);
-    if (!$exportStartDateObj) {
-        $exportStartDateObj = new DateTimeImmutable(date('Y-m-01'));
-        $exportMonth = $exportStartDateObj->format('Y-m');
+    $exportStartDate = DateTimeImmutable::createFromFormat('Y-m-d', $exportMonth . '-01');
+    if (!$exportStartDate) {
+        $exportStartDate = new DateTimeImmutable(date('Y-m-01'));
+        $exportMonth = $exportStartDate->format('Y-m');
     }
 
-    $exportStartDate = $exportStartDateObj->format('Y-m-01');
-    $exportEndDate = $exportStartDateObj->modify('+1 month')->format('Y-m-01');
-
     try {
-        $exportRows = getMonthlyInstallReportRows($db, $exportStartDate, $exportEndDate, $exportClientId, $canUseWorkOrdersInStats);
+        $exportRows = statsGetMonthlyReportRows(
+            $db,
+            $exportStartDate->format('Y-m-01'),
+            $exportStartDate->modify('+1 month')->format('Y-m-01'),
+            $exportClientId,
+            $includeWorkOrders
+        );
+
         if ($exportFormat === 'xlsx') {
-            exportMonthlyReportXlsx($exportRows, $exportMonth);
+            statsExportMonthlyReportXlsx($exportRows, $exportMonth);
         } else {
-            exportMonthlyReportCsv($exportRows, $exportMonth);
+            statsExportMonthlyReportCsv($exportRows, $exportMonth);
         }
         exit;
-    } catch (Exception $e) {
-        flashError('Nie udało się wygenerować eksportu raportu. Spróbuj ponownie lub skontaktuj się z administratorem.');
-        error_log('statistics monthlyReport export failed: ' . $e->getMessage());
+    } catch (Throwable $e) {
+        flashError('Nie udało się wygenerować eksportu raportu.');
+        error_log('statistics export failed: ' . $e->getMessage());
         redirect(getBaseUrl() . 'statistics.php?year=' . urlencode((string)$year) . '&report_month=' . urlencode($reportMonth) . '&report_client_id=' . urlencode((string)($reportClientId ?? 0)));
     }
 }
 
-$monthlyReportTotal = count($monthlyReportRows);
-$monthlyReportUniqueClients = count(array_unique(array_map(static fn($row) => resolveClientName($row), $monthlyReportRows)));
-$monthlyReportEmptyMessage = $monthlyReportError
-    ? 'Brak danych raportu. Spróbuj ponownie po odświeżeniu strony.'
-    : 'Brak montaży dla wybranych filtrów.';
+$monthlyReportRows = [];
+$monthlyReportClients = [];
+$monthlyReportError = null;
+try {
+    $monthlyReportClients = statsGetMonthlyReportClients($db, $reportMonthStartValue, $reportMonthEndValue, $includeWorkOrders);
+    $monthlyReportRows = statsGetMonthlyReportRows($db, $reportMonthStartValue, $reportMonthEndValue, $reportClientId, $includeWorkOrders);
+} catch (Throwable $e) {
+    $monthlyReportError = 'Nie udało się przygotować raportu montaży za wybrany miesiąc.';
+    error_log('statistics monthly report failed: ' . $e->getMessage());
+}
 
-// ─── Initialise all variables with safe defaults ──────────────────────────
+$monthlyReportSummary = [
+    'total_installations' => count($monthlyReportRows),
+    'unique_clients' => count(array_unique(array_map(static fn(array $row): string => statsResolveClientName($row), $monthlyReportRows))),
+    'unique_devices' => count(array_unique(array_map(static fn(array $row): string => (string)($row['serial_number'] ?? ''), $monthlyReportRows))),
+    'unique_technicians' => count(array_filter(array_unique(array_map(static fn(array $row): string => trim((string)($row['technician_name'] ?? '')), $monthlyReportRows)))),
+];
+$monthlyReportEmptyMessage = $monthlyReportError ?: 'Brak montaży dla wybranych filtrów.';
+
 $installsByMonthData = array_fill(1, 12, 0);
 $servicesByMonthData = array_fill(1, 12, 0);
-$topDevices          = [];
-$servicesByType      = [];
-$topTechs            = [];
+$topDevices = [];
+$servicesByType = [];
+$topTechnicians = [];
 $totalServiceRevenue = 0.0;
-$offerStatsData      = ['total' => 0, 'accepted' => 0, 'total_value' => 0, 'accepted_value' => 0];
-$deviceStatusMap     = [];
-$statsError          = null;
-$statsFailureCount   = 0;
-$totalStatsQueries   = 8;
-// Consider stats page degraded when at least half of key queries fail.
-$criticalFailureThreshold = (int)ceil($totalStatsQueries / 2);
-$dbDriver            = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-$isSqlite            = $dbDriver === 'sqlite';
-$monthInstallExpr    = $isSqlite ? "strftime('%m', installation_date)" : "DATE_FORMAT(installation_date,'%m')";
-$monthServiceExpr    = $isSqlite ? "strftime('%m', completed_date)" : "DATE_FORMAT(completed_date,'%m')";
-$yearInstallCond     = $isSqlite ? "strftime('%Y', installation_date) = ?" : "YEAR(installation_date) = ?";
-$yearServiceCond     = $isSqlite ? "strftime('%Y', completed_date) = ?" : "YEAR(completed_date) = ?";
-$yearCompletedCond   = $isSqlite ? "strftime('%Y', completed_date) = ?" : "YEAR(completed_date) = ?";
-$yearCreatedCond     = $isSqlite ? "strftime('%Y', created_at) = ?" : "YEAR(created_at) = ?";
-$yearParam           = (string)$year;
+$offerStats = ['total' => 0, 'accepted' => 0, 'total_value' => 0.0, 'accepted_value' => 0.0];
+$deviceStatuses = [];
+$statsWarnings = [];
+
+$monthInstallExpr = $isSqlite ? "CAST(strftime('%m', installation_date) AS INTEGER)" : 'MONTH(installation_date)';
+$monthServiceExpr = $isSqlite ? "CAST(strftime('%m', completed_date) AS INTEGER)" : 'MONTH(completed_date)';
+$yearInstallExpr = $isSqlite ? "strftime('%Y', installation_date) = ?" : 'YEAR(installation_date) = ?';
+$yearServiceExpr = $isSqlite ? "strftime('%Y', completed_date) = ?" : 'YEAR(completed_date) = ?';
+$yearCreatedExpr = $isSqlite ? "strftime('%Y', created_at) = ?" : 'YEAR(created_at) = ?';
+$yearParam = (string)$year;
 
 try {
-    $installsByMonth = $db->prepare("
-        SELECT {$monthInstallExpr} as month, COUNT(*) as count
-        FROM installations
-        WHERE {$yearInstallCond}
-        GROUP BY month
-        ORDER BY month
-    ");
-    $installsByMonth->execute([$yearParam]);
-    foreach ($installsByMonth->fetchAll() as $row) {
-        $installsByMonthData[(int)$row['month']] = (int)$row['count'];
+    $stmt = $db->prepare("SELECT {$monthInstallExpr} AS month_no, COUNT(*) AS item_count FROM installations WHERE {$yearInstallExpr} GROUP BY month_no ORDER BY month_no");
+    $stmt->execute([$yearParam]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $month = (int)($row['month_no'] ?? 0);
+        if ($month >= 1 && $month <= 12) {
+            $installsByMonthData[$month] = (int)$row['item_count'];
+        }
     }
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics installsByMonth failed: ' . $e->getMessage()); }
-
-try {
-    $servicesByMonth = $db->prepare("
-        SELECT {$monthServiceExpr} as month, COUNT(*) as count
-        FROM services
-        WHERE {$yearServiceCond} AND status = 'zakończony'
-        GROUP BY month
-        ORDER BY month
-    ");
-    $servicesByMonth->execute([$yearParam]);
-    foreach ($servicesByMonth->fetchAll() as $row) {
-        $servicesByMonthData[(int)$row['month']] = (int)$row['count'];
-    }
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics servicesByMonth failed: ' . $e->getMessage()); }
-
-try {
-    $topDevices = $db->query("
-        SELECT mf.name as manufacturer, m.name as model, COUNT(i.id) as install_count
-        FROM installations i
-        JOIN devices d ON d.id=i.device_id
-        JOIN models m ON m.id=d.model_id
-        JOIN manufacturers mf ON mf.id=m.manufacturer_id
-        GROUP BY m.id
-        ORDER BY install_count DESC
-        LIMIT 10
-    ")->fetchAll();
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics topDevices failed: ' . $e->getMessage()); }
-
-try {
-    $servicesByType = $db->query("SELECT type, COUNT(*) as count FROM services GROUP BY type ORDER BY count DESC")->fetchAll();
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics servicesByType failed: ' . $e->getMessage()); }
-
-try {
-    $topTechs = $db->query("
-        SELECT u.name,
-               COUNT(DISTINCT i.id) as installs,
-               COUNT(DISTINCT s.id) as services
-        FROM users u
-        LEFT JOIN installations i ON i.technician_id=u.id
-        LEFT JOIN services s ON s.technician_id=u.id AND s.status='zakończony'
-        GROUP BY u.id
-        HAVING installs > 0 OR services > 0
-        ORDER BY (installs + services) DESC
-    ")->fetchAll();
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics topTechs failed: ' . $e->getMessage()); }
-
-try {
-    $serviceRevenue = $db->prepare("
-        SELECT SUM(cost) as total FROM services
-        WHERE {$yearCompletedCond} AND status='zakończony'
-    ");
-    $serviceRevenue->execute([$yearParam]);
-    $totalServiceRevenue = (float)($serviceRevenue->fetchColumn() ?? 0);
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics serviceRevenue failed: ' . $e->getMessage()); }
-
-try {
-    $offerStats = $db->prepare("
-        SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN status='zaakceptowana' THEN 1 ELSE 0 END) as accepted,
-            SUM(total_gross) as total_value,
-            SUM(CASE WHEN status='zaakceptowana' THEN total_gross ELSE 0 END) as accepted_value
-        FROM offers WHERE {$yearCreatedCond}
-    ");
-    $offerStats->execute([$yearParam]);
-    $offerRow = $offerStats->fetch();
-    if ($offerRow) $offerStatsData = $offerRow;
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics offerStats failed: ' . $e->getMessage()); }
-
-try {
-    $deviceStats = $db->query("SELECT status, COUNT(*) as count FROM devices GROUP BY status")->fetchAll();
-    foreach ($deviceStats as $row) $deviceStatusMap[$row['status']] = $row['count'];
-} catch (Exception $e) { $statsFailureCount++; error_log('statistics deviceStats failed: ' . $e->getMessage()); }
-
-if ($statsFailureCount > 0 && $statsFailureCount >= $criticalFailureThreshold) {
-    $statsError = 'Część zapytań statystycznych nie została wykonana.';
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać miesięcznych montaży.';
+    error_log('statistics installs by month failed: ' . $e->getMessage());
 }
+
+try {
+    $stmt = $db->prepare("SELECT {$monthServiceExpr} AS month_no, COUNT(*) AS item_count FROM services WHERE {$yearServiceExpr} AND status = 'zakończony' GROUP BY month_no ORDER BY month_no");
+    $stmt->execute([$yearParam]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $month = (int)($row['month_no'] ?? 0);
+        if ($month >= 1 && $month <= 12) {
+            $servicesByMonthData[$month] = (int)$row['item_count'];
+        }
+    }
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać miesięcznych serwisów.';
+    error_log('statistics services by month failed: ' . $e->getMessage());
+}
+
+try {
+    $topDevices = $db->query("\n        SELECT mf.name AS manufacturer_name, m.name AS model_name, COUNT(i.id) AS install_count\n        FROM installations i\n        JOIN devices d ON d.id = i.device_id\n        JOIN models m ON m.id = d.model_id\n        JOIN manufacturers mf ON mf.id = m.manufacturer_id\n        GROUP BY m.id, mf.name, m.name\n        ORDER BY install_count DESC, mf.name ASC, m.name ASC\n        LIMIT 10\n    ")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać rankingu modeli.';
+    error_log('statistics top models failed: ' . $e->getMessage());
+}
+
+try {
+    $servicesByType = $db->query("SELECT type, COUNT(*) AS item_count FROM services GROUP BY type ORDER BY item_count DESC, type ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać typów serwisów.';
+    error_log('statistics services by type failed: ' . $e->getMessage());
+}
+
+try {
+    $topTechnicians = $db->query("\n        SELECT\n            u.name,\n            COUNT(DISTINCT i.id) AS installs,\n            COUNT(DISTINCT s.id) AS services\n        FROM users u\n        LEFT JOIN installations i ON i.technician_id = u.id\n        LEFT JOIN services s ON s.technician_id = u.id AND s.status = 'zakończony'\n        GROUP BY u.id, u.name\n        HAVING installs > 0 OR services > 0\n        ORDER BY (installs + services) DESC, u.name ASC\n        LIMIT 10\n    ")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać statystyk techników.';
+    error_log('statistics technicians failed: ' . $e->getMessage());
+}
+
+try {
+    $stmt = $db->prepare("SELECT COALESCE(SUM(cost), 0) AS total_revenue FROM services WHERE {$yearServiceExpr} AND status = 'zakończony'");
+    $stmt->execute([$yearParam]);
+    $totalServiceRevenue = (float)($stmt->fetchColumn() ?? 0);
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać przychodu serwisów.';
+    error_log('statistics service revenue failed: ' . $e->getMessage());
+}
+
+try {
+    $stmt = $db->prepare("\n        SELECT\n            COUNT(*) AS total,\n            SUM(CASE WHEN status = 'zaakceptowana' THEN 1 ELSE 0 END) AS accepted,\n            COALESCE(SUM(total_gross), 0) AS total_value,\n            COALESCE(SUM(CASE WHEN status = 'zaakceptowana' THEN total_gross ELSE 0 END), 0) AS accepted_value\n        FROM offers\n        WHERE {$yearCreatedExpr}\n    ");
+    $stmt->execute([$yearParam]);
+    $offerStatsRow = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($offerStatsRow) {
+        $offerStats = array_merge($offerStats, $offerStatsRow);
+    }
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać statystyk ofert.';
+    error_log('statistics offers failed: ' . $e->getMessage());
+}
+
+try {
+    $deviceStatuses = $db->query("SELECT status, COUNT(*) AS item_count FROM devices GROUP BY status ORDER BY item_count DESC, status ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $statsWarnings[] = 'Nie udało się pobrać statusów urządzeń.';
+    error_log('statistics device statuses failed: ' . $e->getMessage());
+}
+
+$statsError = count($statsWarnings) >= 3
+    ? 'Część sekcji statystyk nie mogła zostać wczytana. Dane poniżej mogą być niepełne.'
+    : null;
+
+$acceptedOffers = (int)($offerStats['accepted'] ?? 0);
+$totalOffers = (int)($offerStats['total'] ?? 0);
+$acceptanceRate = $totalOffers > 0 ? round(($acceptedOffers / $totalOffers) * 100) : 0;
+$deviceStatusChartLabels = array_map(static fn(array $row): string => ucfirst(str_replace('_', ' ', (string)$row['status'])), $deviceStatuses);
+$deviceStatusChartValues = array_map(static fn(array $row): int => (int)$row['item_count'], $deviceStatuses);
 
 $activePage = 'statistics';
 $pageTitle = 'Statystyki';
@@ -556,14 +519,17 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="page-header">
-    <h1><i class="fas fa-chart-bar me-2 text-primary"></i>Statystyki</h1>
-    <form method="GET" class="d-flex gap-2 align-items-center">
+    <div>
+        <h1><i class="fas fa-chart-bar me-2 text-primary"></i>Statystyki</h1>
+        <p class="text-muted mb-0">Przebudowany widok statystyk z raportem montaży miesięcznych i eksportem do pliku.</p>
+    </div>
+    <form method="GET" class="d-flex gap-2 align-items-center flex-wrap">
         <input type="hidden" name="report_month" value="<?= h($reportMonth) ?>">
         <input type="hidden" name="report_client_id" value="<?= (int)($reportClientId ?? 0) ?>">
-        <label class="me-2 mb-0">Rok:</label>
-        <select name="year" class="form-select form-select-sm" onchange="this.form.submit()">
-            <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
-            <option value="<?= $y ?>" <?= $y === $year ? 'selected' : '' ?>><?= $y ?></option>
+        <label class="mb-0 fw-semibold">Rok:</label>
+        <select name="year" class="form-select" onchange="this.form.submit()" style="min-width: 120px;">
+            <?php for ($availableYear = (int)date('Y'); $availableYear >= (int)date('Y') - 5; $availableYear--): ?>
+            <option value="<?= $availableYear ?>" <?= $availableYear === $year ? 'selected' : '' ?>><?= $availableYear ?></option>
             <?php endfor; ?>
         </select>
     </form>
@@ -571,25 +537,63 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($statsError): ?>
 <div class="alert alert-warning">
-    <i class="fas fa-exclamation-triangle me-2"></i>
-    Nie udało się wczytać części danych statystycznych. Sprawdź, czy baza danych jest poprawnie skonfigurowana.
+    <i class="fas fa-exclamation-triangle me-2"></i><?= h($statsError) ?>
 </div>
 <?php endif; ?>
 
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div><i class="fas fa-file-alt me-2 text-primary"></i>Raport montaży za miesiąc</div>
-        <div class="small text-muted">Okres: <?= h($reportMonthLabel) ?></div>
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted small mb-1">Montaże w <?= $year ?></div>
+                <div class="h3 fw-bold text-primary mb-0"><?= array_sum($installsByMonthData) ?></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted small mb-1">Serwisy zakończone</div>
+                <div class="h3 fw-bold text-warning mb-0"><?= array_sum($servicesByMonthData) ?></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted small mb-1">Przychód serwisów</div>
+                <div class="h3 fw-bold text-success mb-0"><?= formatMoney($totalServiceRevenue) ?></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted small mb-1">Akceptacja ofert</div>
+                <div class="h3 fw-bold text-info mb-0"><?= $acceptanceRate ?>%</div>
+                <div class="small text-muted mt-1"><?= $acceptedOffers ?> / <?= $totalOffers ?> zaakceptowanych</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <div class="fw-semibold"><i class="fas fa-file-alt me-2 text-primary"></i>Raport montaży za miesiąc</div>
+            <div class="small text-muted">Okres: <?= h($reportMonthLabel) ?></div>
+        </div>
+        <span class="badge rounded-pill text-bg-light border"><?= $includeWorkOrders ? 'Źródło: montaże + zlecenia' : 'Źródło: montaże' ?></span>
     </div>
     <div class="card-body">
-        <form method="GET" class="row g-2 align-items-end mb-3">
+        <form method="GET" class="row g-3 align-items-end mb-4">
             <input type="hidden" name="year" value="<?= $year ?>">
-            <div class="col-sm-4 col-md-3">
-                <label class="form-label mb-1">Miesiąc</label>
+            <div class="col-md-3">
+                <label class="form-label">Miesiąc</label>
                 <input type="month" name="report_month" class="form-control" value="<?= h($reportMonth) ?>" required>
             </div>
-            <div class="col-sm-5 col-md-4">
-                <label class="form-label mb-1">Klient</label>
+            <div class="col-md-4">
+                <label class="form-label">Klient</label>
                 <select name="report_client_id" class="form-select">
                     <option value="0">Wszyscy klienci</option>
                     <?php foreach ($monthlyReportClients as $client): ?>
@@ -599,75 +603,94 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-sm-3 col-md-2">
-                <button type="submit" class="btn btn-primary w-100">
-                    <i class="fas fa-filter me-1"></i>Filtruj
-                </button>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100"><i class="fas fa-filter me-1"></i>Filtruj</button>
             </div>
         </form>
 
         <?php if ($monthlyReportError): ?>
-        <div class="alert alert-warning mb-3">
+        <div class="alert alert-warning mb-4">
             <i class="fas fa-exclamation-triangle me-2"></i><?= h($monthlyReportError) ?>
         </div>
         <?php endif; ?>
-        <div class="small text-uppercase text-muted fw-semibold mb-2">Podsumowanie</div>
-        <div class="d-flex flex-wrap gap-2 mb-3">
-            <span class="badge text-bg-primary">Montaże: <?= $monthlyReportTotal ?></span>
-            <span class="badge text-bg-secondary">Klienci: <?= $monthlyReportUniqueClients ?></span>
-            <span class="badge text-bg-light border text-dark">Miesiąc: <?= h($reportMonthLabel) ?></span>
+
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-lg-3">
+                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
+                    <div class="small text-muted">Montaże</div>
+                    <div class="h4 mb-0 fw-bold text-primary"><?= $monthlyReportSummary['total_installations'] ?></div>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
+                    <div class="small text-muted">Klienci</div>
+                    <div class="h4 mb-0 fw-bold text-secondary"><?= $monthlyReportSummary['unique_clients'] ?></div>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
+                    <div class="small text-muted">Urządzenia</div>
+                    <div class="h4 mb-0 fw-bold text-success"><?= $monthlyReportSummary['unique_devices'] ?></div>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
+                    <div class="small text-muted">Technicy</div>
+                    <div class="h4 mb-0 fw-bold text-info"><?= $monthlyReportSummary['unique_technicians'] ?></div>
+                </div>
+            </div>
         </div>
 
-        <div class="small text-uppercase text-muted fw-semibold mb-2">Eksport</div>
         <div class="d-flex flex-wrap gap-2 mb-3">
-            <form method="POST" class="d-inline">
+            <form method="POST">
                 <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
                 <input type="hidden" name="action" value="export_monthly_installations">
                 <input type="hidden" name="format" value="csv">
                 <input type="hidden" name="report_month" value="<?= h($reportMonth) ?>">
                 <input type="hidden" name="report_client_id" value="<?= (int)($reportClientId ?? 0) ?>">
-                <button type="submit" class="btn btn-outline-success btn-sm">
-                    <i class="fas fa-file-csv me-1"></i>Eksport CSV
-                </button>
+                <button type="submit" class="btn btn-outline-success"><i class="fas fa-file-csv me-1"></i>Eksport CSV</button>
             </form>
-            <form method="POST" class="d-inline">
+            <form method="POST">
                 <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
                 <input type="hidden" name="action" value="export_monthly_installations">
                 <input type="hidden" name="format" value="xlsx">
                 <input type="hidden" name="report_month" value="<?= h($reportMonth) ?>">
                 <input type="hidden" name="report_client_id" value="<?= (int)($reportClientId ?? 0) ?>">
-                <button type="submit" class="btn btn-outline-primary btn-sm">
-                    <i class="fas fa-file-excel me-1"></i>Eksport XLSX
-                </button>
+                <button type="submit" class="btn btn-outline-primary"><i class="fas fa-file-excel me-1"></i>Eksport XLSX</button>
             </form>
         </div>
 
-        <div class="small text-uppercase text-muted fw-semibold mb-2">Tabela raportu</div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
                         <th>Data montażu</th>
                         <th>Klient</th>
-                        <th>Producent / Model</th>
+                        <th>Pojazd</th>
+                        <th>Urządzenie</th>
                         <th>Nr seryjny</th>
+                        <th>Technik</th>
                         <th>Nr zlecenia</th>
-                        <th>Uwagi ze zlecenia</th>
+                        <th>Uwagi</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($monthlyReportRows as $row): ?>
                     <tr>
                         <td><?= $row['installation_date'] ? formatDate($row['installation_date']) : '—' ?></td>
-                        <td><?= h(resolveClientName($row)) ?></td>
-                        <td><?= h(trim(($row['manufacturer_name'] ?? '') . ' ' . ($row['model_name'] ?? ''))) ?></td>
-                        <td class="fw-semibold"><?= h($row['serial_number'] ?? '—') ?></td>
+                        <td><?= h(statsResolveClientName($row)) ?></td>
+                        <td><?= h($row['vehicle_registration'] ?: '—') ?></td>
+                        <td><?= h(trim(($row['manufacturer_name'] ?? '') . ' ' . ($row['model_name'] ?? ''))) ?: '—' ?></td>
+                        <td class="fw-semibold"><?= h($row['serial_number'] ?: '—') ?></td>
+                        <td><?= h($row['technician_name'] ?: '—') ?></td>
                         <td><?= h($row['order_number'] ?: '—') ?></td>
-                        <td class="small text-muted"><?= nl2br(h($row['work_order_notes'] ?: '—')) ?></td>
+                        <td class="small text-muted" style="min-width: 240px;"><?= nl2br(h(statsResolveReportNotes($row))) ?></td>
                     </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($monthlyReportRows)): ?>
-                    <tr><td colspan="6" class="text-center text-muted py-4"><?= h($monthlyReportEmptyMessage) ?></td></tr>
+                    <?php if (!$monthlyReportRows): ?>
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4"><?= h($monthlyReportEmptyMessage) ?></td>
+                    </tr>
                     <?php endif; ?>
                 </tbody>
             </table>
@@ -675,116 +698,101 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<!-- Summary Stats -->
 <div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
-        <div class="card text-center p-3">
-            <div class="h3 text-primary fw-bold"><?= array_sum($installsByMonthData) ?></div>
-            <div class="text-muted small">Montaży w <?= $year ?></div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card text-center p-3">
-            <div class="h3 text-warning fw-bold"><?= array_sum($servicesByMonthData) ?></div>
-            <div class="text-muted small">Serwisów w <?= $year ?></div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card text-center p-3">
-            <div class="h3 text-success fw-bold"><?= formatMoney($totalServiceRevenue) ?></div>
-            <div class="text-muted small">Przychód serwisów <?= $year ?></div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card text-center p-3">
-            <div class="h3 text-info fw-bold"><?= (int)($offerStatsData['accepted'] ?? 0) ?> / <?= (int)($offerStatsData['total'] ?? 0) ?></div>
-            <div class="text-muted small">Ofert zaakceptowanych/wystawionych <?= $year ?></div>
-        </div>
-    </div>
-</div>
-
-<div class="row g-3 mb-4">
-    <!-- Monthly Chart -->
-    <div class="col-md-8">
-        <div class="card">
-            <div class="card-header">Montaże i serwisy w <?= $year ?> r.</div>
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white fw-semibold">Montaże i serwisy w <?= $year ?> roku</div>
             <div class="card-body">
                 <canvas id="monthlyChart" height="120"></canvas>
             </div>
         </div>
     </div>
-
-    <!-- Device Status -->
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header">Statusy urządzeń</div>
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white fw-semibold">Statusy urządzeń</div>
             <div class="card-body">
-                <canvas id="deviceStatusChart" height="200"></canvas>
+                <?php if ($deviceStatuses): ?>
+                <canvas id="deviceStatusChart" height="220"></canvas>
+                <?php else: ?>
+                <div class="text-center text-muted py-5">Brak danych o statusach urządzeń.</div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
 </div>
 
 <div class="row g-3">
-    <!-- Top Models -->
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header"><i class="fas fa-trophy me-2 text-warning"></i>Najpopularniejsze modele</div>
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white fw-semibold"><i class="fas fa-trophy me-2 text-warning"></i>Najpopularniejsze modele</div>
             <div class="table-responsive">
                 <table class="table table-sm mb-0">
-                    <thead><tr><th>Model</th><th class="text-end">Montaże</th></tr></thead>
-                    <tbody>
-                        <?php foreach ($topDevices as $i => $d): ?>
+                    <thead>
                         <tr>
-                            <td><?= h($d['manufacturer'] . ' ' . $d['model']) ?></td>
-                            <td class="text-end fw-bold"><?= $d['install_count'] ?></td>
+                            <th>Model</th>
+                            <th class="text-end">Montaże</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($topDevices as $device): ?>
+                        <tr>
+                            <td><?= h($device['manufacturer_name'] . ' ' . $device['model_name']) ?></td>
+                            <td class="text-end fw-semibold"><?= (int)$device['install_count'] ?></td>
                         </tr>
                         <?php endforeach; ?>
-                        <?php if (empty($topDevices)): ?><tr><td colspan="2" class="text-muted text-center">Brak danych</td></tr><?php endif; ?>
+                        <?php if (!$topDevices): ?>
+                        <tr><td colspan="2" class="text-center text-muted py-4">Brak danych.</td></tr>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
-
-    <!-- Services by Type -->
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header"><i class="fas fa-wrench me-2 text-info"></i>Serwisy według typu</div>
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white fw-semibold"><i class="fas fa-screwdriver-wrench me-2 text-info"></i>Serwisy według typu</div>
             <div class="card-body">
-                <?php $totalSvc = array_sum(array_column($servicesByType, 'count')); ?>
-                <?php foreach ($servicesByType as $svc): ?>
-                <div class="mb-2">
-                    <div class="d-flex justify-content-between mb-1">
-                        <span class="small"><?= h(ucfirst($svc['type'])) ?></span>
-                        <span class="small fw-bold"><?= $svc['count'] ?></span>
+                <?php $serviceTypeTotal = array_sum(array_map(static fn(array $row): int => (int)$row['item_count'], $servicesByType)); ?>
+                <?php foreach ($servicesByType as $serviceType): ?>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between gap-3 mb-1">
+                        <span><?= h(ucfirst((string)$serviceType['type'])) ?></span>
+                        <span class="fw-semibold"><?= (int)$serviceType['item_count'] ?></span>
                     </div>
-                    <div class="progress" style="height:6px">
-                        <div class="progress-bar" style="width:<?= $totalSvc > 0 ? round($svc['count']/$totalSvc*100) : 0 ?>%"></div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar" role="progressbar" style="width: <?= $serviceTypeTotal > 0 ? round(((int)$serviceType['item_count'] / $serviceTypeTotal) * 100) : 0 ?>%"></div>
                     </div>
                 </div>
                 <?php endforeach; ?>
-                <?php if (empty($servicesByType)): ?><p class="text-muted text-center">Brak danych</p><?php endif; ?>
+                <?php if (!$servicesByType): ?>
+                <div class="text-center text-muted py-4">Brak danych.</div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
-
-    <!-- Top Technicians -->
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header"><i class="fas fa-user-cog me-2 text-success"></i>Technicy</div>
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white fw-semibold"><i class="fas fa-user-cog me-2 text-success"></i>Technicy</div>
             <div class="table-responsive">
                 <table class="table table-sm mb-0">
-                    <thead><tr><th>Technik</th><th class="text-end">Montaże</th><th class="text-end">Serwisy</th></tr></thead>
-                    <tbody>
-                        <?php foreach ($topTechs as $tech): ?>
+                    <thead>
                         <tr>
-                            <td><?= h($tech['name']) ?></td>
-                            <td class="text-end"><?= $tech['installs'] ?></td>
-                            <td class="text-end"><?= $tech['services'] ?></td>
+                            <th>Technik</th>
+                            <th class="text-end">Montaże</th>
+                            <th class="text-end">Serwisy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($topTechnicians as $technician): ?>
+                        <tr>
+                            <td><?= h($technician['name']) ?></td>
+                            <td class="text-end"><?= (int)$technician['installs'] ?></td>
+                            <td class="text-end"><?= (int)$technician['services'] ?></td>
                         </tr>
                         <?php endforeach; ?>
-                        <?php if (empty($topTechs)): ?><tr><td colspan="3" class="text-muted text-center">Brak danych</td></tr><?php endif; ?>
+                        <?php if (!$topTechnicians): ?>
+                        <tr><td colspan="3" class="text-center text-muted py-4">Brak danych.</td></tr>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -792,40 +800,82 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php if ($statsWarnings && !$statsError): ?>
+<div class="alert alert-light border mt-4 mb-0">
+    <div class="fw-semibold mb-2">Informacje diagnostyczne</div>
+    <ul class="mb-0">
+        <?php foreach ($statsWarnings as $warning): ?>
+        <li><?= h($warning) ?></li>
+        <?php endforeach; ?>
+    </ul>
+</div>
+<?php endif; ?>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-const months = ['Sty','Lut','Mar','Apr','Maj','Cze','Lip','Sie','Wrz','Paź','Lis','Gru'];
-const instData = [<?= implode(',', array_values($installsByMonthData)) ?>];
-const svcData  = [<?= implode(',', array_values($servicesByMonthData)) ?>];
+const monthLabels = ['Sty', 'Lut', 'Mar', 'Apr', 'Maj', 'Cze', 'Lip', 'Sie', 'Wrz', 'Paź', 'Lis', 'Gru'];
+const installSeries = <?= json_encode(array_values($installsByMonthData), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+const serviceSeries = <?= json_encode(array_values($servicesByMonthData), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
 new Chart(document.getElementById('monthlyChart'), {
     type: 'bar',
     data: {
-        labels: months,
+        labels: monthLabels,
         datasets: [
-            { label: 'Montaże', data: instData, backgroundColor: 'rgba(13,110,253,0.8)', borderRadius: 4 },
-            { label: 'Serwisy', data: svcData, backgroundColor: 'rgba(253,126,20,0.8)', borderRadius: 4 }
+            {
+                label: 'Montaże',
+                data: installSeries,
+                backgroundColor: 'rgba(13, 110, 253, 0.82)',
+                borderRadius: 6
+            },
+            {
+                label: 'Serwisy',
+                data: serviceSeries,
+                backgroundColor: 'rgba(253, 126, 20, 0.82)',
+                borderRadius: 6
+            }
         ]
     },
     options: {
         responsive: true,
-        plugins: { legend: { position: 'top' } },
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'top'
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    precision: 0
+                }
+            }
+        }
     }
 });
 
-const deviceLabels = [<?= implode(',', array_map(fn($k) => '"' . ucfirst(str_replace('_',' ',$k)) . '"', array_keys($deviceStatusMap))) ?>];
-const deviceData   = [<?= implode(',', array_values($deviceStatusMap)) ?>];
-const deviceColors = ['#198754','#0d6efd','#fd7e14','#dc3545','#6f42c1','#6c757d'];
-
+<?php if ($deviceStatuses): ?>
 new Chart(document.getElementById('deviceStatusChart'), {
     type: 'doughnut',
     data: {
-        labels: deviceLabels,
-        datasets: [{ data: deviceData, backgroundColor: deviceColors }]
+        labels: <?= json_encode($deviceStatusChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
+        datasets: [{
+            data: <?= json_encode($deviceStatusChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
+            backgroundColor: ['#0d6efd', '#198754', '#fd7e14', '#dc3545', '#6f42c1', '#20c997', '#6c757d', '#0dcaf0', '#ffc107']
+        }]
     },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        }
+    }
 });
+<?php endif; ?>
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
