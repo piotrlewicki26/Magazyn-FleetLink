@@ -429,7 +429,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
     } catch (Throwable $e) {
         flashError('Nie udało się wygenerować eksportu raportu.');
         error_log('statistics export failed: ' . $e->getMessage());
-        redirect(getBaseUrl() . 'statistics.php?tab=monthly&year=' . urlencode((string)$year) . '&report_month=' . urlencode($reportMonth) . '&report_client_id=' . urlencode((string)($reportClientId ?? 0)));
+        redirect(getBaseUrl() . 'statistics.php?tab=monthly&report_month=' . urlencode($reportMonth) . '&report_client_id=' . urlencode((string)($reportClientId ?? 0)));
     }
 }
 
