@@ -313,7 +313,7 @@ function statsGetMonthlyReportRows(PDO $db, string $startDate, string $endDate, 
         $params[] = $clientId;
     }
 
-    $sql .= ' ORDER BY i.installation_date DESC, vehicle_registration ASC, serial_number ASC';
+    $sql .= ' ORDER BY i.installation_date DESC, v.registration ASC, d.serial_number ASC';
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -866,8 +866,8 @@ include __DIR__ . '/includes/header.php';
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 const monthLabels = ['Sty', 'Lut', 'Mar', 'Apr', 'Maj', 'Cze', 'Lip', 'Sie', 'Wrz', 'Paź', 'Lis', 'Gru'];
-const installSeries = <?= json_encode(array_values($installsByMonthData), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
-const serviceSeries = <?= json_encode(array_values($servicesByMonthData), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+const installSeries = <?= json_encode(array_values($installsByMonthData), JSON_UNESCAPED_UNICODE) ?>;
+const serviceSeries = <?= json_encode(array_values($servicesByMonthData), JSON_UNESCAPED_UNICODE) ?>;
 
 new Chart(document.getElementById('monthlyChart'), {
     type: 'bar',
@@ -913,7 +913,7 @@ new Chart(document.getElementById('deviceStatusChart'), {
     data: {
         labels: <?= json_encode($deviceStatusChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
         datasets: [{
-            data: <?= json_encode($deviceStatusChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>,
+            data: <?= json_encode($deviceStatusChartValues, JSON_UNESCAPED_UNICODE) ?>,
             backgroundColor: ['#0d6efd', '#198754', '#fd7e14', '#dc3545', '#6f42c1', '#20c997', '#6c757d', '#0dcaf0', '#ffc107']
         }]
     },
