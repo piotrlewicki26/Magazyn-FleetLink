@@ -237,9 +237,9 @@ try {
                     </button>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                    <button type="button" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-user-circle me-1"></i><?= h($currentUser['name'] ?? 'Użytkownik') ?>
-                    </a>
+                    </button>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><span class="dropdown-item-text text-muted small"><?= h($currentUser['email'] ?? '') ?></span></li>
                         <li><hr class="dropdown-divider"></li>
