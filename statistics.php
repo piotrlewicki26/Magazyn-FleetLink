@@ -463,7 +463,23 @@ $monthlyReportSummary = [
     'unique_technicians' => count($uniqueMonthlyTechnicians),
 ];
 $monthlyReportEmptyMessage = $monthlyReportError ?: 'Brak montaży dla wybranych filtrów.';
+
+$installsByMonthData = array_fill(1, 12, 0);
+$servicesByMonthData = array_fill(1, 12, 0);
+$topDevices = [];
+$servicesByType = [];
+$topTechnicians = [];
+$totalServiceRevenue = 0.0;
+$offerStats = ['total' => 0, 'accepted' => 0, 'total_value' => 0.0, 'accepted_value' => 0.0];
+$deviceStatuses = [];
 $statsWarnings = [];
+
+$monthInstallExpr = $isSqlite ? "CAST(strftime('%m', installation_date) AS INTEGER)" : 'MONTH(installation_date)';
+$monthServiceExpr = $isSqlite ? "CAST(strftime('%m', completed_date) AS INTEGER)" : 'MONTH(completed_date)';
+$yearInstallExpr = $isSqlite ? "strftime('%Y', installation_date) = ?" : 'YEAR(installation_date) = ?';
+$yearServiceExpr = $isSqlite ? "strftime('%Y', completed_date) = ?" : 'YEAR(completed_date) = ?';
+$yearCreatedExpr = $isSqlite ? "strftime('%Y', created_at) = ?" : 'YEAR(created_at) = ?';
+$yearParam = (string)$year;
 
 try {
     $mountedCountStmt = $db->prepare("SELECT COUNT(*) FROM installations WHERE status=?");
@@ -494,22 +510,6 @@ try {
     $statsWarnings[] = 'Nie udało się pobrać listy zamontowanych urządzeń.';
     error_log('statistics mounted devices failed: ' . $e->getMessage());
 }
-
-$installsByMonthData = array_fill(1, 12, 0);
-$servicesByMonthData = array_fill(1, 12, 0);
-$topDevices = [];
-$servicesByType = [];
-$topTechnicians = [];
-$totalServiceRevenue = 0.0;
-$offerStats = ['total' => 0, 'accepted' => 0, 'total_value' => 0.0, 'accepted_value' => 0.0];
-$deviceStatuses = [];
-
-$monthInstallExpr = $isSqlite ? "CAST(strftime('%m', installation_date) AS INTEGER)" : 'MONTH(installation_date)';
-$monthServiceExpr = $isSqlite ? "CAST(strftime('%m', completed_date) AS INTEGER)" : 'MONTH(completed_date)';
-$yearInstallExpr = $isSqlite ? "strftime('%Y', installation_date) = ?" : 'YEAR(installation_date) = ?';
-$yearServiceExpr = $isSqlite ? "strftime('%Y', completed_date) = ?" : 'YEAR(completed_date) = ?';
-$yearCreatedExpr = $isSqlite ? "strftime('%Y', created_at) = ?" : 'YEAR(created_at) = ?';
-$yearParam = (string)$year;
 
 try {
     $stmt = $db->prepare("SELECT {$monthInstallExpr} AS month_no, COUNT(*) AS item_count FROM installations WHERE {$yearInstallExpr} GROUP BY month_no ORDER BY month_no");
@@ -818,7 +818,7 @@ include __DIR__ . '/includes/header.php';
                     <td class="small text-muted" style="min-width: 240px;"><?= h($md['order_notes'] ?? '—') ?></td>
                 </tr>
                 <?php endforeach; ?>
-                <?php if (!$mountedDevices): ?>
+                <?php if (empty($mountedDevices)): ?>
                 <tr><td colspan="6" class="text-center text-muted py-4">Brak aktywnie zamontowanych urządzeń.</td></tr>
                 <?php endif; ?>
             </tbody>
