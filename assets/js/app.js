@@ -33,7 +33,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Ensure navbar dropdown toggles are initialized on every page
     if (typeof bootstrap !== 'undefined' && bootstrap.Dropdown) {
-        document.querySelectorAll('.navbar [data-bs-toggle="dropdown"]').forEach(function (el) {
+        var navDropdowns = document.querySelectorAll('.navbar [data-bs-toggle="dropdown"]');
+        if (navDropdowns.length === 0) return;
+        navDropdowns.forEach(function (el) {
             bootstrap.Dropdown.getOrCreateInstance(el);
         });
     }
