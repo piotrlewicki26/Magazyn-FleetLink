@@ -548,13 +548,15 @@ include __DIR__ . '/includes/header.php';
         <div class="alert alert-warning mb-3">
             <i class="fas fa-exclamation-triangle me-2"></i><?= h($monthlyReportError) ?>
         </div>
-        <?php else: ?>
+        <?php endif; ?>
+        <div class="small text-uppercase text-muted fw-semibold mb-2">Podsumowanie</div>
         <div class="d-flex flex-wrap gap-2 mb-3">
             <span class="badge text-bg-primary">Montaże: <?= $monthlyReportTotal ?></span>
             <span class="badge text-bg-secondary">Klienci: <?= $monthlyReportUniqueClients ?></span>
             <span class="badge text-bg-light border text-dark">Miesiąc: <?= h($reportMonthLabel) ?></span>
         </div>
 
+        <div class="small text-uppercase text-muted fw-semibold mb-2">Eksport</div>
         <div class="d-flex flex-wrap gap-2 mb-3">
             <form method="POST" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
@@ -578,6 +580,7 @@ include __DIR__ . '/includes/header.php';
             </form>
         </div>
 
+        <div class="small text-uppercase text-muted fw-semibold mb-2">Tabela raportu</div>
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle mb-0">
                 <thead class="table-light">
@@ -602,12 +605,11 @@ include __DIR__ . '/includes/header.php';
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($monthlyReportRows)): ?>
-                    <tr><td colspan="6" class="text-center text-muted py-4">Brak montaży dla wybranych filtrów.</td></tr>
+                    <tr><td colspan="6" class="text-center text-muted py-4"><?= $monthlyReportError ? 'Brak danych raportu. Spróbuj ponownie po odświeżeniu strony.' : 'Brak montaży dla wybranych filtrów.' ?></td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
         </div>
-        <?php endif; ?>
     </div>
 </div>
 
