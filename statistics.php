@@ -59,12 +59,16 @@ try {
  */
 function resolveClientName(array $row): string
 {
-    $workOrderName = trim((string)($row['wo_company_name'] ?: $row['wo_contact_name'] ?? ''));
+    $workOrderCompany = trim((string)($row['wo_company_name'] ?? ''));
+    $workOrderContact = trim((string)($row['wo_contact_name'] ?? ''));
+    $workOrderName = $workOrderCompany !== '' ? $workOrderCompany : $workOrderContact;
     if ($workOrderName !== '') {
         return $workOrderName;
     }
 
-    $installationName = trim((string)($row['inst_company_name'] ?: $row['inst_contact_name'] ?? ''));
+    $installationCompany = trim((string)($row['inst_company_name'] ?? ''));
+    $installationContact = trim((string)($row['inst_contact_name'] ?? ''));
+    $installationName = $installationCompany !== '' ? $installationCompany : $installationContact;
     if ($installationName !== '') {
         return $installationName;
     }
@@ -75,36 +79,63 @@ function resolveClientName(array $row): string
 /**
  * Fetch monthly installations report rows with optional client filtering.
  */
-function getMonthlyInstallReportRows(PDO $db, string $startDate, string $endDate, ?int $clientId = null): array
+function getMonthlyInstallReportRows(PDO $db, string $startDate, string $endDate, ?int $clientId = null, bool $canUseWorkOrders = true): array
 {
-    $sql = "
-        SELECT i.id as installation_id,
-               i.installation_date,
-               d.serial_number,
-               m.name as model_name,
-               mf.name as manufacturer_name,
-               wo.order_number,
-               wo.notes as work_order_notes,
-               i.notes as installation_notes,
-               wo.client_id as wo_client_id,
-               i.client_id as inst_client_id,
-               cwo.company_name as wo_company_name,
-               cwo.contact_name as wo_contact_name,
-               ci.company_name as inst_company_name,
-               ci.contact_name as inst_contact_name
-        FROM installations i
-        JOIN devices d ON d.id = i.device_id
-        JOIN models m ON m.id = d.model_id
-        JOIN manufacturers mf ON mf.id = m.manufacturer_id
-        LEFT JOIN work_orders wo ON wo.id = i.work_order_id
-        LEFT JOIN clients cwo ON cwo.id = wo.client_id
-        LEFT JOIN clients ci ON ci.id = i.client_id
-        WHERE i.installation_date >= ? AND i.installation_date < ?
-    ";
+    if ($canUseWorkOrders) {
+        $sql = "
+            SELECT i.id as installation_id,
+                   i.installation_date,
+                   d.serial_number,
+                   m.name as model_name,
+                   mf.name as manufacturer_name,
+                   wo.order_number,
+                   wo.notes as work_order_notes,
+                   i.notes as installation_notes,
+                   wo.client_id as wo_client_id,
+                   i.client_id as inst_client_id,
+                   cwo.company_name as wo_company_name,
+                   cwo.contact_name as wo_contact_name,
+                   ci.company_name as inst_company_name,
+                   ci.contact_name as inst_contact_name
+            FROM installations i
+            JOIN devices d ON d.id = i.device_id
+            JOIN models m ON m.id = d.model_id
+            JOIN manufacturers mf ON mf.id = m.manufacturer_id
+            LEFT JOIN work_orders wo ON wo.id = i.work_order_id
+            LEFT JOIN clients cwo ON cwo.id = wo.client_id
+            LEFT JOIN clients ci ON ci.id = i.client_id
+            WHERE i.installation_date >= ? AND i.installation_date < ?
+        ";
+    } else {
+        $sql = "
+            SELECT i.id as installation_id,
+                   i.installation_date,
+                   d.serial_number,
+                   m.name as model_name,
+                   mf.name as manufacturer_name,
+                   NULL as order_number,
+                   i.notes as work_order_notes,
+                   i.notes as installation_notes,
+                   NULL as wo_client_id,
+                   i.client_id as inst_client_id,
+                   NULL as wo_company_name,
+                   NULL as wo_contact_name,
+                   ci.company_name as inst_company_name,
+                   ci.contact_name as inst_contact_name
+            FROM installations i
+            JOIN devices d ON d.id = i.device_id
+            JOIN models m ON m.id = d.model_id
+            JOIN manufacturers mf ON mf.id = m.manufacturer_id
+            LEFT JOIN clients ci ON ci.id = i.client_id
+            WHERE i.installation_date >= ? AND i.installation_date < ?
+        ";
+    }
     $params = [$startDate, $endDate];
 
     if ($clientId) {
-        $sql .= " AND COALESCE(wo.client_id, i.client_id) = ?";
+        $sql .= $canUseWorkOrders
+            ? " AND COALESCE(wo.client_id, i.client_id) = ?"
+            : " AND i.client_id = ?";
         $params[] = $clientId;
     }
 
@@ -113,6 +144,20 @@ function getMonthlyInstallReportRows(PDO $db, string $startDate, string $endDate
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     return $stmt->fetchAll();
+}
+
+/**
+ * Return whether work order joins can be used in statistics report queries.
+ */
+function canUseWorkOrdersInStats(PDO $db): bool
+{
+    try {
+        $db->query("SELECT 1 FROM work_orders LIMIT 1");
+        $db->query("SELECT work_order_id FROM installations LIMIT 1");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
 }
 
 /**
@@ -301,27 +346,41 @@ $reportMonthStart = $reportMonthStartDate->format('Y-m-01');
 $reportMonthEnd = $reportMonthStartDate->modify('+1 month')->format('Y-m-01');
 $reportMonthLabel = ucfirst(formatDate($reportMonthStart, 'F Y'));
 
+$canUseWorkOrdersInStats = canUseWorkOrdersInStats($db);
 $monthlyReportClients = [];
 $monthlyReportRows = [];
 $monthlyReportError = null;
 
 try {
-    $clientsStmt = $db->prepare("
-        SELECT COALESCE(cwo.id, ci.id) as client_id,
-               COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) as client_name
-        FROM installations i
-        LEFT JOIN work_orders wo ON wo.id = i.work_order_id
-        LEFT JOIN clients cwo ON cwo.id = wo.client_id
-        LEFT JOIN clients ci ON ci.id = i.client_id
-        WHERE i.installation_date >= ? AND i.installation_date < ?
-          AND COALESCE(cwo.id, ci.id) IS NOT NULL
-        GROUP BY COALESCE(cwo.id, ci.id), COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
-        ORDER BY client_name
-    ");
+    if ($canUseWorkOrdersInStats) {
+        $clientsStmt = $db->prepare("
+            SELECT COALESCE(cwo.id, ci.id) as client_id,
+                   COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) as client_name
+            FROM installations i
+            LEFT JOIN work_orders wo ON wo.id = i.work_order_id
+            LEFT JOIN clients cwo ON cwo.id = wo.client_id
+            LEFT JOIN clients ci ON ci.id = i.client_id
+            WHERE i.installation_date >= ? AND i.installation_date < ?
+              AND COALESCE(cwo.id, ci.id) IS NOT NULL
+            GROUP BY COALESCE(cwo.id, ci.id), COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
+            ORDER BY client_name
+        ");
+    } else {
+        $clientsStmt = $db->prepare("
+            SELECT ci.id as client_id,
+                   COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) as client_name
+            FROM installations i
+            LEFT JOIN clients ci ON ci.id = i.client_id
+            WHERE i.installation_date >= ? AND i.installation_date < ?
+              AND ci.id IS NOT NULL
+            GROUP BY ci.id, COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
+            ORDER BY client_name
+        ");
+    }
     $clientsStmt->execute([$reportMonthStart, $reportMonthEnd]);
     $monthlyReportClients = $clientsStmt->fetchAll();
 
-    $monthlyReportRows = getMonthlyInstallReportRows($db, $reportMonthStart, $reportMonthEnd, $reportClientId);
+    $monthlyReportRows = getMonthlyInstallReportRows($db, $reportMonthStart, $reportMonthEnd, $reportClientId, $canUseWorkOrdersInStats);
 } catch (Exception $e) {
     $monthlyReportError = 'Nie udało się przygotować raportu miesięcznego. Sprawdź konfigurację danych lub skontaktuj się z administratorem.';
     error_log('statistics monthlyReport failed: ' . $e->getMessage());
@@ -356,7 +415,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
     $exportEndDate = $exportStartDateObj->modify('+1 month')->format('Y-m-01');
 
     try {
-        $exportRows = getMonthlyInstallReportRows($db, $exportStartDate, $exportEndDate, $exportClientId);
+        $exportRows = getMonthlyInstallReportRows($db, $exportStartDate, $exportEndDate, $exportClientId, $canUseWorkOrdersInStats);
         if ($exportFormat === 'xlsx') {
             exportMonthlyReportXlsx($exportRows, $exportMonth);
         } else {
