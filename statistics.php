@@ -384,6 +384,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
     }
 
     $exportFormat = sanitize($_POST['format'] ?? 'csv');
+    if (!in_array($exportFormat, ['csv', 'xlsx'], true)) {
+        $exportFormat = 'csv';
+    }
     $exportMonth = sanitize($_POST['report_month'] ?? date('Y-m'));
     if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $exportMonth)) {
         $exportMonth = date('Y-m');
