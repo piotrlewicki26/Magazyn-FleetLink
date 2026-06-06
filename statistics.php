@@ -949,6 +949,9 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
+<?php
+ob_start();
+?>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 const monthLabels = ['Sty', 'Lut', 'Mar', 'Apr', 'Maj', 'Cze', 'Lip', 'Sie', 'Wrz', 'Paź', 'Lis', 'Gru'];
@@ -1015,5 +1018,6 @@ new Chart(document.getElementById('deviceStatusChart'), {
 });
 <?php endif; ?>
 </script>
-
-<?php include __DIR__ . '/includes/footer.php'; ?>
+<?php
+$pageEndScripts = ob_get_clean();
+include __DIR__ . '/includes/footer.php'; ?>
