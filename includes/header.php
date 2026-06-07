@@ -1001,7 +1001,7 @@ var navSimDevicesJson = <?= json_encode(array_values(array_map(function($d) {
                    . ($d['sim_number'] ? ' — SIM: ' . $d['sim_number'] : '')
                    . ' (' . $d['manufacturer_name'] . ' ' . $d['model_name'] . ')',
     ];
-}, $navSimDevices))) ?>;
+}, $navSimDevices)), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 
 function navSimBulkBuildDeviceSelect() {
     var opts = '<option value="">— brak —</option>';

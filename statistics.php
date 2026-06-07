@@ -404,9 +404,9 @@ function statsGetMonthlyServiceRows(PDO $db, string $startDate, string $endDate,
 }
 
 /**
- * Fetch active devices installed in a given month for monthly report.
+ * Fetch all currently active devices for monthly report section.
  */
-function statsGetMonthlyActiveDevices(PDO $db, string $startDate, string $endDate, bool $includeWorkOrders, int $limit): array
+function statsGetMonthlyActiveDevices(PDO $db, bool $includeWorkOrders, int $limit, ?int $clientId = null): array
 {
     $sql = "
         SELECT
@@ -430,12 +430,18 @@ function statsGetMonthlyActiveDevices(PDO $db, string $startDate, string $endDat
         " . ($includeWorkOrders ? "LEFT JOIN work_orders wo ON wo.id = i.work_order_id
         LEFT JOIN clients oc ON oc.id = wo.client_id" : "") . "
         WHERE i.status = 'aktywna'
-          AND i.installation_date >= ? AND i.installation_date < ?
-        ORDER BY i.installation_date DESC, i.id DESC
-        LIMIT ?
     ";
+    $params = [];
+    if ($clientId !== null) {
+        $sql .= $includeWorkOrders
+            ? ' AND COALESCE(wo.client_id, i.client_id) = ?'
+            : ' AND i.client_id = ?';
+        $params[] = $clientId;
+    }
+    $sql .= ' ORDER BY i.installation_date DESC, i.id DESC LIMIT ?';
+    $params[] = $limit;
     $stmt = $db->prepare($sql);
-    $stmt->execute([$startDate, $endDate, $limit]);
+    $stmt->execute($params);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -588,17 +594,23 @@ if ($activeTab === 'monthly') {
     }
 
     try {
-        $countActiveStmt = $db->prepare(
-            "SELECT COUNT(*) FROM installations i WHERE i.status = 'aktywna' AND i.installation_date >= ? AND i.installation_date < ?"
-        );
-        $countActiveStmt->execute([$reportMonthStartValue, $reportMonthEndValue]);
+        if ($reportClientId !== null) {
+            $countActiveStmt = $db->prepare(
+                "SELECT COUNT(*) FROM installations i WHERE i.status = 'aktywna' AND i.client_id = ?"
+            );
+            $countActiveStmt->execute([$reportClientId]);
+        } else {
+            $countActiveStmt = $db->prepare(
+                "SELECT COUNT(*) FROM installations i WHERE i.status = 'aktywna'"
+            );
+            $countActiveStmt->execute([]);
+        }
         $monthlyActiveDevicesTotal = (int)$countActiveStmt->fetchColumn();
         $monthlyActiveDevices = statsGetMonthlyActiveDevices(
             $db,
-            $reportMonthStartValue,
-            $reportMonthEndValue,
             $includeWorkOrders,
-            $monthlyActiveDevicesDisplayLimit
+            $monthlyActiveDevicesDisplayLimit,
+            $reportClientId
         );
     } catch (Throwable $e) {
         $monthlyActiveDevicesError = 'Nie udało się pobrać listy zamontowanych urządzeń.';
@@ -1180,7 +1192,7 @@ include __DIR__ . '/includes/header.php';
                 <span class="badge bg-success ms-1"><?= $monthlyActiveDevicesTotal ?></span>
                 <?php endif; ?>
             </div>
-            <div class="small text-muted">Urządzenia zamontowane w <?= h($reportMonthLabel) ?>, których instalacja jest nadal aktywna</div>
+            <div class="small text-muted">Aktualnie aktywne instalacje urządzeń GPS<?= $reportClientId ? ' (wybrany klient)' : '' ?></div>
         </div>
     </div>
 
@@ -1216,7 +1228,7 @@ include __DIR__ . '/includes/header.php';
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($monthlyActiveDevices)): ?>
-                <tr><td colspan="5" class="text-center text-muted py-4">Brak aktywnych instalacji z wybranego miesiąca.</td></tr>
+                <tr><td colspan="5" class="text-center text-muted py-4">Brak aktywnych instalacji urządzeń.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
