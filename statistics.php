@@ -356,11 +356,141 @@ function statsGetMonthlyReportClients(PDO $db, string $startDate, string $endDat
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/**
+ * Fetch monthly service report rows.
+ */
+function statsGetMonthlyServiceRows(PDO $db, string $startDate, string $endDate, ?int $clientId): array
+{
+    $sql = "
+        SELECT
+            s.id AS service_id,
+            s.type AS service_type,
+            s.status AS service_status,
+            COALESCE(s.completed_date, s.planned_date) AS service_date,
+            s.completed_date,
+            s.planned_date,
+            s.description AS service_description,
+            s.cost AS service_cost,
+            d.serial_number,
+            m.name AS model_name,
+            mf.name AS manufacturer_name,
+            u.name AS technician_name,
+            v.registration AS vehicle_registration,
+            c.company_name AS client_company_name,
+            c.contact_name AS client_contact_name,
+            c.id AS client_id
+        FROM services s
+        JOIN devices d ON d.id = s.device_id
+        JOIN models m ON m.id = d.model_id
+        JOIN manufacturers mf ON mf.id = m.manufacturer_id
+        LEFT JOIN users u ON u.id = s.technician_id
+        LEFT JOIN installations inst ON inst.id = s.installation_id
+        LEFT JOIN vehicles v ON v.id = inst.vehicle_id
+        LEFT JOIN clients c ON c.id = inst.client_id
+        WHERE COALESCE(s.completed_date, s.planned_date) >= ? AND COALESCE(s.completed_date, s.planned_date) < ?
+    ";
+
+    $params = [$startDate, $endDate];
+    if ($clientId !== null) {
+        $sql .= ' AND c.id = ?';
+        $params[] = $clientId;
+    }
+
+    $sql .= ' ORDER BY COALESCE(s.completed_date, s.planned_date) DESC, d.serial_number ASC';
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Fetch active devices installed in a given month for monthly report.
+ */
+function statsGetMonthlyActiveDevices(PDO $db, string $startDate, string $endDate, bool $includeWorkOrders, int $limit): array
+{
+    $sql = "
+        SELECT
+            i.id AS installation_id,
+            i.installation_date,
+            d.serial_number,
+            m.name AS model_name,
+            mf.name AS manufacturer_name,
+            v.registration AS vehicle_registration,
+            " . ($includeWorkOrders
+                ? "COALESCE(c.company_name, oc.company_name) AS client_company_name,
+                   COALESCE(c.contact_name, oc.contact_name) AS client_contact_name"
+                : "c.company_name AS client_company_name,
+                   c.contact_name AS client_contact_name") . "
+        FROM installations i
+        JOIN devices d ON d.id = i.device_id
+        JOIN models m ON m.id = d.model_id
+        JOIN manufacturers mf ON mf.id = m.manufacturer_id
+        LEFT JOIN vehicles v ON v.id = i.vehicle_id
+        LEFT JOIN clients c ON c.id = i.client_id
+        " . ($includeWorkOrders ? "LEFT JOIN work_orders wo ON wo.id = i.work_order_id
+        LEFT JOIN clients oc ON oc.id = wo.client_id" : "") . "
+        WHERE i.status = 'aktywna'
+          AND i.installation_date >= ? AND i.installation_date < ?
+        ORDER BY i.installation_date DESC, i.id DESC
+        LIMIT ?
+    ";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([$startDate, $endDate, $limit]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Resolve service client name from service row.
+ */
+function statsResolveServiceClientName(array $row): string
+{
+    $company = trim((string)($row['client_company_name'] ?? ''));
+    if ($company !== '') {
+        return $company;
+    }
+    $contact = trim((string)($row['client_contact_name'] ?? ''));
+    if ($contact !== '') {
+        return $contact;
+    }
+    return '—';
+}
+
+/**
+ * Translate service type to Polish label.
+ */
+function statsServiceTypeLabel(string $type): string
+{
+    $map = [
+        'przeglad'    => 'Przegląd',
+        'naprawa'     => 'Naprawa',
+        'wymiana'     => 'Wymiana',
+        'aktualizacja' => 'Aktualizacja',
+        'inne'        => 'Inne',
+    ];
+    return $map[$type] ?? ucfirst($type);
+}
+
+/**
+ * Translate service status to Polish label.
+ */
+function statsServiceStatusLabel(string $status): string
+{
+    $map = [
+        'zaplanowany' => 'Zaplanowany',
+        'w_trakcie'   => 'W trakcie',
+        'zakończony'  => 'Zakończony',
+        'anulowany'   => 'Anulowany',
+        'archiwum'    => 'Archiwum',
+    ];
+    return $map[$status] ?? ucfirst($status);
+}
+
 $year = (int)($_GET['year'] ?? date('Y'));
 
 $activeTab = sanitize($_GET['tab'] ?? 'yearly');
-if (!in_array($activeTab, ['yearly', 'monthly', 'devices'], true)) {
-    $activeTab = 'yearly';
+// 'devices' was a former standalone tab — redirect to monthly
+if (!in_array($activeTab, ['yearly', 'monthly'], true)) {
+    $activeTab = $activeTab === 'devices' ? 'monthly' : 'yearly';
 }
 
 $reportMonth = sanitize($_GET['report_month'] ?? date('Y-m'));
@@ -369,11 +499,6 @@ if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $reportMonth)) {
 }
 $reportClientId = (int)($_GET['report_client_id'] ?? 0);
 $reportClientId = $reportClientId > 0 ? $reportClientId : null;
-
-$devMonth = sanitize($_GET['dev_month'] ?? '');
-if ($devMonth !== '' && !preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $devMonth)) {
-    $devMonth = '';
-}
 
 $reportMonthStart = DateTimeImmutable::createFromFormat('Y-m-d', $reportMonth . '-01');
 if (!$reportMonthStart) {
@@ -437,7 +562,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'expor
 $monthlyReportRows = [];
 $monthlyReportClients = [];
 $monthlyReportError = null;
-$monthlyReportSummary = ['total_installations' => 0, 'unique_clients' => 0, 'unique_devices' => 0, 'unique_technicians' => 0];
+$monthlyServiceRows = [];
+$monthlyServiceError = null;
+$monthlyActiveDevices = [];
+$monthlyActiveDevicesTotal = 0;
+$monthlyActiveDevicesError = null;
+$monthlyActiveDevicesDisplayLimit = 500;
+$monthlyReportSummary = ['total_installations' => 0, 'unique_clients' => 0, 'total_services' => 0, 'unique_technicians' => 0];
 $monthlyReportEmptyMessage = 'Brak montaży dla wybranych filtrów.';
 
 if ($activeTab === 'monthly') {
@@ -449,86 +580,57 @@ if ($activeTab === 'monthly') {
         error_log('statistics monthly report failed: ' . $e->getMessage());
     }
 
+    try {
+        $monthlyServiceRows = statsGetMonthlyServiceRows($db, $reportMonthStartValue, $reportMonthEndValue, $reportClientId);
+    } catch (Throwable $e) {
+        $monthlyServiceError = 'Nie udało się przygotować raportu serwisów za wybrany miesiąc.';
+        error_log('statistics monthly service report failed: ' . $e->getMessage());
+    }
+
+    try {
+        $countActiveStmt = $db->prepare(
+            "SELECT COUNT(*) FROM installations i WHERE i.status = 'aktywna' AND i.installation_date >= ? AND i.installation_date < ?"
+        );
+        $countActiveStmt->execute([$reportMonthStartValue, $reportMonthEndValue]);
+        $monthlyActiveDevicesTotal = (int)$countActiveStmt->fetchColumn();
+        $monthlyActiveDevices = statsGetMonthlyActiveDevices(
+            $db,
+            $reportMonthStartValue,
+            $reportMonthEndValue,
+            $includeWorkOrders,
+            $monthlyActiveDevicesDisplayLimit
+        );
+    } catch (Throwable $e) {
+        $monthlyActiveDevicesError = 'Nie udało się pobrać listy zamontowanych urządzeń.';
+        error_log('statistics monthly active devices failed: ' . $e->getMessage());
+    }
+
     $uniqueMonthlyClients = [];
-    $uniqueMonthlyDevices = [];
     $uniqueMonthlyTechnicians = [];
     foreach ($monthlyReportRows as $monthlyReportRow) {
         $clientName = statsResolveClientName($monthlyReportRow);
         if ($clientName !== '—') {
             $uniqueMonthlyClients[$clientName] = true;
         }
-        $serialNumber = trim((string)($monthlyReportRow['serial_number'] ?? ''));
-        if ($serialNumber !== '') {
-            $uniqueMonthlyDevices[$serialNumber] = true;
-        }
         $technicianName = trim((string)($monthlyReportRow['technician_name'] ?? ''));
         if ($technicianName !== '') {
             $uniqueMonthlyTechnicians[$technicianName] = true;
         }
     }
-
-    $monthlyReportSummary = [
-        'total_installations' => count($monthlyReportRows),
-        'unique_clients' => count($uniqueMonthlyClients),
-        'unique_devices' => count($uniqueMonthlyDevices),
-        'unique_technicians' => count($uniqueMonthlyTechnicians),
-    ];
-    $monthlyReportEmptyMessage = $monthlyReportError ?: 'Brak montaży dla wybranych filtrów.';
-}
-
-// ── Devices tab data ───────────────────────────────────────────────────
-$mountedDevices = [];
-$mountedDevicesTotal = 0;
-$mountedDevicesDisplayLimit = 500;
-$mountedDevicesError = null;
-
-if ($activeTab === 'devices') {
-    // Build WHERE clause based on month filter
-    $devMonthParams = [];
-    $devMonthWhere = "i.status='aktywna'";
-    if ($devMonth !== '') {
-        $devMonthStart = DateTimeImmutable::createFromFormat('Y-m-d', $devMonth . '-01');
-        if ($devMonthStart) {
-            $devMonthStartVal = $devMonthStart->format('Y-m-01');
-            $devMonthEndVal   = $devMonthStart->modify('+1 month')->format('Y-m-01');
-            $devMonthWhere    = "i.status='aktywna' AND i.installation_date >= ? AND i.installation_date < ?";
-            $devMonthParams   = [$devMonthStartVal, $devMonthEndVal];
+    foreach ($monthlyServiceRows as $svcRow) {
+        $tech = trim((string)($svcRow['technician_name'] ?? ''));
+        if ($tech !== '') {
+            $uniqueMonthlyTechnicians[$tech] = true;
         }
     }
 
-    try {
-        $countSql = "SELECT COUNT(*) FROM installations i WHERE {$devMonthWhere}";
-        $countStmt = $db->prepare($countSql);
-        $countStmt->execute($devMonthParams);
-        $mountedDevicesTotal = (int)$countStmt->fetchColumn();
-
-        $mountedSql = "
-            SELECT i.id AS installation_id, i.installation_date,
-                   d.serial_number,
-                   m.name AS model_name, mf.name AS manufacturer_name,
-                   " . ($includeWorkOrders
-                        ? "COALESCE(c.company_name, oc.company_name) AS client_company_name,
-                           COALESCE(c.contact_name, oc.contact_name) AS client_contact_name"
-                        : "c.company_name AS client_company_name,
-                           c.contact_name AS client_contact_name") . "
-            FROM installations i
-            JOIN devices d ON d.id=i.device_id
-            JOIN models m ON m.id=d.model_id
-            JOIN manufacturers mf ON mf.id=m.manufacturer_id
-            LEFT JOIN clients c ON c.id=i.client_id
-            " . ($includeWorkOrders ? "LEFT JOIN work_orders wo ON wo.id=i.work_order_id
-            LEFT JOIN clients oc ON oc.id=wo.client_id" : "") . "
-            WHERE {$devMonthWhere}
-            ORDER BY i.installation_date DESC, i.id DESC
-            LIMIT ?
-        ";
-        $mountedStmt = $db->prepare($mountedSql);
-        $mountedStmt->execute(array_merge($devMonthParams, [$mountedDevicesDisplayLimit]));
-        $mountedDevices = $mountedStmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        $mountedDevicesError = 'Nie udało się pobrać listy zamontowanych urządzeń.';
-        error_log('statistics mounted devices failed: ' . $e->getMessage());
-    }
+    $monthlyReportSummary = [
+        'total_installations' => count($monthlyReportRows),
+        'unique_clients'      => count($uniqueMonthlyClients),
+        'total_services'      => count($monthlyServiceRows),
+        'unique_technicians'  => count($uniqueMonthlyTechnicians),
+    ];
+    $monthlyReportEmptyMessage = $monthlyReportError ?: 'Brak montaży dla wybranych filtrów.';
 }
 
 // ── Yearly stats data ──────────────────────────────────────────────────
@@ -667,15 +769,6 @@ $acceptanceRate = $totalOffers > 0 ? round(($acceptedOffers / $totalOffers) * 10
 $deviceStatusChartLabels = array_map(static fn(array $row): string => ucfirst(str_replace('_', ' ', (string)$row['status'])), $deviceStatuses);
 $deviceStatusChartValues = array_map(static fn(array $row): int => (int)$row['item_count'], $deviceStatuses);
 
-// Label for current dev_month filter
-$devMonthLabel = '';
-if ($devMonth !== '') {
-    $devMonthDt = DateTimeImmutable::createFromFormat('Y-m-d', $devMonth . '-01');
-    if ($devMonthDt) {
-        $devMonthLabel = ucfirst(formatDate($devMonthDt->format('Y-m-01'), 'F Y'));
-    }
-}
-
 $activePage = 'statistics';
 $pageTitle = 'Statystyki';
 include __DIR__ . '/includes/header.php';
@@ -709,11 +802,6 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'monthly' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>statistics.php?tab=monthly&report_month=<?= h($reportMonth) ?>">
             <i class="fas fa-file-alt me-1"></i>Raport miesięczny
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'devices' ? 'active' : '' ?>" href="<?= getBaseUrl() ?>statistics.php?tab=devices<?= $devMonth !== '' ? '&dev_month=' . h($devMonth) : '' ?>">
-            <i class="fas fa-microchip me-1"></i>Zamontowane urządzenia
         </a>
     </li>
 </ul>
@@ -879,24 +967,25 @@ include __DIR__ . '/includes/header.php';
 <?php elseif ($activeTab === 'monthly'): ?>
 <!-- ═══ TAB: RAPORT MIESIĘCZNY ════════════════════════════════════════ -->
 
+<!-- Filter card -->
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
-            <div class="fw-semibold"><i class="fas fa-file-alt me-2 text-primary"></i>Raport montaży za miesiąc</div>
+            <div class="fw-semibold"><i class="fas fa-file-alt me-2 text-primary"></i>Raport miesięczny</div>
             <div class="small text-muted">Okres: <?= h($reportMonthLabel) ?></div>
         </div>
         <span class="badge rounded-pill text-bg-light border"><?= $includeWorkOrders ? 'Źródło: montaże + zlecenia' : 'Źródło: montaże' ?></span>
     </div>
-    <div class="card-body">
-        <form method="GET" class="row g-3 align-items-end mb-4">
+    <div class="card-body pb-3">
+        <form method="GET" id="reportFilterForm" class="row g-3 align-items-end mb-3">
             <input type="hidden" name="tab" value="monthly">
             <div class="col-md-3">
                 <label class="form-label">Miesiąc</label>
-                <input type="month" name="report_month" class="form-control" value="<?= h($reportMonth) ?>" required>
+                <input type="month" id="reportMonthInput" name="report_month" class="form-control" value="<?= h($reportMonth) ?>" required>
             </div>
             <div class="col-md-4">
                 <label class="form-label">Klient</label>
-                <select name="report_client_id" class="form-select">
+                <select name="report_client_id" id="reportClientSelect" class="form-select">
                     <option value="0">Wszyscy klienci</option>
                     <?php foreach ($monthlyReportClients as $client): ?>
                     <option value="<?= (int)$client['client_id'] ?>" <?= (int)$client['client_id'] === (int)($reportClientId ?? 0) ? 'selected' : '' ?>>
@@ -909,48 +998,14 @@ include __DIR__ . '/includes/header.php';
                 <button type="submit" class="btn btn-primary w-100"><i class="fas fa-filter me-1"></i>Filtruj</button>
             </div>
         </form>
-
-        <?php if ($monthlyReportError): ?>
-        <div class="alert alert-warning mb-4">
-            <i class="fas fa-exclamation-triangle me-2"></i><?= h($monthlyReportError) ?>
-        </div>
-        <?php endif; ?>
-
-        <div class="row g-3 mb-4">
-            <div class="col-6 col-lg-3">
-                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
-                    <div class="small text-muted">Montaże</div>
-                    <div class="h4 mb-0 fw-bold text-primary"><?= $monthlyReportSummary['total_installations'] ?></div>
-                </div>
-            </div>
-            <div class="col-6 col-lg-3">
-                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
-                    <div class="small text-muted">Klienci</div>
-                    <div class="h4 mb-0 fw-bold text-secondary"><?= $monthlyReportSummary['unique_clients'] ?></div>
-                </div>
-            </div>
-            <div class="col-6 col-lg-3">
-                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
-                    <div class="small text-muted">Urządzenia</div>
-                    <div class="h4 mb-0 fw-bold text-success"><?= $monthlyReportSummary['unique_devices'] ?></div>
-                </div>
-            </div>
-            <div class="col-6 col-lg-3">
-                <div class="border rounded-3 p-3 h-100 bg-light-subtle">
-                    <div class="small text-muted">Technicy</div>
-                    <div class="h4 mb-0 fw-bold text-info"><?= $monthlyReportSummary['unique_technicians'] ?></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="d-flex flex-wrap gap-2 mb-3">
+        <div class="d-flex gap-2 flex-wrap">
             <form method="POST">
                 <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
                 <input type="hidden" name="action" value="export_monthly_installations">
                 <input type="hidden" name="format" value="csv">
                 <input type="hidden" name="report_month" value="<?= h($reportMonth) ?>">
                 <input type="hidden" name="report_client_id" value="<?= (int)($reportClientId ?? 0) ?>">
-                <button type="submit" class="btn btn-outline-success"><i class="fas fa-file-csv me-1"></i>Eksport CSV</button>
+                <button type="submit" class="btn btn-outline-success btn-sm"><i class="fas fa-file-csv me-1"></i>Eksport montaży CSV</button>
             </form>
             <form method="POST">
                 <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
@@ -958,88 +1013,61 @@ include __DIR__ . '/includes/header.php';
                 <input type="hidden" name="format" value="xlsx">
                 <input type="hidden" name="report_month" value="<?= h($reportMonth) ?>">
                 <input type="hidden" name="report_client_id" value="<?= (int)($reportClientId ?? 0) ?>">
-                <button type="submit" class="btn btn-outline-primary"><i class="fas fa-file-excel me-1"></i>Eksport XLSX</button>
+                <button type="submit" class="btn btn-outline-primary btn-sm"><i class="fas fa-file-excel me-1"></i>Eksport montaży XLSX</button>
             </form>
-        </div>
-
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Data montażu</th>
-                        <th>Klient</th>
-                        <th>Pojazd</th>
-                        <th>Urządzenie</th>
-                        <th>Nr seryjny</th>
-                        <th>Technik</th>
-                        <th>Nr zlecenia</th>
-                        <th>Uwagi</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($monthlyReportRows as $row): ?>
-                    <tr>
-                        <td><?= $row['installation_date'] ? formatDate($row['installation_date']) : '—' ?></td>
-                        <td><?= h(statsResolveClientName($row)) ?></td>
-                        <td><?= h($row['vehicle_registration'] ?: '—') ?></td>
-                        <td><?= h(statsResolveDeviceLabel($row)) ?></td>
-                        <td class="fw-semibold"><?= h($row['serial_number'] ?: '—') ?></td>
-                        <td><?= h($row['technician_name'] ?: '—') ?></td>
-                        <td><?= h($row['order_number'] ?: '—') ?></td>
-                        <td class="small text-muted" style="min-width: 240px;"><?= nl2br(h(statsResolveReportNotes($row))) ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-                    <?php if (!$monthlyReportRows): ?>
-                    <tr>
-                        <td colspan="8" class="text-center text-muted py-4"><?= h($monthlyReportEmptyMessage) ?></td>
-                    </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
         </div>
     </div>
 </div>
 
-<?php elseif ($activeTab === 'devices'): ?>
-<!-- ═══ TAB: ZAMONTOWANE URZĄDZENIA ══════════════════════════════════ -->
-
-<div class="card border-0 shadow-sm mb-4">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div>
-            <div class="fw-semibold"><i class="fas fa-microchip me-2 text-primary"></i>Zamontowane urządzenia
-                <?php if ($mountedDevicesError === null): ?>
-                <span class="badge bg-secondary ms-1"><?= $mountedDevicesTotal ?></span>
-                <?php endif; ?>
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="small text-muted mb-1"><i class="fas fa-tools me-1 text-primary"></i>Montaże</div>
+                <div class="h3 fw-bold text-primary mb-0"><?= $monthlyReportSummary['total_installations'] ?></div>
             </div>
-            <?php if ($devMonthLabel !== ''): ?>
-            <div class="small text-muted">Filtr: <?= h($devMonthLabel) ?></div>
-            <?php else: ?>
-            <div class="small text-muted">Aktywne instalacje</div>
-            <?php endif; ?>
         </div>
     </div>
-    <div class="card-body pb-0">
-        <form method="GET" class="row g-2 align-items-end mb-3">
-            <input type="hidden" name="tab" value="devices">
-            <div class="col-auto">
-                <label class="form-label mb-1">Filtr miesiąca montażu</label>
-                <input type="month" name="dev_month" class="form-control" value="<?= h($devMonth) ?>">
+    <div class="col-6 col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="small text-muted mb-1"><i class="fas fa-wrench me-1 text-warning"></i>Serwisy</div>
+                <div class="h3 fw-bold text-warning mb-0"><?= $monthlyReportSummary['total_services'] ?></div>
             </div>
-            <div class="col-auto">
-                <button type="submit" class="btn btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="small text-muted mb-1"><i class="fas fa-users me-1 text-secondary"></i>Klienci (montaże)</div>
+                <div class="h3 fw-bold text-secondary mb-0"><?= $monthlyReportSummary['unique_clients'] ?></div>
             </div>
-            <?php if ($devMonth !== ''): ?>
-            <div class="col-auto">
-                <a href="<?= getBaseUrl() ?>statistics.php?tab=devices" class="btn btn-outline-secondary"><i class="fas fa-times me-1"></i>Wyczyść</a>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="small text-muted mb-1"><i class="fas fa-user-cog me-1 text-info"></i>Technicy</div>
+                <div class="h3 fw-bold text-info mb-0"><?= $monthlyReportSummary['unique_technicians'] ?></div>
             </div>
-            <?php endif; ?>
-        </form>
+        </div>
+    </div>
+</div>
+
+<!-- ─── Section 1: Montaże ─────────────────────────────────────────── -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <div class="fw-semibold"><i class="fas fa-tools me-2 text-primary"></i>Montaże
+            <span class="badge bg-primary ms-1"><?= count($monthlyReportRows) ?></span>
+        </div>
+        <div class="small text-muted">Lista montaży wykonanych w <?= h($reportMonthLabel) ?></div>
     </div>
 
-    <?php if ($mountedDevicesError): ?>
-    <div class="card-body pt-0">
+    <?php if ($monthlyReportError): ?>
+    <div class="card-body">
         <div class="alert alert-warning mb-0">
-            <i class="fas fa-exclamation-triangle me-2"></i><?= h($mountedDevicesError) ?>
+            <i class="fas fa-exclamation-triangle me-2"></i><?= h($monthlyReportError) ?>
         </div>
     </div>
     <?php else: ?>
@@ -1047,38 +1075,155 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th>Nr seryjny</th>
-                    <th>Model urządzenia</th>
                     <th>Data montażu</th>
+                    <th>Model urządzenia</th>
                     <th>Klient</th>
+                    <th>Pojazd</th>
+                    <th>Nr seryjny</th>
+                    <th>Technik</th>
+                    <th>Nr zlecenia</th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($mountedDevices as $md): ?>
-                <?php
-                    $mdClient = '—';
-                    if (!empty($md['client_company_name'])) {
-                        $mdClient = $md['client_company_name'];
-                    } elseif (!empty($md['client_contact_name'])) {
-                        $mdClient = $md['client_contact_name'];
-                    }
-                ?>
+                <?php foreach ($monthlyReportRows as $row): ?>
                 <tr>
-                    <td class="fw-semibold"><?= h($md['serial_number']) ?></td>
-                    <td><?= h($md['manufacturer_name'] . ' ' . $md['model_name']) ?></td>
-                    <td><?= formatDate($md['installation_date']) ?></td>
-                    <td><?= h($mdClient) ?></td>
+                    <td><?= $row['installation_date'] ? formatDate($row['installation_date']) : '—' ?></td>
+                    <td><?= h(statsResolveDeviceLabel($row)) ?></td>
+                    <td><?= h(statsResolveClientName($row)) ?></td>
+                    <td><?= h($row['vehicle_registration'] ?: '—') ?></td>
+                    <td class="fw-semibold"><?= h($row['serial_number'] ?: '—') ?></td>
+                    <td><?= h($row['technician_name'] ?: '—') ?></td>
+                    <td><?= h($row['order_number'] ?: '—') ?></td>
                 </tr>
                 <?php endforeach; ?>
-                <?php if (empty($mountedDevices)): ?>
-                <tr><td colspan="4" class="text-center text-muted py-4">Brak zamontowanych urządzeń dla wybranych kryteriów.</td></tr>
+                <?php if (!$monthlyReportRows): ?>
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-4"><?= h($monthlyReportEmptyMessage) ?></td>
+                </tr>
                 <?php endif; ?>
             </tbody>
         </table>
     </div>
-    <?php if ($mountedDevicesTotal > count($mountedDevices)): ?>
+    <?php endif; ?>
+</div>
+
+<!-- ─── Section 2: Serwisy ─────────────────────────────────────────── -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <div class="fw-semibold"><i class="fas fa-wrench me-2 text-warning"></i>Serwisy
+            <span class="badge bg-warning text-dark ms-1"><?= count($monthlyServiceRows) ?></span>
+        </div>
+        <div class="small text-muted">Lista serwisów w <?= h($reportMonthLabel) ?></div>
+    </div>
+
+    <?php if ($monthlyServiceError): ?>
+    <div class="card-body">
+        <div class="alert alert-warning mb-0">
+            <i class="fas fa-exclamation-triangle me-2"></i><?= h($monthlyServiceError) ?>
+        </div>
+    </div>
+    <?php else: ?>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Data serwisu</th>
+                    <th>Model urządzenia</th>
+                    <th>Klient</th>
+                    <th>Nr seryjny</th>
+                    <th>Typ serwisu</th>
+                    <th>Technik</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($monthlyServiceRows as $svcRow): ?>
+                <tr>
+                    <td><?= $svcRow['service_date'] ? formatDate($svcRow['service_date']) : '—' ?></td>
+                    <td><?= h(trim(($svcRow['manufacturer_name'] ?? '') . ' ' . ($svcRow['model_name'] ?? '')) ?: '—') ?></td>
+                    <td><?= h(statsResolveServiceClientName($svcRow)) ?></td>
+                    <td class="fw-semibold"><?= h($svcRow['serial_number'] ?: '—') ?></td>
+                    <td><?= h(statsServiceTypeLabel((string)($svcRow['service_type'] ?? ''))) ?></td>
+                    <td><?= h($svcRow['technician_name'] ?: '—') ?></td>
+                    <td>
+                        <?php
+                        $svcStatus = (string)($svcRow['service_status'] ?? '');
+                        $statusClass = match($svcStatus) {
+                            'zakończony' => 'bg-success',
+                            'w_trakcie'  => 'bg-warning text-dark',
+                            'zaplanowany' => 'bg-info text-dark',
+                            'anulowany'  => 'bg-secondary',
+                            default      => 'bg-light text-dark border',
+                        };
+                        ?>
+                        <span class="badge <?= $statusClass ?>"><?= h(statsServiceStatusLabel($svcStatus)) ?></span>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (!$monthlyServiceRows): ?>
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-4">Brak serwisów dla wybranych filtrów.</td>
+                </tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php endif; ?>
+</div>
+
+<!-- ─── Section 3: Zamontowane urządzenia w tym miesiącu ───────────── -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <div class="fw-semibold"><i class="fas fa-microchip me-2 text-success"></i>Zamontowane urządzenia (aktywne)
+                <?php if ($monthlyActiveDevicesError === null): ?>
+                <span class="badge bg-success ms-1"><?= $monthlyActiveDevicesTotal ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="small text-muted">Urządzenia zamontowane w <?= h($reportMonthLabel) ?>, których instalacja jest nadal aktywna</div>
+        </div>
+    </div>
+
+    <?php if ($monthlyActiveDevicesError): ?>
+    <div class="card-body">
+        <div class="alert alert-warning mb-0">
+            <i class="fas fa-exclamation-triangle me-2"></i><?= h($monthlyActiveDevicesError) ?>
+        </div>
+    </div>
+    <?php else: ?>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Data montażu</th>
+                    <th>Model urządzenia</th>
+                    <th>Klient</th>
+                    <th>Nr seryjny</th>
+                    <th>Pojazd</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($monthlyActiveDevices as $ad):
+                    $adClient = !empty($ad['client_company_name']) ? $ad['client_company_name']
+                        : (!empty($ad['client_contact_name']) ? $ad['client_contact_name'] : '—');
+                ?>
+                <tr>
+                    <td><?= formatDate($ad['installation_date']) ?></td>
+                    <td><?= h($ad['manufacturer_name'] . ' ' . $ad['model_name']) ?></td>
+                    <td><?= h($adClient) ?></td>
+                    <td class="fw-semibold"><?= h($ad['serial_number']) ?></td>
+                    <td><?= h($ad['vehicle_registration'] ?: '—') ?></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($monthlyActiveDevices)): ?>
+                <tr><td colspan="5" class="text-center text-muted py-4">Brak aktywnych instalacji z wybranego miesiąca.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php if ($monthlyActiveDevicesTotal > count($monthlyActiveDevices)): ?>
     <div class="card-footer py-2 text-muted small">
-        Wyświetlono pierwsze <?= count($mountedDevices) ?> z <?= $mountedDevicesTotal ?> rekordów.
+        Wyświetlono pierwsze <?= count($monthlyActiveDevices) ?> z <?= $monthlyActiveDevicesTotal ?> rekordów.
     </div>
     <?php endif; ?>
     <?php endif; ?>

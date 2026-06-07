@@ -113,6 +113,7 @@ body {
     padding: 0.4rem;
     min-width: 200px;
     backdrop-filter: blur(16px);
+    z-index: 1030;
 }
 
 .navbar .dropdown-item {
