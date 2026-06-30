@@ -31,6 +31,7 @@ Kompleksowa aplikacja webowa PHP/MySQL do zarządzania urządzeniami GPS — od 
 - Śledzenie statusu serwisów
 - Koszty serwisów
 - Powiązanie z montażem i technikiem
+- Publiczny formularz zgłoszeń serwisów, montaży i demontaży bez logowania
 
 ### 📅 Kalendarz
 - Wizualizacja serwisów i montaży na kalendarzu (FullCalendar)
@@ -95,6 +96,7 @@ Kompleksowa aplikacja webowa PHP/MySQL do zarządzania urządzeniami GPS — od 
 ├── index.php              # Przekierowanie (login lub dashboard)
 ├── setup.php              # Kreator instalacji (uruchom raz)
 ├── login.php / logout.php # Logowanie
+├── public_request.php     # Publiczny formularz zgłoszeń
 ├── dashboard.php          # Panel główny
 ├── devices.php            # Urządzenia GPS
 ├── manufacturers.php      # Producenci
@@ -112,6 +114,7 @@ Kompleksowa aplikacja webowa PHP/MySQL do zarządzania urządzeniami GPS — od 
 ├── email.php              # Wysyłanie e-mail
 ├── users.php              # Zarządzanie użytkownikami
 ├── settings.php           # Ustawienia aplikacji
+├── public_requests.php    # Obsługa zgłoszeń publicznych w panelu
 ├── .htaccess              # Nagłówki bezpieczeństwa, ochrona
 ├── includes/
 │   ├── config.php         # Konfiguracja (generowana przez setup.php)

@@ -216,6 +216,13 @@ function getStatusBadge($status, $type = 'device') {
             'anulowany'   => ['secondary', 'Anulowany'],
             'archiwum'    => ['dark', 'Archiwum'],
         ],
+        'public_request' => [
+            'nowe'                   => ['primary', 'Nowe'],
+            'zweryfikowane'          => ['info', 'Zweryfikowane'],
+            'w_realizacji'           => ['warning', 'W realizacji'],
+            'zamienione_na_zlecenie' => ['success', 'Zamienione na zlecenie'],
+            'odrzucone'              => ['danger', 'Odrzucone'],
+        ],
         'offer' => [
             'robocza'    => ['secondary', 'Robocza'],
             'wyslana'    => ['info', 'Wysłana'],
@@ -302,6 +309,109 @@ function generateServiceOrderNumber($referenceDate = null) {
     $stmt->execute([$prefix . '%']);
     $nextNumber = (int)$stmt->fetchColumn() + 1;
     return sprintf('%s%04d', $prefix, $nextNumber);
+}
+
+function ensurePublicRequestsTable(PDO $db): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    try {
+        $db->query("SELECT 1 FROM public_requests LIMIT 1");
+        return;
+    } catch (Exception $e) {}
+
+    $db->exec("
+        CREATE TABLE IF NOT EXISTS `public_requests` (
+          `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+          `request_number` VARCHAR(30) NOT NULL UNIQUE,
+          `request_type` ENUM('serwis','montaz','demontaz') NOT NULL DEFAULT 'serwis',
+          `status` ENUM('nowe','zweryfikowane','w_realizacji','zamienione_na_zlecenie','odrzucone') NOT NULL DEFAULT 'nowe',
+          `first_name` VARCHAR(100) NOT NULL,
+          `last_name` VARCHAR(100) NOT NULL,
+          `phone` VARCHAR(30) NOT NULL,
+          `company_name` VARCHAR(150) NOT NULL,
+          `nip` VARCHAR(20) DEFAULT NULL,
+          `email` VARCHAR(150) NOT NULL,
+          `service_address` VARCHAR(255) NOT NULL,
+          `description` TEXT NOT NULL,
+          `preferred_date` DATE DEFAULT NULL,
+          `vehicle_registration` VARCHAR(20) DEFAULT NULL,
+          `vehicle_vin` VARCHAR(30) DEFAULT NULL,
+          `vehicle_details` VARCHAR(255) DEFAULT NULL,
+          `consent_contact` TINYINT(1) NOT NULL DEFAULT 0,
+          `admin_notes` TEXT DEFAULT NULL,
+          `client_id` INT UNSIGNED DEFAULT NULL,
+          `technician_id` INT UNSIGNED DEFAULT NULL,
+          `internal_order_id` INT UNSIGNED DEFAULT NULL,
+          `submit_ip` VARCHAR(45) DEFAULT NULL,
+          `submit_user_agent` VARCHAR(255) DEFAULT NULL,
+          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (`id`),
+          KEY `idx_public_requests_status` (`status`),
+          KEY `idx_public_requests_type` (`request_type`),
+          KEY `idx_public_requests_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+}
+
+function generatePublicRequestNumber($referenceDate = null) {
+    $db = getDb();
+    ensurePublicRequestsTable($db);
+    $timestamp = ($referenceDate ? strtotime((string)$referenceDate) : false) ?: time();
+    $year  = date('Y', $timestamp);
+    $month = date('m', $timestamp);
+    $prefix = sprintf('ZGL/%s/%s/', $year, $month);
+    $stmt = $db->prepare("SELECT COALESCE(MAX(CAST(RIGHT(request_number, 4) AS UNSIGNED)), 0) FROM public_requests WHERE request_number LIKE ?");
+    $stmt->execute([$prefix . '%']);
+    $nextNumber = (int)$stmt->fetchColumn() + 1;
+    return sprintf('%s%04d', $prefix, $nextNumber);
+}
+
+function getPublicRequestTypeLabel($type) {
+    $map = [
+        'serwis'   => 'Serwis',
+        'montaz'   => 'Montaż',
+        'demontaz' => 'Demontaż',
+    ];
+    return $map[$type] ?? ucfirst((string)$type);
+}
+
+function getPublicRequestRecipients(PDO $db): array {
+    $recipients = [];
+
+    try {
+        $settingsRows = $db->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('company_email','smtp_from','smtp_from_name')")->fetchAll();
+        $settings = [];
+        foreach ($settingsRows as $row) {
+            $settings[$row['key']] = trim((string)$row['value']);
+        }
+        foreach (['company_email', 'smtp_from'] as $emailKey) {
+            $email = $settings[$emailKey] ?? '';
+            if ($email && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $recipients[strtolower($email)] = [
+                    'email' => $email,
+                    'name'  => $settings['smtp_from_name'] ?? (defined('APP_NAME') ? APP_NAME : 'FleetLink System GPS'),
+                ];
+            }
+        }
+    } catch (Exception $e) {}
+
+    try {
+        $usersStmt = $db->query("SELECT name, email FROM users WHERE active = 1 AND email IS NOT NULL AND email <> ''");
+        foreach ($usersStmt->fetchAll() as $user) {
+            $email = trim((string)($user['email'] ?? ''));
+            if ($email && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $recipients[strtolower($email)] = [
+                    'email' => $email,
+                    'name'  => trim((string)($user['name'] ?? '')),
+                ];
+            }
+        }
+    } catch (Exception $e) {}
+
+    return array_values($recipients);
 }
 
 function generateProtocolNumber($type = 'PP') {
@@ -528,6 +638,48 @@ function getEmailTemplateDefaults() {
   <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Opis</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
 </table>
 <p>Szczegóły dostępne są w panelu systemu.</p>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'public_request_confirmation' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#0d6efd;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}} &mdash; Potwierdzenie zgłoszenia</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
+<p>Dziękujemy za przesłanie zgłoszenia.</p>
+<p>Potwierdzamy przyjęcie zgłoszenia <strong>{{REQUEST_NUMBER}}</strong>.</p>
+<table style="border-collapse:collapse;width:100%;margin:12px 0">
+  <tr><td style="padding:6px 10px;color:#555;width:40%"><strong>Typ zgłoszenia</strong></td><td style="padding:6px 10px">{{REQUEST_TYPE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Firma</strong></td><td style="padding:6px 10px">{{COMPANY_NAME}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Adres usługi</strong></td><td style="padding:6px 10px">{{SERVICE_ADDRESS}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Preferowany termin</strong></td><td style="padding:6px 10px">{{PREFERRED_DATE}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Opis zgłoszenia</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
+</table>
+<p>Nasz zespół skontaktuje się z Państwem po weryfikacji zgłoszenia.</p>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+' . $footer . '
+</div></body></html>',
+
+        'public_request_internal' => '<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333">
+<div style="background:#198754;padding:16px 24px;border-radius:6px 6px 0 0">
+  <h2 style="color:#fff;margin:0;font-size:20px">{{APP_NAME}} &mdash; Nowe zgłoszenie publiczne</h2>
+</div>
+<div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px">
+<p>W systemie pojawiło się nowe zgłoszenie od klienta.</p>
+<table style="border-collapse:collapse;width:100%;margin:12px 0">
+  <tr><td style="padding:6px 10px;color:#555;width:40%"><strong>Numer zgłoszenia</strong></td><td style="padding:6px 10px"><strong>{{REQUEST_NUMBER}}</strong></td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Typ</strong></td><td style="padding:6px 10px">{{REQUEST_TYPE}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Klient</strong></td><td style="padding:6px 10px">{{CLIENT_NAME}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Firma</strong></td><td style="padding:6px 10px">{{COMPANY_NAME}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Telefon</strong></td><td style="padding:6px 10px">{{PHONE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>E-mail</strong></td><td style="padding:6px 10px">{{EMAIL}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Adres usługi</strong></td><td style="padding:6px 10px">{{SERVICE_ADDRESS}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Preferowany termin</strong></td><td style="padding:6px 10px">{{PREFERRED_DATE}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Pojazd</strong></td><td style="padding:6px 10px">{{VEHICLE}}</td></tr>
+  <tr style="background:#f8f9fa"><td style="padding:6px 10px;color:#555"><strong>Opis</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
+  <tr><td style="padding:6px 10px;color:#555"><strong>Panel</strong></td><td style="padding:6px 10px">{{REQUEST_URL}}</td></tr>
+</table>
 <br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
 ' . $footer . '
 </div></body></html>',

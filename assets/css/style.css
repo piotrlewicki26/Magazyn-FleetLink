@@ -555,6 +555,50 @@ body {
     max-height: 64px;
 }
 
+.login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--fl-muted);
+    font-size: .85rem;
+    margin: 1.5rem 0;
+}
+
+.login-divider::before,
+.login-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(13, 110, 253, .15);
+}
+
+.public-request-page {
+    padding: 1.5rem 0;
+}
+
+.public-request-shell {
+    max-width: 1080px;
+}
+
+.public-request-hero {
+    background: linear-gradient(135deg, rgba(13, 27, 75, .95), rgba(13, 110, 253, .92));
+    border-radius: 20px 20px 0 0;
+    padding: 2rem;
+    box-shadow: 0 24px 64px rgba(0,0,0,.18);
+}
+
+.public-request-success {
+    border-radius: 16px;
+    border: 1px solid rgba(25, 135, 84, .18);
+}
+
+.public-request-check {
+    background: rgba(13, 110, 253, .05);
+    border: 1px solid rgba(13, 110, 253, .12);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+}
+
 /* ── Quick Action Buttons (dashboard) ───────────────────── */
 .quick-action-btn {
     border-radius: var(--fl-radius);

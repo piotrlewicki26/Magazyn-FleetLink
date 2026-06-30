@@ -42,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Email templates save action (separate form)
     if ($postAction === 'save_templates') {
         $tplStmt = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
-        $allTplKeys = ['email_tpl_general', 'email_tpl_offer', 'email_tpl_service_reminder', 'email_tpl_installation_created', 'email_tpl_service_created'];
+        $allTplKeys = ['email_tpl_general', 'email_tpl_offer', 'email_tpl_service_reminder', 'email_tpl_installation_created', 'email_tpl_service_created', 'email_tpl_public_request_confirmation', 'email_tpl_public_request_internal'];
         foreach ($allTplKeys as $tplKey) {
             $val = $_POST[$tplKey] ?? '';
             $tplStmt->execute([$tplKey, $val, $val]);
@@ -124,6 +124,8 @@ $emailTplFields = [
     ['key' => 'email_tpl_service_reminder',     'defKey' => 'service_reminder',      'label' => 'Przypomnienie o serwisie',              'desc' => '{{APP_NAME}}, {{VEHICLE}}, {{DATE}}, {{DESCRIPTION}}, {{SENDER_NAME}}'],
     ['key' => 'email_tpl_installation_created', 'defKey' => 'installation_created',  'label' => 'Powiadomienie — nowy montaż',           'desc' => '{{APP_NAME}}, {{COUNT}}, {{DATE}}, {{TECHNICIAN}}, {{VEHICLES}}, {{ADDRESS}}, {{NOTES}}, {{SENDER_NAME}}'],
     ['key' => 'email_tpl_service_created',      'defKey' => 'service_created',       'label' => 'Powiadomienie — nowy serwis',           'desc' => '{{APP_NAME}}, {{SERVICE_TYPE}}, {{DEVICE}}, {{DATE}}, {{TECHNICIAN}}, {{STATUS}}, {{DESCRIPTION}}, {{SENDER_NAME}}'],
+    ['key' => 'email_tpl_public_request_confirmation', 'defKey' => 'public_request_confirmation', 'label' => 'Potwierdzenie zgłoszenia klienta', 'desc' => '{{APP_NAME}}, {{REQUEST_NUMBER}}, {{REQUEST_TYPE}}, {{COMPANY_NAME}}, {{SERVICE_ADDRESS}}, {{PREFERRED_DATE}}, {{DESCRIPTION}}, {{SENDER_NAME}}'],
+    ['key' => 'email_tpl_public_request_internal',     'defKey' => 'public_request_internal',     'label' => 'Powiadomienie — nowe zgłoszenie publiczne', 'desc' => '{{APP_NAME}}, {{REQUEST_NUMBER}}, {{REQUEST_TYPE}}, {{CLIENT_NAME}}, {{COMPANY_NAME}}, {{PHONE}}, {{EMAIL}}, {{SERVICE_ADDRESS}}, {{PREFERRED_DATE}}, {{VEHICLE}}, {{DESCRIPTION}}, {{REQUEST_URL}}, {{SENDER_NAME}}'],
 ];
 $schemaFields = [
     ['key' => 'schema_allcan300_pass',        'label' => 'ALL-CAN 300',          'default' => 'Pj0;Gm6$.g2rnd9'],

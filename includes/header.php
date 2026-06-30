@@ -108,13 +108,14 @@ try {
                     </ul>
                 </li>
                 <li class="nav-item dropdown">
-                    <button type="button" class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['orders','installations']) ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
+                    <button type="button" class="nav-link dropdown-toggle <?= in_array(($activePage ?? ''), ['orders','installations','public_requests']) ? 'active' : '' ?>" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="fas fa-clipboard-list me-1"></i>Zlecenia
                     </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php"><i class="fas fa-list me-2"></i>Lista zleceń</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=add"><i class="fas fa-plus me-2"></i>Nowe zlecenie</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=my"><i class="fas fa-user-check me-2"></i>Moje zlecenia</a></li>
+                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>public_requests.php"><i class="fas fa-inbox me-2"></i>Zgłoszenia publiczne</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=demontaze"><i class="fas fa-tools me-2"></i>Demontaże</a></li>
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>orders.php?action=protocols"><i class="fas fa-clipboard-check me-2"></i>Protokoły montaży</a></li>

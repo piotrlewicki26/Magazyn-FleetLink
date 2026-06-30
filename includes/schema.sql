@@ -179,6 +179,39 @@ CREATE TABLE IF NOT EXISTS `services` (
   FOREIGN KEY (`technician_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Public request submissions table
+CREATE TABLE IF NOT EXISTS `public_requests` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `request_number` VARCHAR(30) NOT NULL UNIQUE,
+  `request_type` ENUM('serwis','montaz','demontaz') NOT NULL DEFAULT 'serwis',
+  `status` ENUM('nowe','zweryfikowane','w_realizacji','zamienione_na_zlecenie','odrzucone') NOT NULL DEFAULT 'nowe',
+  `first_name` VARCHAR(100) NOT NULL,
+  `last_name` VARCHAR(100) NOT NULL,
+  `phone` VARCHAR(30) NOT NULL,
+  `company_name` VARCHAR(150) NOT NULL,
+  `nip` VARCHAR(20) DEFAULT NULL,
+  `email` VARCHAR(150) NOT NULL,
+  `service_address` VARCHAR(255) NOT NULL,
+  `description` TEXT NOT NULL,
+  `preferred_date` DATE DEFAULT NULL,
+  `vehicle_registration` VARCHAR(20) DEFAULT NULL,
+  `vehicle_vin` VARCHAR(30) DEFAULT NULL,
+  `vehicle_details` VARCHAR(255) DEFAULT NULL,
+  `consent_contact` TINYINT(1) NOT NULL DEFAULT 0,
+  `admin_notes` TEXT DEFAULT NULL,
+  `client_id` INT UNSIGNED DEFAULT NULL,
+  `technician_id` INT UNSIGNED DEFAULT NULL,
+  `internal_order_id` INT UNSIGNED DEFAULT NULL,
+  `submit_ip` VARCHAR(45) DEFAULT NULL,
+  `submit_user_agent` VARCHAR(255) DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_public_requests_status` (`status`),
+  KEY `idx_public_requests_type` (`request_type`),
+  KEY `idx_public_requests_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Offers table
 CREATE TABLE IF NOT EXISTS `offers` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

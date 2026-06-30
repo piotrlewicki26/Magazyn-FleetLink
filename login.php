@@ -112,6 +112,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <i class="fas fa-sign-in-alt me-2"></i>Zaloguj się
                 </button>
             </form>
+            <div class="login-divider"><span>lub</span></div>
+            <a href="<?= getBaseUrl() ?>public_request.php" class="btn btn-outline-primary btn-lg w-100">
+                <i class="fas fa-screwdriver-wrench me-2"></i>Zgłoś serwis / montaż / demontaż
+            </a>
+            <p class="text-center text-muted small mt-3 mb-0">
+                Formularz publiczny umożliwia zgłoszenie usługi bez logowania i wysyła potwierdzenie e-mail do klienta.
+            </p>
         </div>
         <div class="card-footer text-center text-muted small py-3">
             FleetLink System GPS v<?= defined('APP_VERSION') ? h(APP_VERSION) : '1.2.0' ?>
