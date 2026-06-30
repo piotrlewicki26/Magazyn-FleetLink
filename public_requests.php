@@ -185,6 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (PDOException $e) {
                     $sqlState = $e->getCode();
                     $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
+                    // 1062 = MySQL duplicate key, 1555/2067 = SQLite duplicate/unique constraint variants.
                     $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
                     if (!$isDuplicate || $attempt === 4) {
                         throw $e;
