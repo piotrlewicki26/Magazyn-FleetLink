@@ -356,7 +356,7 @@ function ensurePublicRequestsTable(PDO $db): void {
     ");
 }
 
-function generatePublicRequestNumber($referenceDate = null) {
+function generatePublicRequestNumber($referenceDate = null): string {
     $db = getDb();
     ensurePublicRequestsTable($db);
     $timestamp = ($referenceDate ? strtotime((string)$referenceDate) : false) ?: time();
@@ -369,7 +369,7 @@ function generatePublicRequestNumber($referenceDate = null) {
     return sprintf('%s%04d', $prefix, $nextNumber);
 }
 
-function getPublicRequestTypeLabel($type) {
+function getPublicRequestTypeLabel(string $type): string {
     $map = [
         'serwis'   => 'Serwis',
         'montaz'   => 'Montaż',
