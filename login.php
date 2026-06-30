@@ -95,12 +95,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <span class="public-hero-badge mb-3 d-inline-block">
                     <i class="fas fa-satellite-dish me-2"></i>System GPS FleetLink
                 </span>
-                <h1 class="public-hero-title">Profesjonalne<br>usługi GPS<br>dla Twojej floty</h1>
-                <p class="public-hero-lead">Montaż, serwis i demontaż urządzeń GPS. Wyślij zgłoszenie online — skontaktujemy się z Tobą, aby ustalić szczegóły.</p>
+                <h1 class="public-hero-title">System serwisowy<br>FleetLink</h1>
+                <p class="public-hero-lead">Montaż, serwis i demontaż urządzeń GPS. Wypełnij formularz zgłoszenia online — skontaktujemy się z Tobą, aby ustalić szczegóły.</p>
                 <div class="d-flex gap-3 flex-wrap mt-4">
-                    <a href="#form" class="btn btn-primary btn-lg px-5 fw-semibold">
-                        <i class="fas fa-paper-plane me-2"></i>Wyślij zgłoszenie
-                    </a>
+                    <button type="button" class="btn btn-primary btn-lg px-5 fw-semibold"
+                            data-bs-toggle="modal" data-bs-target="#requestModal">
+                        <i class="fas fa-file-alt me-2"></i>Formularz zgłoszenia
+                    </button>
                     <a href="#status" class="btn btn-outline-secondary btn-lg px-4">
                         <i class="fas fa-search me-2"></i>Sprawdź status
                     </a>
@@ -121,97 +122,110 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <!-- ── Sprawdź status ────────────────────────────────────── -->
 <section class="public-status-section" id="status">
     <div class="container-xl">
-        <div class="public-status-card mx-auto">
-            <div class="d-flex align-items-center gap-3 mb-4">
-                <div class="public-section-icon bg-primary bg-opacity-10 text-primary">
-                    <i class="fas fa-search"></i>
-                </div>
-                <div>
-                    <h2 class="h4 fw-bold mb-0">Sprawdź status zgłoszenia</h2>
-                    <p class="text-muted mb-0 small">Wpisz numer zgłoszenia otrzymany w potwierdzeniu e-mail</p>
-                </div>
-            </div>
-            <form method="GET" action="<?= getBaseUrl() ?>login.php" class="d-flex gap-3 flex-column flex-sm-row" id="statusCheckForm">
-                <input type="hidden" name="tab" value="status">
-                <div class="flex-grow-1">
-                    <div class="input-group input-group-lg">
-                        <span class="input-group-text"><i class="fas fa-hashtag text-muted"></i></span>
-                        <input type="text" name="check_number" id="checkNumberInput"
-                               class="form-control"
-                               value="<?= h($_GET['check_number'] ?? '') ?>"
-                               placeholder="np. ZGL/2025/06/0001"
-                               autocomplete="off">
+        <div class="row g-4 align-items-stretch">
+            <div class="col-lg-6">
+                <div class="public-status-card h-100">
+                    <div class="d-flex align-items-center gap-3 mb-4">
+                        <div class="public-section-icon bg-primary bg-opacity-10 text-primary">
+                            <i class="fas fa-search"></i>
+                        </div>
+                        <div>
+                            <h2 class="h4 fw-bold mb-0">Sprawdź status zgłoszenia</h2>
+                            <p class="text-muted mb-0 small">Wpisz numer zgłoszenia otrzymany w potwierdzeniu e-mail</p>
+                        </div>
                     </div>
-                </div>
-                <button type="submit" class="btn btn-primary btn-lg px-5 fw-semibold">
-                    <i class="fas fa-search me-2"></i>Sprawdź
-                </button>
-            </form>
+                    <form method="GET" action="<?= getBaseUrl() ?>login.php" class="d-flex gap-3 flex-column flex-sm-row" id="statusCheckForm">
+                        <input type="hidden" name="tab" value="status">
+                        <div class="flex-grow-1">
+                            <div class="input-group input-group-lg">
+                                <span class="input-group-text"><i class="fas fa-hashtag text-muted"></i></span>
+                                <input type="text" name="check_number" id="checkNumberInput"
+                                       class="form-control"
+                                       value="<?= h($_GET['check_number'] ?? '') ?>"
+                                       placeholder="np. ZGL/2025/06/0001"
+                                       autocomplete="off">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg px-5 fw-semibold">
+                            <i class="fas fa-search me-2"></i>Sprawdź
+                        </button>
+                    </form>
 
-            <?php
-            $checkNumber = sanitize($_GET['check_number'] ?? '');
-            $tabParam    = sanitize($_GET['tab'] ?? '');
-            if ($checkNumber !== '' && $tabParam === 'status'):
-                $db = getDb();
-                ensurePublicRequestsTable($db);
-                $chkStmt = $db->prepare("SELECT id, request_number, request_type, status, first_name, last_name, company_name, preferred_date, created_at FROM public_requests WHERE request_number = ? LIMIT 1");
-                $chkStmt->execute([$checkNumber]);
-                $chkRow = $chkStmt->fetch();
-                if ($chkRow):
-                    $statusMap = [
-                        'nowe'                     => ['primary',   'Nowe'],
-                        'zweryfikowane'             => ['info',      'Zweryfikowane'],
-                        'w_realizacji'             => ['warning',   'W realizacji'],
-                        'zamienione_na_zlecenie'   => ['success',   'Zlecenie utworzone'],
-                        'odrzucone'                => ['danger',    'Odrzucone'],
-                    ];
-                    $si = $statusMap[$chkRow['status']] ?? ['secondary', $chkRow['status']];
-            ?>
-            <div class="alert alert-success mt-4 mb-0 public-status-result">
-                <div class="d-flex gap-3 align-items-start flex-wrap">
-                    <i class="fas fa-circle-check fa-2x text-success mt-1"></i>
-                    <div class="flex-grow-1">
-                        <div class="fw-bold fs-5 mb-2"><?= h($chkRow['request_number']) ?></div>
-                        <div class="row g-2">
-                            <div class="col-sm-6">
-                                <small class="text-muted d-block">Typ zgłoszenia</small>
-                                <span class="fw-semibold"><?= h(getPublicRequestTypeLabel($chkRow['request_type'])) ?></span>
-                            </div>
-                            <div class="col-sm-6">
-                                <small class="text-muted d-block">Status</small>
-                                <span class="badge bg-<?= $si[0] ?> fs-6"><?= h($si[1]) ?></span>
-                            </div>
-                            <div class="col-sm-6">
-                                <small class="text-muted d-block">Firma</small>
-                                <span class="fw-semibold"><?= h($chkRow['company_name']) ?></span>
-                            </div>
-                            <div class="col-sm-6">
-                                <small class="text-muted d-block">Data zgłoszenia</small>
-                                <span class="fw-semibold"><?= h(substr($chkRow['created_at'], 0, 10)) ?></span>
+                    <?php
+                    $checkNumber = sanitize($_GET['check_number'] ?? '');
+                    $tabParam    = sanitize($_GET['tab'] ?? '');
+                    if ($checkNumber !== '' && $tabParam === 'status'):
+                        $db = getDb();
+                        ensurePublicRequestsTable($db);
+                        $chkStmt = $db->prepare("SELECT id, request_number, request_type, status, first_name, last_name, company_name, preferred_date, created_at FROM public_requests WHERE request_number = ? LIMIT 1");
+                        $chkStmt->execute([$checkNumber]);
+                        $chkRow = $chkStmt->fetch();
+                        if ($chkRow):
+                            $statusMap = [
+                                'nowe'                     => ['primary',   'Nowe'],
+                                'zweryfikowane'             => ['info',      'Zweryfikowane'],
+                                'w_realizacji'             => ['warning',   'W realizacji'],
+                                'zamienione_na_zlecenie'   => ['success',   'Zlecenie utworzone'],
+                                'odrzucone'                => ['danger',    'Odrzucone'],
+                            ];
+                            $si = $statusMap[$chkRow['status']] ?? ['secondary', $chkRow['status']];
+                    ?>
+                    <div class="alert alert-success mt-4 mb-0 public-status-result">
+                        <div class="d-flex gap-3 align-items-start flex-wrap">
+                            <i class="fas fa-circle-check fa-2x text-success mt-1"></i>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold fs-5 mb-2"><?= h($chkRow['request_number']) ?></div>
+                                <div class="row g-2">
+                                    <div class="col-sm-6">
+                                        <small class="text-muted d-block">Typ zgłoszenia</small>
+                                        <span class="fw-semibold"><?= h(getPublicRequestTypeLabel($chkRow['request_type'])) ?></span>
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <small class="text-muted d-block">Status</small>
+                                        <span class="badge bg-<?= $si[0] ?> fs-6"><?= h($si[1]) ?></span>
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <small class="text-muted d-block">Firma</small>
+                                        <span class="fw-semibold"><?= h($chkRow['company_name']) ?></span>
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <small class="text-muted d-block">Data zgłoszenia</small>
+                                        <span class="fw-semibold"><?= h(substr($chkRow['created_at'], 0, 10)) ?></span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
+                    <?php else: ?>
+                    <div class="alert alert-warning mt-4 mb-0">
+                        <i class="fas fa-triangle-exclamation me-2"></i>Nie znaleziono zgłoszenia o podanym numerze. Sprawdź, czy numer jest wpisany poprawnie.
+                    </div>
+                    <?php endif; endif; ?>
                 </div>
             </div>
-            <?php else: ?>
-            <div class="alert alert-warning mt-4 mb-0">
-                <i class="fas fa-triangle-exclamation me-2"></i>Nie znaleziono zgłoszenia o podanym numerze. Sprawdź, czy numer jest wpisany poprawnie.
+            <div class="col-lg-6">
+                <div class="public-status-card public-action-card h-100">
+                    <div class="d-flex align-items-center gap-3 mb-4">
+                        <div class="public-section-icon bg-primary bg-opacity-10 text-primary">
+                            <i class="fas fa-file-signature"></i>
+                        </div>
+                        <div>
+                            <h2 class="h4 fw-bold mb-0">Zleć usługę</h2>
+                            <p class="text-muted mb-0 small">Otwórz formularz zgłoszenia i przekaż szczegóły serwisu, montażu lub demontażu</p>
+                        </div>
+                    </div>
+                    <p class="public-section-lead text-start mx-0 mb-4">
+                        Wypełnij formularz, a nasz zespół skontaktuje się z Tobą w celu ustalenia szczegółów.
+                    </p>
+                    <div class="mt-auto">
+                        <button type="button" class="btn btn-primary btn-lg px-5 fw-semibold"
+                                data-bs-toggle="modal" data-bs-target="#requestModal">
+                            <i class="fas fa-file-alt me-2"></i>Formularz zgłoszenia
+                        </button>
+                    </div>
+                </div>
             </div>
-            <?php endif; endif; ?>
         </div>
-    </div>
-</section>
-
-<!-- ── Formularz zgłoszenia ──────────────────────────────── -->
-<section class="public-form-section" id="form">
-    <div class="container-xl">
-        <div class="text-center mb-5">
-            <h2 class="public-section-title">Zgłoś usługę GPS</h2>
-            <p class="public-section-lead">Wypełnij formularz, a nasz zespół skontaktuje się z Tobą w celu ustalenia szczegółów</p>
-        </div>
-        <a href="<?= getBaseUrl() ?>public_request.php" class="btn btn-primary btn-lg px-5 d-flex align-items-center gap-2 mx-auto" style="width:fit-content">
-            <i class="fas fa-file-alt"></i>Otwórz formularz zgłoszenia
-        </a>
     </div>
 </section>
 
@@ -270,6 +284,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <i class="fas fa-sign-in-alt me-2"></i>Zaloguj się
                     </button>
                 </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal formularza zgłoszenia ───────────────────────── -->
+<div class="modal fade" id="requestModal" tabindex="-1" aria-labelledby="requestModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl public-request-modal-dialog">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header border-0 pb-0 pt-4 px-4">
+                <div>
+                    <h5 class="modal-title fw-bold mb-1" id="requestModalLabel">Formularz zgłoszenia</h5>
+                    <p class="text-muted small mb-0">Serwis, montaż lub demontaż urządzeń GPS</p>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Zamknij"></button>
+            </div>
+            <div class="modal-body p-0">
+                <iframe
+                    src="<?= getBaseUrl() ?>public_request.php?embed=1"
+                    title="Formularz zgłoszenia FleetLink"
+                    class="public-request-modal-frame"
+                    loading="lazy"></iframe>
             </div>
         </div>
     </div>

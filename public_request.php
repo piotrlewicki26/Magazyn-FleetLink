@@ -17,6 +17,7 @@ require_once __DIR__ . '/includes/functions.php';
 
 date_default_timezone_set(defined('APP_TIMEZONE') ? APP_TIMEZONE : 'Europe/Warsaw');
 
+$embedded = ($_GET['embed'] ?? '') === '1';
 $db = getDb();
 ensurePublicRequestsTable($db);
 
@@ -202,7 +203,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } catch (Exception $e) {}
 
-            redirect(getBaseUrl() . 'public_request.php?submitted=' . urlencode($requestNumber) . '&type=' . urlencode($formData['request_type']));
+            $redirectUrl = getBaseUrl() . 'public_request.php?submitted=' . urlencode($requestNumber) . '&type=' . urlencode($formData['request_type']);
+            if ($embedded) {
+                $redirectUrl .= '&embed=1';
+            }
+            redirect($redirectUrl);
         } catch (Exception $e) {
             $error = 'Nie udało się zapisać zgłoszenia. Spróbuj ponownie.';
         }
@@ -219,8 +224,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="<?= getBaseUrl() ?>assets/css/style.css">
 </head>
-<body class="public-landing-page">
+<body class="<?= $embedded ? 'public-form-embed' : 'public-landing-page' ?>">
 
+<?php if (!$embedded): ?>
 <!-- ── Nawigacja ────────────────────────────────────────── -->
 <nav class="public-navbar navbar navbar-expand-lg sticky-top">
     <div class="container-xl">
@@ -238,6 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 </nav>
+<?php endif; ?>
 
 <div class="public-form-page">
     <div class="container-xl py-5">
@@ -269,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <h2 class="h5 fw-bold mb-2">Zgłoszenie przyjęte pomyślnie</h2>
                                 <p class="mb-1">Numer zgłoszenia: <strong><?= h($submittedNumber) ?></strong></p>
                                 <p class="mb-2">Typ: <strong><?= h(getPublicRequestTypeLabel($submittedType ?: 'serwis')) ?></strong></p>
-                                <p class="mb-0 small text-muted">Potwierdzenie zostało wysłane na Twój adres e-mail. Możesz sprawdzić status zgłoszenia <a href="<?= getBaseUrl() ?>login.php?tab=status&check_number=<?= urlencode($submittedNumber) ?>#status">tutaj</a>.</p>
+                                <p class="mb-0 small text-muted">Potwierdzenie zostało wysłane na Twój adres e-mail. Możesz sprawdzić status zgłoszenia <a href="<?= getBaseUrl() ?>login.php?tab=status&check_number=<?= urlencode($submittedNumber) ?>#status"<?= $embedded ? ' target="_top"' : '' ?>>tutaj</a>.</p>
                             </div>
                         </div>
                     </div>
@@ -391,6 +398,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 </div>
 
+<?php if (!$embedded): ?>
 <!-- ── Footer ────────────────────────────────────────────── -->
 <footer class="public-footer">
     <div class="container-xl d-flex flex-column flex-sm-row justify-content-between align-items-center gap-2">
@@ -441,6 +449,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>

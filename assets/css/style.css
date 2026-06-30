@@ -649,8 +649,11 @@ body {
     border-bottom: 1px solid #e9ecef;
 }
 .public-status-card {
-    max-width: 700px;
     background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 20px;
+    padding: 2rem;
+    box-shadow: 0 18px 48px rgba(13, 27, 75, .08);
 }
 .public-section-icon {
     width: 48px;
@@ -681,6 +684,25 @@ body {
     max-width: 520px;
     margin: 0 auto .5rem;
 }
+.public-action-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+.public-request-modal-dialog {
+    max-width: min(1200px, calc(100vw - 2rem));
+}
+.public-request-modal-dialog .modal-content {
+    border-radius: 24px;
+    overflow: hidden;
+}
+.public-request-modal-frame {
+    display: block;
+    width: 100%;
+    height: min(78vh, 980px);
+    border: 0;
+    background: #f0f4fb;
+}
 
 /* Footer */
 .public-footer {
@@ -697,6 +719,23 @@ body {
     background: #f0f4fb;
     min-height: calc(100vh - 130px);
 }
+.public-form-embed {
+    background: #f0f4fb;
+}
+.public-form-embed .public-form-page {
+    min-height: auto;
+}
+.public-form-embed .container-xl.py-5 {
+    max-width: 100%;
+    padding: 1rem !important;
+}
+.public-form-embed .public-request-shell {
+    max-width: none;
+}
+.public-form-embed .public-form-header {
+    border-radius: 20px 20px 0 0;
+}
+
 .public-request-shell {
     max-width: 900px;
 }
@@ -758,6 +797,15 @@ body {
 }
 .public-request-success {
     border-radius: 16px;
+}
+
+@media (max-width: 991.98px) {
+    .public-status-card {
+        padding: 1.5rem;
+    }
+    .public-request-modal-frame {
+        height: 72vh;
+    }
     border: 1px solid rgba(25, 135, 84, .18);
 }
 .public-request-check {
