@@ -157,7 +157,10 @@ try {
         ORDER BY created_at DESC
         LIMIT 5
     ")->fetchAll();
-} catch (PDOException $e) { $recentPublicRequests = []; }
+} catch (PDOException $e) {
+    error_log('FleetLink dashboard public_requests: ' . $e->getMessage());
+    $recentPublicRequests = [];
+}
 
 $activePage = 'dashboard';
 $pageTitle = 'Panel główny';

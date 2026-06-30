@@ -269,7 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <h2 class="h5 fw-bold mb-2">Zgłoszenie przyjęte pomyślnie</h2>
                                 <p class="mb-1">Numer zgłoszenia: <strong><?= h($submittedNumber) ?></strong></p>
                                 <p class="mb-2">Typ: <strong><?= h(getPublicRequestTypeLabel($submittedType ?: 'serwis')) ?></strong></p>
-                                <p class="mb-0 small text-muted">Potwierdzenie zostało wysłane na Twój adres e-mail. Możesz sprawdzić status zgłoszenia na <a href="<?= getBaseUrl() ?>login.php?tab=status&check_number=<?= urlencode($submittedNumber) ?>#status">stronie głównej</a>.</p>
+                                <p class="mb-0 small text-muted">Potwierdzenie zostało wysłane na Twój adres e-mail. Możesz sprawdzić status zgłoszenia <a href="<?= getBaseUrl() ?>login.php?tab=status&check_number=<?= urlencode($submittedNumber) ?>#status">tutaj</a>.</p>
                             </div>
                         </div>
                     </div>

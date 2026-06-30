@@ -788,6 +788,7 @@ function getDashboardStats() {
         $stmt = $db->query("SELECT COUNT(*) FROM public_requests WHERE status IN ('nowe','zweryfikowane')");
         $stats['public_requests_new'] = (int)$stmt->fetchColumn();
     } catch (Exception $e) {
+        error_log('FleetLink getDashboardStats public_requests: ' . $e->getMessage());
         $stats['public_requests_new'] = 0;
     }
 

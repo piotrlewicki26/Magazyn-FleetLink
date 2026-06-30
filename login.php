@@ -252,7 +252,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <span class="input-group-text"><i class="fas fa-envelope text-muted"></i></span>
                             <input type="email" id="email" name="email" class="form-control form-control-lg"
                                    value="<?= h($_POST['email'] ?? '') ?>" required
-                                   <?= $error ? '' : 'autofocus' ?>
                                    placeholder="twoj@email.pl">
                         </div>
                     </div>
@@ -289,14 +288,21 @@ function togglePass() {
         icon.classList.replace('fa-eye-slash', 'fa-eye');
     }
 }
-<?php if ($error): ?>
-// Open login modal automatically when there is a login error
 document.addEventListener('DOMContentLoaded', function () {
-    var modal = new bootstrap.Modal(document.getElementById('loginModal'));
-    modal.show();
-    document.getElementById('email').focus();
+    <?php if ($error): ?>
+    // Open login modal automatically when there is a login error
+    var loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
+    loginModal.show();
+    document.getElementById('loginModal').addEventListener('shown.bs.modal', function () {
+        document.getElementById('email').focus();
+    });
+    <?php else: ?>
+    // Auto-open modal and focus email if redirected here deliberately
+    document.getElementById('loginModal').addEventListener('shown.bs.modal', function () {
+        document.getElementById('email').focus();
+    });
+    <?php endif; ?>
 });
-<?php endif; ?>
 </script>
 </body>
 </html>
