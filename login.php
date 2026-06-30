@@ -134,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <p class="text-muted mb-0 small">Wpisz numer zgłoszenia otrzymany w potwierdzeniu e-mail</p>
                         </div>
                     </div>
-                    <form method="GET" action="<?= getBaseUrl() ?>login.php" class="d-flex gap-3 flex-column flex-sm-row" id="statusCheckForm">
+                    <form method="GET" action="<?= getBaseUrl() ?>login.php" class="d-flex gap-3 flex-column" id="statusCheckForm">
                         <input type="hidden" name="tab" value="status">
                         <div class="flex-grow-1">
                             <div class="input-group input-group-lg">
@@ -146,7 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                        autocomplete="off">
                             </div>
                         </div>
-                        <button type="submit" class="btn btn-primary btn-lg px-5 fw-semibold">
+                        <button type="submit" class="btn btn-primary btn-lg px-5 fw-semibold align-self-center">
                             <i class="fas fa-search me-2"></i>Sprawdź
                         </button>
                     </form>
@@ -217,7 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <p class="public-section-lead text-start mx-0 mb-4">
                         Wypełnij formularz, a nasz zespół skontaktuje się z Tobą w celu ustalenia szczegółów.
                     </p>
-                    <div class="mt-auto">
+                    <div class="mt-auto text-center">
                         <button type="button" class="btn btn-primary btn-lg px-5 fw-semibold"
                                 data-bs-toggle="modal" data-bs-target="#requestModal">
                             <i class="fas fa-file-alt me-2"></i>Formularz zgłoszenia
