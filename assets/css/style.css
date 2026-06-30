@@ -524,7 +524,7 @@ body {
 [data-bs-theme="dark"] .fc-toolbar-title { color: var(--fl-text); }
 [data-bs-theme="dark"] .fc-button { background: var(--fl-surface-2) !important; border-color: var(--fl-border) !important; color: var(--fl-text) !important; }
 
-/* ── Login page ─────────────────────────────────────────── */
+/* ── Login page (legacy, kept for compatibility) ────────── */
 .login-wrapper {
     min-height: 100vh;
     display: flex;
@@ -572,26 +572,194 @@ body {
     background: rgba(13, 110, 253, .15);
 }
 
+/* ── Public landing page (new premium layout) ───────────── */
+.public-landing-page {
+    background: #f0f4fb;
+    min-height: 100vh;
+}
+
+/* Navbar */
+.public-navbar {
+    background: rgba(13, 27, 75, .97);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    padding: .75rem 0;
+}
+.public-navbar .navbar-brand img { filter: brightness(1.1); }
+
+/* Hero section */
+.public-hero {
+    background: linear-gradient(140deg, #0d1b4b 0%, #1a3a8a 55%, #1a6cdc 100%);
+    padding: 5rem 0 6rem;
+    position: relative;
+    overflow: hidden;
+}
+.public-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 70% 60%, rgba(13, 110, 253, .25) 0%, transparent 60%);
+    pointer-events: none;
+}
+.public-hero-badge {
+    background: rgba(255,255,255,.12);
+    color: rgba(255,255,255,.85);
+    font-size: .82rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: .4rem 1rem;
+    border-radius: 100px;
+    border: 1px solid rgba(255,255,255,.18);
+}
+.public-hero-title {
+    font-size: clamp(2rem, 4vw, 3.2rem);
+    font-weight: 800;
+    color: #fff;
+    line-height: 1.15;
+    letter-spacing: -.02em;
+}
+.public-hero-lead {
+    color: rgba(255,255,255,.72);
+    font-size: 1.1rem;
+    max-width: 480px;
+    line-height: 1.6;
+}
+.public-hero-icons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    max-width: 340px;
+}
+.public-hero-icon-item {
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 16px;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    color: #fff;
+}
+.public-hero-icon-item i { display: block; margin-bottom: .5rem; opacity: .85; }
+.public-hero-icon-item span { font-size: .82rem; font-weight: 600; opacity: .75; }
+
+/* Status check section */
+.public-status-section {
+    padding: 3rem 0;
+    background: #fff;
+    border-bottom: 1px solid #e9ecef;
+}
+.public-status-card {
+    max-width: 700px;
+    background: #fff;
+}
+.public-section-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+.public-status-result { border-radius: 16px; }
+
+/* Form section on landing page */
+.public-form-section {
+    padding: 4rem 0;
+    text-align: center;
+}
+.public-section-title {
+    font-size: 1.8rem;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    color: #0d1b4b;
+}
+.public-section-lead {
+    color: #6c757d;
+    font-size: 1.05rem;
+    max-width: 520px;
+    margin: 0 auto .5rem;
+}
+
+/* Footer */
+.public-footer {
+    background: #0d1b4b;
+    color: rgba(255,255,255,.7);
+    padding: 1.25rem 0;
+    font-size: .9rem;
+}
+.public-footer a { color: rgba(255,255,255,.5); }
+.public-footer a:hover { color: rgba(255,255,255,.85); }
+
+/* ── Public form page (premium) ─────────────────────────── */
+.public-form-page {
+    background: #f0f4fb;
+    min-height: calc(100vh - 130px);
+}
+.public-request-shell {
+    max-width: 900px;
+}
+.public-form-header {
+    background: linear-gradient(135deg, #0d1b4b 0%, #1a3a8a 55%, #1a6cdc 100%);
+    border-radius: 20px 20px 0 0;
+    padding: 2rem 2.5rem;
+}
+.public-form-icon {
+    width: 48px;
+    height: 48px;
+    background: rgba(255,255,255,.15);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    flex-shrink: 0;
+}
+.public-form-card {
+    border-radius: 0 0 20px 20px !important;
+}
+.public-form-section-label {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    font-weight: 700;
+    font-size: .95rem;
+    color: #0d1b4b;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 1rem;
+    padding-bottom: .5rem;
+    border-bottom: 2px solid #e9ecef;
+}
+.public-form-section-num {
+    width: 26px;
+    height: 26px;
+    background: #0d6efd;
+    color: #fff;
+    border-radius: 50%;
+    font-size: .78rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* Legacy public request classes kept for compatibility */
 .public-request-page {
     padding: 1.5rem 0;
 }
-
-.public-request-shell {
-    max-width: 1080px;
-}
-
 .public-request-hero {
     background: linear-gradient(135deg, rgba(13, 27, 75, .95), rgba(13, 110, 253, .92));
     border-radius: 20px 20px 0 0;
     padding: 2rem;
     box-shadow: 0 24px 64px rgba(0,0,0,.18);
 }
-
 .public-request-success {
     border-radius: 16px;
     border: 1px solid rgba(25, 135, 84, .18);
 }
-
 .public-request-check {
     background: rgba(13, 110, 253, .05);
     border: 1px solid rgba(13, 110, 253, .12);

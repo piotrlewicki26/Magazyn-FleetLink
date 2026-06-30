@@ -560,7 +560,7 @@ function logEmail($to, $subject, $status) {
 
 function getEmailTemplateDefaults() {
     $footer = '<hr style="border:1px solid #eee;margin-top:20px"><table style="width:100%"><tr>'
-        . '<td style="font-size:11px;color:#999">{{APP_NAME}} &mdash; System GPS</td>'
+        . '<td style="font-size:11px;color:#999">FleetLink</td>'
         . '<td style="font-size:11px;color:#999;text-align:right"><a href="https://www.fleetlink.pl" style="color:#999;text-decoration:none">www.fleetlink.pl</a></td>'
         . '</tr></table>';
     return [
@@ -657,7 +657,7 @@ function getEmailTemplateDefaults() {
   <tr><td style="padding:6px 10px;color:#555"><strong>Opis zgłoszenia</strong></td><td style="padding:6px 10px">{{DESCRIPTION}}</td></tr>
 </table>
 <p>Nasz zespół skontaktuje się z Państwem po weryfikacji zgłoszenia.</p>
-<br><p style="margin-top:20px">Z poważaniem,<br><strong>{{SENDER_NAME}}</strong></p>
+<br><p style="margin-top:20px">Z poważaniem,<br><strong>FleetLink - System GPS</strong></p>
 ' . $footer . '
 </div></body></html>',
 
@@ -782,6 +782,14 @@ function getDashboardStats() {
 
     $stmt = $db->query("SELECT COUNT(*) FROM services WHERE status IN ('zaplanowany','w_trakcie')");
     $stats['pending_services'] = (int)$stmt->fetchColumn();
+
+    try {
+        ensurePublicRequestsTable($db);
+        $stmt = $db->query("SELECT COUNT(*) FROM public_requests WHERE status IN ('nowe','zweryfikowane')");
+        $stats['public_requests_new'] = (int)$stmt->fetchColumn();
+    } catch (Exception $e) {
+        $stats['public_requests_new'] = 0;
+    }
 
     $stmt = $db->query("SELECT COUNT(*) FROM offers WHERE status IN ('robocza','wyslana')");
     $stats['active_offers'] = (int)$stmt->fetchColumn();

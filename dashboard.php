@@ -147,6 +147,18 @@ $lowStock = $db->query("
     LIMIT 5
 ")->fetchAll();
 
+// Recent public requests
+$recentPublicRequests = [];
+try {
+    ensurePublicRequestsTable($db);
+    $recentPublicRequests = $db->query("
+        SELECT id, request_number, request_type, status, first_name, last_name, company_name, preferred_date, created_at
+        FROM public_requests
+        ORDER BY created_at DESC
+        LIMIT 5
+    ")->fetchAll();
+} catch (PDOException $e) { $recentPublicRequests = []; }
+
 $activePage = 'dashboard';
 $pageTitle = 'Panel główny';
 include __DIR__ . '/includes/header.php';
@@ -163,7 +175,7 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md">
         <div class="card stat-card text-white" style="background: linear-gradient(135deg, #0d6efd, #0b5ed7)">
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
@@ -179,7 +191,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md">
         <div class="card stat-card text-white" style="background: linear-gradient(135deg, #198754, #157347)">
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
@@ -195,7 +207,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md">
         <div class="card stat-card text-white" style="background: linear-gradient(135deg, #fd7e14, #dc6c0a)">
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
@@ -211,7 +223,23 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md">
+        <div class="card stat-card text-white" style="background: linear-gradient(135deg, #0ea5e9, #0284c7)">
+            <div class="card-body d-flex align-items-center">
+                <div class="flex-grow-1">
+                    <div class="stat-number"><?= $stats['public_requests_new'] ?></div>
+                    <div class="small opacity-75">Zgłoszenia</div>
+                </div>
+                <i class="fas fa-inbox stat-icon"></i>
+            </div>
+            <div class="card-footer bg-transparent border-0 pt-0">
+                <a href="public_requests.php" class="text-white-50 small text-decoration-none">
+                    <i class="fas fa-arrow-right me-1"></i>Zobacz zgłoszenia
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
         <div class="card stat-card text-white" style="background: linear-gradient(135deg, #6f42c1, #5a32a3)">
             <div class="card-body d-flex align-items-center">
                 <div class="flex-grow-1">
@@ -231,7 +259,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="row g-3">
     <!-- Recent Orders (Ostatnie zlecenia) -->
-    <div class="col-md-6">
+    <div class="col-md-4">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-clipboard-list me-2 text-success"></i>Ostatnie zlecenia</span>
@@ -283,7 +311,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <!-- Upcoming Services -->
-    <div class="col-md-6">
+    <div class="col-md-4">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-wrench me-2 text-warning"></i>Nadchodzące serwisy</span>
@@ -307,6 +335,49 @@ include __DIR__ . '/includes/header.php';
                             <div class="text-end">
                                 <?= getStatusBadge($svc['status'], 'service') ?>
                                 <br><small class="text-muted"><?= formatDate($svc['planned_date']) ?></small>
+                            </div>
+                        </div>
+                    </a>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Public Requests (Zgłoszenia publiczne) -->
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-inbox me-2 text-info"></i>Zgłoszenia publiczne</span>
+                <a href="public_requests.php" class="btn btn-sm btn-outline-primary">Wszystkie</a>
+            </div>
+            <div class="card-body p-0">
+                <?php if (empty($recentPublicRequests)): ?>
+                <div class="p-3 text-muted text-center">Brak zgłoszeń publicznych</div>
+                <?php else: ?>
+                <?php
+                $prStatusMap = [
+                    'nowe'                   => ['primary', 'Nowe'],
+                    'zweryfikowane'           => ['info',    'Zweryfikowane'],
+                    'w_realizacji'           => ['warning', 'W realizacji'],
+                    'zamienione_na_zlecenie' => ['success', 'Zlecenie'],
+                    'odrzucone'              => ['danger',  'Odrzucone'],
+                ];
+                ?>
+                <div class="list-group list-group-flush">
+                    <?php foreach ($recentPublicRequests as $pr): ?>
+                    <?php $prsi = $prStatusMap[$pr['status']] ?? ['secondary', $pr['status']]; ?>
+                    <a href="public_requests.php?action=view&id=<?= $pr['id'] ?>" class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <div class="fw-semibold small"><?= h($pr['request_number']) ?></div>
+                                <small class="text-muted"><i class="fas fa-building me-1"></i><?= h($pr['company_name']) ?></small>
+                                <br><small class="text-muted"><?= h(getPublicRequestTypeLabel($pr['request_type'])) ?></small>
+                            </div>
+                            <div class="text-end">
+                                <span class="badge bg-<?= $prsi[0] ?>"><?= h($prsi[1]) ?></span>
+                                <br><small class="text-muted"><?= h(substr($pr['created_at'], 0, 10)) ?></small>
                             </div>
                         </div>
                     </a>
