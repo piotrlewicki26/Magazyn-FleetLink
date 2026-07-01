@@ -222,6 +222,7 @@ function getStatusBadge($status, $type = 'device') {
             'w_realizacji'           => ['warning', 'W realizacji'],
             'zamienione_na_zlecenie' => ['success', 'Zamienione na zlecenie'],
             'odrzucone'              => ['danger', 'Odrzucone'],
+            'archiwum'               => ['dark', 'Archiwum'],
         ],
         'offer' => [
             'robocza'    => ['secondary', 'Robocza'],
@@ -318,6 +319,10 @@ function ensurePublicRequestsTable(PDO $db): void {
 
     try {
         $db->query("SELECT 1 FROM public_requests LIMIT 1");
+        // Table exists – ensure 'archiwum' is in the status ENUM
+        try {
+            $db->exec("ALTER TABLE `public_requests` MODIFY COLUMN `status` ENUM('nowe','zweryfikowane','w_realizacji','zamienione_na_zlecenie','odrzucone','archiwum') NOT NULL DEFAULT 'nowe'");
+        } catch (Exception $e) {}
         return;
     } catch (Exception $e) {}
 
@@ -326,7 +331,7 @@ function ensurePublicRequestsTable(PDO $db): void {
           `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
           `request_number` VARCHAR(30) NOT NULL UNIQUE,
           `request_type` ENUM('serwis','montaz','demontaz') NOT NULL DEFAULT 'serwis',
-          `status` ENUM('nowe','zweryfikowane','w_realizacji','zamienione_na_zlecenie','odrzucone') NOT NULL DEFAULT 'nowe',
+          `status` ENUM('nowe','zweryfikowane','w_realizacji','zamienione_na_zlecenie','odrzucone','archiwum') NOT NULL DEFAULT 'nowe',
           `first_name` VARCHAR(100) NOT NULL,
           `last_name` VARCHAR(100) NOT NULL,
           `phone` VARCHAR(30) NOT NULL,

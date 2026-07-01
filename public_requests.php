@@ -210,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'archive_request') {
-        $db->prepare("UPDATE public_requests SET archived = 1 WHERE id = ? AND status = 'zamienione_na_zlecenie'")
+        $db->prepare("UPDATE public_requests SET status = 'archiwum', archived = 1 WHERE id = ? AND status = 'zamienione_na_zlecenie'")
             ->execute([$requestId]);
         flashSuccess('Zgłoszenie zostało przeniesione do archiwum.');
         redirect(getBaseUrl() . 'public_requests.php?action=view&id=' . $requestId);
@@ -261,7 +261,7 @@ if ($action === 'view' && $id > 0) {
                 <i class="fas fa-clipboard-list me-2"></i>Otwórz zlecenie
             </a>
             <?php endif; ?>
-            <?php if ($request['status'] === 'zamienione_na_zlecenie' && empty($request['archived'])): ?>
+            <?php if ($request['status'] === 'zamienione_na_zlecenie'): ?>
             <form method="POST" class="d-inline m-0">
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="archive_request">
@@ -270,7 +270,7 @@ if ($action === 'view' && $id > 0) {
                     <i class="fas fa-box-archive me-2"></i>Archiwizuj
                 </button>
             </form>
-            <?php elseif (!empty($request['archived'])): ?>
+            <?php elseif ($request['status'] === 'archiwum'): ?>
             <span class="badge bg-secondary fs-6 align-self-center"><i class="fas fa-box-archive me-1"></i>Zarchiwizowane</span>
             <?php endif; ?>
         </div>
@@ -530,7 +530,7 @@ $requests = $listStmt->fetchAll();
                             <a href="<?= getBaseUrl() ?>public_requests.php?action=view&id=<?= (int)$request['id'] ?>" class="btn btn-sm btn-outline-primary">
                                 <i class="fas fa-eye me-1"></i>Szczegóły
                             </a>
-                            <?php if ($request['status'] === 'zamienione_na_zlecenie' && empty($request['archived'])): ?>
+                            <?php if ($request['status'] === 'zamienione_na_zlecenie'): ?>
                             <form method="POST" class="d-inline m-0">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="archive_request">
