@@ -154,6 +154,7 @@ try {
     $recentPublicRequests = $db->query("
         SELECT id, request_number, request_type, status, first_name, last_name, company_name, preferred_date, created_at
         FROM public_requests
+        WHERE status != 'archiwum'
         ORDER BY created_at DESC
         LIMIT 5
     ")->fetchAll();
