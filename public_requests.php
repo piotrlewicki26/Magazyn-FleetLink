@@ -387,8 +387,7 @@ if ($action === 'view' && $id > 0) {
                     <?php if (!empty($request['internal_order_id'])): ?>
                     <div class="alert alert-success mb-0">
                         To zgłoszenie zostało już zamienione na zlecenie
-                        <a href="<?= getBaseUrl() ?>orders.php?action=view&id=<?= (int)$request['internal_order_id'] ?>" class="alert-link">#<?= (int)$request['internal_order_id'] ?></a>
-                        <?php if (!empty($request['converted_by_name'])): ?> przez <strong><?= h($request['converted_by_name']) ?></strong><?php endif; ?>.
+                        <a href="<?= getBaseUrl() ?>orders.php?action=view&id=<?= (int)$request['internal_order_id'] ?>" class="alert-link">#<?= (int)$request['internal_order_id'] ?></a><?php if (!empty($request['converted_by_name'])): ?> przez <strong><?= h($request['converted_by_name']) ?></strong><?php endif; ?>.
                     </div>
                     <?php else: ?>
                     <form method="POST" class="row g-3">
@@ -512,7 +511,7 @@ $requests = $listStmt->fetchAll();
             </thead>
             <tbody>
                 <?php foreach ($requests as $request): ?>
-                <tr class="<?= !empty($request['archived']) ? 'table-secondary' : '' ?>" style="<?= !empty($request['archived']) ? 'opacity:.6' : '' ?>">
+                <tr class="<?= !empty($request['archived']) ? 'table-secondary' : '' ?>" style="<?= !empty($request['archived']) ? 'opacity: 0.6' : '' ?>">
                     <td class="fw-semibold"><?= h($request['request_number']) ?></td>
                     <td><?= h(getPublicRequestTypeLabel($request['request_type'])) ?></td>
                     <td>
