@@ -344,6 +344,8 @@ function ensurePublicRequestsTable(PDO $db): void {
           `client_id` INT UNSIGNED DEFAULT NULL,
           `technician_id` INT UNSIGNED DEFAULT NULL,
           `internal_order_id` INT UNSIGNED DEFAULT NULL,
+          `archived` TINYINT(1) NOT NULL DEFAULT 0,
+          `converted_by` INT UNSIGNED DEFAULT NULL,
           `submit_ip` VARCHAR(45) DEFAULT NULL,
           `submit_user_agent` VARCHAR(255) DEFAULT NULL,
           `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -48,6 +48,22 @@ function getDb() {
                     ADD COLUMN `mac_address` VARCHAR(17)       DEFAULT NULL AFTER `minor`");
             }
         } catch (PDOException $e) { /* devices table may not exist yet (fresh install) */ }
+
+        try {
+            // v10a: public_requests archived flag
+            $chk = $pdo->query("SHOW COLUMNS FROM `public_requests` LIKE 'archived'");
+            if ($chk && $chk->rowCount() === 0) {
+                $pdo->exec("ALTER TABLE `public_requests` ADD COLUMN `archived` TINYINT(1) NOT NULL DEFAULT 0 AFTER `internal_order_id`");
+            }
+        } catch (PDOException $e) { /* public_requests may not exist yet */ }
+
+        try {
+            // v10b: public_requests converted_by (user who created the work order)
+            $chk = $pdo->query("SHOW COLUMNS FROM `public_requests` LIKE 'converted_by'");
+            if ($chk && $chk->rowCount() === 0) {
+                $pdo->exec("ALTER TABLE `public_requests` ADD COLUMN `converted_by` INT UNSIGNED DEFAULT NULL AFTER `archived`");
+            }
+        } catch (PDOException $e) { /* public_requests may not exist yet */ }
     }
     return $pdo;
 }

@@ -195,9 +195,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $db->prepare("
                 UPDATE public_requests
-                SET status = 'zamienione_na_zlecenie', technician_id = ?, client_id = ?, internal_order_id = ?
+                SET status = 'zamienione_na_zlecenie', technician_id = ?, client_id = ?, internal_order_id = ?, converted_by = ?
                 WHERE id = ?
-            ")->execute([$technicianId, $clientId ?: null, $newOrderId, $requestId]);
+            ")->execute([$technicianId, $clientId ?: null, $newOrderId, $currentUser['id'], $requestId]);
 
             $db->commit();
             flashSuccess('Utworzono zlecenie ' . $orderNumber . ' na podstawie zgłoszenia.');
@@ -207,6 +207,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Nie udało się utworzyć zlecenia na podstawie zgłoszenia.');
             redirect(getBaseUrl() . 'public_requests.php?action=view&id=' . $requestId);
         }
+    }
+
+    if ($postAction === 'archive_request') {
+        $db->prepare("UPDATE public_requests SET archived = 1 WHERE id = ? AND status = 'zamienione_na_zlecenie'")
+            ->execute([$requestId]);
+        flashSuccess('Zgłoszenie zostało przeniesione do archiwum.');
+        redirect(getBaseUrl() . 'public_requests.php?action=view&id=' . $requestId);
     }
 }
 
@@ -222,10 +229,12 @@ $users = $db->query("SELECT id, name FROM users WHERE active = 1 ORDER BY name")
 
 if ($action === 'view' && $id > 0) {
     $detailStmt = $db->prepare("
-        SELECT pr.*, u.name AS technician_name, c.company_name AS linked_company_name, c.contact_name AS linked_contact_name
+        SELECT pr.*, u.name AS technician_name, c.company_name AS linked_company_name, c.contact_name AS linked_contact_name,
+               ub.name AS converted_by_name
         FROM public_requests pr
         LEFT JOIN users u ON u.id = pr.technician_id
         LEFT JOIN clients c ON c.id = pr.client_id
+        LEFT JOIN users ub ON ub.id = pr.converted_by
         WHERE pr.id = ?
         LIMIT 1
     ");
@@ -251,6 +260,18 @@ if ($action === 'view' && $id > 0) {
             <a href="<?= getBaseUrl() ?>orders.php?action=view&id=<?= (int)$request['internal_order_id'] ?>" class="btn btn-outline-primary">
                 <i class="fas fa-clipboard-list me-2"></i>Otwórz zlecenie
             </a>
+            <?php endif; ?>
+            <?php if ($request['status'] === 'zamienione_na_zlecenie' && empty($request['archived'])): ?>
+            <form method="POST" class="d-inline m-0">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="archive_request">
+                <input type="hidden" name="id" value="<?= (int)$request['id'] ?>">
+                <button type="submit" class="btn btn-outline-secondary" onclick="return confirm('Przenieść zgłoszenie do archiwum?')">
+                    <i class="fas fa-box-archive me-2"></i>Archiwizuj
+                </button>
+            </form>
+            <?php elseif (!empty($request['archived'])): ?>
+            <span class="badge bg-secondary fs-6 align-self-center"><i class="fas fa-box-archive me-1"></i>Zarchiwizowane</span>
             <?php endif; ?>
         </div>
     </div>
@@ -366,7 +387,8 @@ if ($action === 'view' && $id > 0) {
                     <?php if (!empty($request['internal_order_id'])): ?>
                     <div class="alert alert-success mb-0">
                         To zgłoszenie zostało już zamienione na zlecenie
-                        <a href="<?= getBaseUrl() ?>orders.php?action=view&id=<?= (int)$request['internal_order_id'] ?>" class="alert-link">#<?= (int)$request['internal_order_id'] ?></a>.
+                        <a href="<?= getBaseUrl() ?>orders.php?action=view&id=<?= (int)$request['internal_order_id'] ?>" class="alert-link">#<?= (int)$request['internal_order_id'] ?></a>
+                        <?php if (!empty($request['converted_by_name'])): ?> przez <strong><?= h($request['converted_by_name']) ?></strong><?php endif; ?>.
                     </div>
                     <?php else: ?>
                     <form method="POST" class="row g-3">
@@ -490,7 +512,7 @@ $requests = $listStmt->fetchAll();
             </thead>
             <tbody>
                 <?php foreach ($requests as $request): ?>
-                <tr>
+                <tr class="<?= !empty($request['archived']) ? 'table-secondary' : '' ?>" style="<?= !empty($request['archived']) ? 'opacity:.6' : '' ?>">
                     <td class="fw-semibold"><?= h($request['request_number']) ?></td>
                     <td><?= h(getPublicRequestTypeLabel($request['request_type'])) ?></td>
                     <td>
@@ -505,9 +527,21 @@ $requests = $listStmt->fetchAll();
                     <td><?= h($request['technician_name'] ?: '—') ?></td>
                     <td><?= h(formatDateTime($request['created_at'])) ?></td>
                     <td class="text-end">
-                        <a href="<?= getBaseUrl() ?>public_requests.php?action=view&id=<?= (int)$request['id'] ?>" class="btn btn-sm btn-outline-primary">
-                            <i class="fas fa-eye me-1"></i>Szczegóły
-                        </a>
+                        <div class="d-flex gap-1 justify-content-end">
+                            <a href="<?= getBaseUrl() ?>public_requests.php?action=view&id=<?= (int)$request['id'] ?>" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-eye me-1"></i>Szczegóły
+                            </a>
+                            <?php if ($request['status'] === 'zamienione_na_zlecenie' && empty($request['archived'])): ?>
+                            <form method="POST" class="d-inline m-0">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="archive_request">
+                                <input type="hidden" name="id" value="<?= (int)$request['id'] ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary" title="Przenieś do archiwum" onclick="return confirm('Przenieść do archiwum?')">
+                                    <i class="fas fa-box-archive"></i>
+                                </button>
+                            </form>
+                            <?php endif; ?>
+                        </div>
                     </td>
                 </tr>
                 <?php endforeach; ?>
