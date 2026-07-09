@@ -875,7 +875,7 @@ if ($action === 'list') {
                 FROM devices d
                 JOIN models m ON m.id = d.model_id
                 JOIN manufacturers mf ON mf.id = m.manufacturer_id
-                WHERE d.status = 'Nowe'
+                WHERE d.status = 'nowy'
                 ORDER BY mf.name, m.name, d.serial_number
                 LIMIT 500
             ")->fetchAll();
