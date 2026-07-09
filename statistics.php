@@ -89,12 +89,11 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite): array
             COUNT(i.id) AS install_count
         FROM work_orders wo
         LEFT JOIN clients c ON c.id = wo.client_id
-        LEFT JOIN installations i ON i.work_order_id = wo.id
+        INNER JOIN installations i ON i.work_order_id = wo.id
         LEFT JOIN devices d ON d.id = i.device_id
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearExpr}
-          AND i.id IS NOT NULL
         GROUP BY wo.id, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
         ORDER BY wo.date, wo.id
     ";
@@ -483,7 +482,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var monthlyDetails  = <?= json_encode(array_values($yearlyMonthlyDetails), JSON_UNESCAPED_UNICODE) ?>;
 
     function escHtml(s) {
-        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
     function openMonthModal(monthIndex) {
