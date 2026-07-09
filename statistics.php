@@ -52,7 +52,7 @@ function statsTableExists(PDO $db, string $table): bool
 function statsColumnExists(PDO $db, string $table, string $column): bool
 {
     try {
-        $allowedTable  = statsAllowedIdentifier($table,  ['installations', 'work_orders']);
+        $allowedTable  = statsAllowedIdentifier($table, ['installations', 'work_orders']);
         $allowedColumn = statsAllowedIdentifier($column, ['work_order_id', 'other_devices']);
         if ($allowedTable === null || $allowedColumn === null) {
             return false;
@@ -169,7 +169,7 @@ function statsExportMonthlyReportCsv(array $rows, string $monthValue): void
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     echo "\xEF\xBB\xBF";
 
-    fputcsv($out, ['Data zlecenia', 'Klient', 'Nr zlecenia', 'Adres', 'Technik', 'Uwagi', 'Inne urządzenia', 'Urządz. GPS (szt.)'], ';');
+    fputcsv($out, ['Data zlecenia', 'Klient', 'Nr zlecenia', 'Adres', 'Technik', 'Uwagi', 'Inne urządzenia', 'Urządzeń GPS (szt.)'], ';');
     foreach (statsBuildExportRows($rows) as $row) {
         fputcsv($out, $row, ';');
     }
@@ -185,7 +185,7 @@ function statsExportMonthlyReportXlsx(array $rows, string $monthValue): void
     $filename = 'raport_montaze_' . statsNormalizeReportMonthToken($monthValue) . '_' . date('Y-m-d_His') . '.xlsx';
     $xmlEsc = static fn($v) => htmlspecialchars((string)$v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
     $allRows = array_merge([
-        ['Data zlecenia', 'Klient', 'Nr zlecenia', 'Adres', 'Technik', 'Uwagi', 'Inne urządzenia', 'Urządz. GPS (szt.)'],
+        ['Data zlecenia', 'Klient', 'Nr zlecenia', 'Adres', 'Technik', 'Uwagi', 'Inne urządzenia', 'Urządzeń GPS (szt.)'],
     ], statsBuildExportRows($rows));
 
     $sharedStrings = [];
@@ -608,7 +608,7 @@ if ($activeTab === 'monthly') {
         'total_orders'      => count($monthlyOrderRows),
         'unique_clients'    => count($uniqueMonthlyClients),
         'total_services'    => count($monthlyServiceRows),
-        'unique_technicians'=> count($uniqueMonthlyTechnicians),
+        'unique_technicians' => count($uniqueMonthlyTechnicians),
     ];
     $monthlyReportEmptyMessage = $monthlyReportError ?: 'Brak zleceń dla wybranych filtrów.';
 }

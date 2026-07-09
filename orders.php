@@ -1932,7 +1932,7 @@ echo paginate($archiveTotalOrders, $archPerPage, $archPage, $_archUrl);
                 <div class="col-12">
                     <div class="alert alert-info py-2 mb-0">
                         <i class="fas fa-info-circle me-2"></i>
-                        <strong>Urządzenia GPS</strong> z listy systemowej będą przypisane do zlecenia z poziomu
+                        <strong>Urządzenia GPS</strong> będą przypisane do zlecenia z poziomu
                         <a href="devices.php" class="alert-link">listy urządzeń</a> — technik wybierze je samodzielnie.
                     </div>
                 </div>
