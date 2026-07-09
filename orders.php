@@ -1091,7 +1091,8 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                                     <i class="fas fa-microchip"></i>
                                 </button>
                                 <form method="POST" class="d-inline"
-                                      onsubmit="return confirm('Czy na pewno chcesz odłączyć urządzenie <?= h($dev['serial_number']) ?> od tego zlecenia?')">
+                                      data-serial="<?= h($dev['serial_number']) ?>"
+                                      onsubmit="return confirmRemoveFromOrder(this)">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="remove_device_from_order">
                                     <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
@@ -3197,6 +3198,8 @@ function toggleModalInstallForm() {
     var shouldShow = form.classList.contains('d-none');
     form.classList.toggle('d-none');
     if (shouldShow) {
+        // Small delay allows Bootstrap to finish layout updates before scrolling.
+        var QUICK_PREVIEW_SCROLL_DELAY_MS = 60;
         setTimeout(function() {
             form.scrollIntoView({behavior:'smooth', block:'start'});
             var body = document.getElementById('orderPreviewBody');
@@ -3205,8 +3208,15 @@ function toggleModalInstallForm() {
             }
             var input = document.getElementById('modalDeviceSearchInput');
             if (input) input.focus();
-        }, 60);
+        }, QUICK_PREVIEW_SCROLL_DELAY_MS);
     }
+}
+function confirmRemoveFromOrder(formEl) {
+    var serial = '';
+    if (formEl && formEl.dataset) {
+        serial = formEl.dataset.serial || '';
+    }
+    return confirm('Czy na pewno chcesz odłączyć urządzenie ' + serial + ' od tego zlecenia?');
 }
 
 function openOrderModal(orderId, orderNumber) {
