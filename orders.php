@@ -60,6 +60,15 @@ try {
     } catch (PDOException $ex) { /* ignore */ }
 }
 
+// Ensure other_devices column exists on work_orders (free-text for non-GPS devices)
+try {
+    $db->query("SELECT other_devices FROM work_orders LIMIT 1");
+} catch (PDOException $e) {
+    try {
+        $db->exec("ALTER TABLE `work_orders` ADD COLUMN `other_devices` TEXT DEFAULT NULL");
+    } catch (PDOException $ex) { /* ignore */ }
+}
+
 // ── One-time migration: create work_orders for completed/archived installations
 // that were created in the old "Montaże" list and have no work_order_id yet.
 try {
@@ -124,12 +133,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'add') {
-        $orderDate   = sanitize($_POST['date'] ?? '');
-        $clientId    = (int)($_POST['client_id'] ?? 0) ?: null;
-        $techId      = (int)($_POST['technician_id'] ?? 0) ?: null;
-        $address     = sanitize($_POST['installation_address'] ?? '');
-        $notes       = sanitize($_POST['notes'] ?? '');
-        $isAjax      = !empty($_POST['ajax']);
+        $orderDate    = sanitize($_POST['date'] ?? '');
+        $clientId     = (int)($_POST['client_id'] ?? 0) ?: null;
+        $techId       = (int)($_POST['technician_id'] ?? 0) ?: null;
+        $address      = sanitize($_POST['installation_address'] ?? '');
+        $notes        = sanitize($_POST['notes'] ?? '');
+        $otherDevices = sanitize($_POST['other_devices'] ?? '');
+        $isAjax       = !empty($_POST['ajax']);
 
         if (!$techId) $techId = (int)$currentUser['id'];
 
@@ -141,14 +151,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $orderNumber = '';
         $newOrderId = 0;
-        $insertStmt = $db->prepare("INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, created_by) VALUES (?,?,?,?,?,?,?,?)");
+        $insertStmt = $db->prepare("INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, other_devices, created_by) VALUES (?,?,?,?,?,?,?,?,?)");
         try {
             $maxInsertAttempts = 5;
             $inserted = false;
             for ($attempt = 0; $attempt < $maxInsertAttempts && !$inserted; $attempt++) {
                 $orderNumber = generateOrderNumber($orderDate ?: null);
                 try {
-                    $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $currentUser['id']]);
+                    $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $otherDevices ?: null, $currentUser['id']]);
                     $inserted = true;
                     $newOrderId = (int)$db->lastInsertId();
                 } catch (PDOException $e) {
@@ -187,14 +197,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $orderUrl = getBaseUrl() . 'orders.php?action=view&id=' . $newOrderId;
             $body = getEmailTemplate('order_created', [
-                'ORDER_NUMBER' => $orderNumber,
-                'DATE'         => date('d.m.Y', strtotime($orderDate)),
-                'TECHNICIAN'   => $techData['name'] ?? '—',
-                'CLIENT'       => $clientLabel,
-                'ADDRESS'      => $address ?: '—',
-                'NOTES'        => $notes ?: '—',
-                'ORDER_URL'    => $orderUrl,
-                'SENDER_NAME'  => $currentUser['name'],
+                'ORDER_NUMBER'  => $orderNumber,
+                'DATE'          => date('d.m.Y', strtotime($orderDate)),
+                'TECHNICIAN'    => $techData['name'] ?? '—',
+                'CLIENT'        => $clientLabel,
+                'ADDRESS'       => $address ?: '—',
+                'NOTES'         => $notes ?: '—',
+                'OTHER_DEVICES' => $otherDevices ?: '—',
+                'ORDER_URL'     => $orderUrl,
+                'SENDER_NAME'   => $currentUser['name'],
             ]);
 
             $allUsersStmt = $db->prepare("SELECT name, email FROM users WHERE email IS NOT NULL AND email <> ''");
@@ -223,14 +234,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $newOrderId);
 
     } elseif ($postAction === 'edit') {
-        $editId    = (int)($_POST['id'] ?? 0);
-        $orderDate = sanitize($_POST['date'] ?? '');
-        $clientId  = (int)($_POST['client_id'] ?? 0) ?: null;
-        $techId    = (int)($_POST['technician_id'] ?? 0) ?: null;
-        $address   = sanitize($_POST['installation_address'] ?? '');
-        $notes     = sanitize($_POST['notes'] ?? '');
-        $status    = sanitize($_POST['status'] ?? 'nowe');
-        $allowed   = ['nowe','w_trakcie','zakonczone','anulowane','archiwum'];
+        $editId       = (int)($_POST['id'] ?? 0);
+        $orderDate    = sanitize($_POST['date'] ?? '');
+        $clientId     = (int)($_POST['client_id'] ?? 0) ?: null;
+        $techId       = (int)($_POST['technician_id'] ?? 0) ?: null;
+        $address      = sanitize($_POST['installation_address'] ?? '');
+        $notes        = sanitize($_POST['notes'] ?? '');
+        $otherDevices = sanitize($_POST['other_devices'] ?? '');
+        $status       = sanitize($_POST['status'] ?? 'nowe');
+        $allowed      = ['nowe','w_trakcie','zakonczone','anulowane','archiwum'];
         if (!in_array($status, $allowed)) $status = 'nowe';
 
         if (!$editId || empty($orderDate)) {
@@ -247,8 +259,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'orders.php?action=view&id=' . $editId);
         }
 
-        $db->prepare("UPDATE work_orders SET date=?, client_id=?, installation_address=?, technician_id=?, status=?, notes=? WHERE id=?")
-           ->execute([$orderDate, $clientId, $address ?: null, $techId, $status, $notes ?: null, $editId]);
+        $db->prepare("UPDATE work_orders SET date=?, client_id=?, installation_address=?, technician_id=?, status=?, notes=?, other_devices=? WHERE id=?")
+           ->execute([$orderDate, $clientId, $address ?: null, $techId, $status, $notes ?: null, $otherDevices ?: null, $editId]);
         flashSuccess('Zlecenie zaktualizowane.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $editId);
 
@@ -1001,6 +1013,7 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                 </td></tr>
                 <tr><th class="text-muted ps-0">Adres instalacji</th><td><?= h($order['installation_address'] ?? '—') ?></td></tr>
                 <?php if ($order['notes']): ?><tr><th class="text-muted ps-0">Uwagi</th><td><?= nl2br(h($order['notes'])) ?></td></tr><?php endif; ?>
+                <?php if (!empty($order['other_devices'])): ?><tr><th class="text-muted ps-0">Inne urządzenia</th><td><?= nl2br(h($order['other_devices'])) ?></td></tr><?php endif; ?>
             </table>
             <?php if ($order['client_id']): ?>
             <hr>
@@ -1910,10 +1923,16 @@ echo paginate($archiveTotalOrders, $archPerPage, $archPage, $_archUrl);
                     <label class="form-label">Uwagi / opis zlecenia</label>
                     <textarea name="notes" class="form-control" rows="3" placeholder="Dodatkowe informacje dla technika..."></textarea>
                 </div>
+                <!-- Inne urządzenia (nie z listy urządzeń GPS) -->
+                <div class="col-12">
+                    <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
+                    <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, radio, alarm..."></textarea>
+                    <div class="form-text">Wpisz urządzenia, które nie figurują na liście urządzeń GPS w systemie.</div>
+                </div>
                 <div class="col-12">
                     <div class="alert alert-info py-2 mb-0">
                         <i class="fas fa-info-circle me-2"></i>
-                        <strong>Urządzenia GPS</strong> będą przypisane do zlecenia z poziomu
+                        <strong>Urządzenia GPS</strong> z listy systemowej będą przypisane do zlecenia z poziomu
                         <a href="devices.php" class="alert-link">listy urządzeń</a> — technik wybierze je samodzielnie.
                     </div>
                 </div>
@@ -2034,6 +2053,9 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                     </td></tr>
                     <tr><th class="text-muted ps-3">Adres instalacji</th><td><?= h($order['installation_address'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted ps-3">Uwagi</th><td><?= nl2br(h($order['notes'] ?? '—')) ?></td></tr>
+                    <?php if (!empty($order['other_devices'])): ?>
+                    <tr><th class="text-muted ps-3">Inne urządzenia</th><td><?= nl2br(h($order['other_devices'])) ?></td></tr>
+                    <?php endif; ?>
                     <tr><th class="text-muted ps-3">Utworzone</th><td><?= formatDateTime($order['created_at']) ?></td></tr>
                 </table>
             </div>
@@ -2496,6 +2518,10 @@ function openReassignDeviceModal(instId, serial) {
                             <label class="form-label">Uwagi</label>
                             <textarea name="notes" class="form-control" rows="3"><?= h($order['notes'] ?? '') ?></textarea>
                         </div>
+                        <div class="col-12">
+                            <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
+                            <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."><?= h($order['other_devices'] ?? '') ?></textarea>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -2788,6 +2814,10 @@ function showCompleteDisassemblyModal(deviceId, serial, installationId) {
                         <div class="col-12">
                             <label class="form-label">Uwagi / opis zlecenia</label>
                             <textarea name="notes" class="form-control" rows="2" placeholder="Dodatkowe informacje dla technika..."></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
+                            <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."></textarea>
                         </div>
                     </div>
                 </form>
