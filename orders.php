@@ -167,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             for ($attempt = 0; $attempt < $maxInsertAttempts && !$inserted; $attempt++) {
                 $orderNumber = generateOrderNumber($orderDate ?: null);
                 try {
-                    $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $otherDevices ?: null, $otherDevicesCount ?: null, $currentUser['id']]);
+                    $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $otherDevices ?: null, $otherDevicesCount, $currentUser['id']]);
                     $inserted = true;
                     $newOrderId = (int)$db->lastInsertId();
                 } catch (PDOException $e) {
@@ -270,7 +270,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $db->prepare("UPDATE work_orders SET date=?, client_id=?, installation_address=?, technician_id=?, status=?, notes=?, other_devices=?, other_devices_count=? WHERE id=?")
-           ->execute([$orderDate, $clientId, $address ?: null, $techId, $status, $notes ?: null, $otherDevices ?: null, $otherDevicesCount ?: null, $editId]);
+           ->execute([$orderDate, $clientId, $address ?: null, $techId, $status, $notes ?: null, $otherDevices ?: null, $otherDevicesCount, $editId]);
         flashSuccess('Zlecenie zaktualizowane.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $editId);
 

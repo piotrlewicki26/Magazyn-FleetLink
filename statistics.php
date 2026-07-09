@@ -170,7 +170,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     foreach ($byMonth as $month => $groups) {
         $normalizedGroups = [];
         foreach ($groups as $groupKey => $group) {
-            if (str_starts_with((string)$groupKey, '_odc_')) {
+            if (strpos((string)$groupKey, '_odc_') === 0) {
                 continue;
             }
             $modelLabels = [];
@@ -178,7 +178,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $modelLabels[] = $count > 1 ? ($modelName . ' × ' . $count) : $modelName;
             }
             // Strip internal tracking keys before output
-            $cleanGroup = array_filter($group, static fn($k) => !str_starts_with((string)$k, '_odc_'), ARRAY_FILTER_USE_KEY);
+            $cleanGroup = array_filter($group, static fn($k) => strpos((string)$k, '_odc_') !== 0, ARRAY_FILTER_USE_KEY);
             $cleanGroup['models'] = $modelLabels;
             $normalizedGroups[] = $cleanGroup;
         }
