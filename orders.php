@@ -3192,7 +3192,7 @@ function openModalReassignDevice(instId, serial) {
     form.classList.remove('d-none');
     form.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
-// Delay after showing install form so modal layout settles before smooth scroll.
+// 60ms delay (empirically) prevents scroll jump before modal content reflow on mobile.
 const INSTALL_FORM_TOGGLE_LAYOUT_DELAY_MS = 60;
 
 function toggleModalInstallForm() {
@@ -3205,7 +3205,7 @@ function toggleModalInstallForm() {
         setTimeout(function() {
             form.scrollIntoView({behavior:'smooth', block:'start'});
             var body = document.getElementById('orderPreviewBody');
-            if (body?.scrollTo) {
+            if (body && body.scrollTo) {
                 body.scrollTo({ top: body.scrollHeight, behavior: 'smooth' });
             }
             var input = document.getElementById('modalDeviceSearchInput');
