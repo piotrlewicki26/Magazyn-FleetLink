@@ -3192,7 +3192,7 @@ function openModalReassignDevice(instId, serial) {
     form.classList.remove('d-none');
     form.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
-// Delay needed for Bootstrap modal content reflow before smooth scrolling.
+// 60ms is enough for Bootstrap modal content reflow after toggling hidden sections.
 const LAYOUT_UPDATE_DELAY_MS = 60;
 
 function toggleModalInstallForm() {
@@ -3218,6 +3218,7 @@ function confirmRemoveFromOrder(formEl) {
     if (formEl && formEl.dataset) {
         serial = (formEl.dataset.serial || '').trim();
     }
+    serial = serial.replace(/[<>"'`]/g, '').trim();
     if (serial) {
         return confirm('Czy na pewno chcesz odłączyć urządzenie ' + serial + ' od tego zlecenia?');
     }
