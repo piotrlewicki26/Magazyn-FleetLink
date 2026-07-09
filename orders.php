@@ -1964,7 +1964,7 @@ echo paginate($archiveTotalOrders, $archPerPage, $archPage, $_archUrl);
                 <!-- Inne urządzenia (nie z listy urządzeń GPS) -->
                 <div class="col-12">
                     <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
-                    <div class="row g-2">
+                    <div class="row g-2 align-items-end">
                         <div class="col-sm-8">
                             <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, radio, alarm..."></textarea>
                         </div>
@@ -2571,7 +2571,7 @@ function openReassignDeviceModal(instId, serial) {
                         </div>
                         <div class="col-12">
                             <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
-                            <div class="row g-2">
+                            <div class="row g-2 align-items-end">
                                 <div class="col-sm-8">
                                     <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."><?= h($order['other_devices'] ?? '') ?></textarea>
                                 </div>
@@ -2876,7 +2876,7 @@ function showCompleteDisassemblyModal(deviceId, serial, installationId) {
                         </div>
                         <div class="col-12">
                             <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
-                            <div class="row g-2">
+                            <div class="row g-2 align-items-end">
                                 <div class="col-sm-8">
                                     <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."></textarea>
                                 </div>

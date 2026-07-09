@@ -101,7 +101,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             COUNT(i.id) AS install_count
         FROM work_orders wo
         LEFT JOIN clients c ON c.id = wo.client_id
-        INNER JOIN installations i ON i.work_order_id = wo.id
+        LEFT JOIN installations i ON i.work_order_id = wo.id
         LEFT JOIN devices d ON d.id = i.device_id
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
@@ -137,13 +137,14 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
 
             $modelName = trim((string)($row['model_name'] ?? ''));
 
-            if (!isset($byMonth[$month][$clientName]['models'][$modelName])) {
-                $byMonth[$month][$clientName]['models'][$modelName] = 0;
-            }
-
             $installCount = (int)($row['install_count'] ?? 0);
-            $byMonth[$month][$clientName]['models'][$modelName] += $installCount;
-            $byMonth[$month][$clientName]['total_install_count'] += $installCount;
+            if ($installCount > 0 && $modelName !== '') {
+                if (!isset($byMonth[$month][$clientName]['models'][$modelName])) {
+                    $byMonth[$month][$clientName]['models'][$modelName] = 0;
+                }
+                $byMonth[$month][$clientName]['models'][$modelName] += $installCount;
+                $byMonth[$month][$clientName]['total_install_count'] += $installCount;
+            }
 
             // Accumulate other_devices_count once per work order date (avoid double-counting when multiple GPS models)
             $otherCount = (int)($row['other_devices_count'] ?? 0);
@@ -198,6 +199,7 @@ $hasOtherDevicesCountColumn = $hasWorkOrdersTable && statsColumnExists($db, 'wor
 
 // ── Yearly stats data ──────────────────────────────────────────────────
 $installsByMonthData = array_fill(1, 12, 0);
+$otherByMonthData    = array_fill(1, 12, 0);
 $servicesByMonthData = array_fill(1, 12, 0);
 $topDevices = [];
 $servicesByType = [];
@@ -227,6 +229,24 @@ $statsWarnings = [];
     } catch (Throwable $e) {
         $statsWarnings[] = 'Nie udało się pobrać miesięcznych montaży.';
         error_log('statistics installs by month failed: ' . $e->getMessage());
+    }
+
+    if ($hasOtherDevicesCountColumn) {
+        try {
+            $yearWoExpr  = $isSqlite ? "strftime('%Y', date) = ?" : 'YEAR(date) = ?';
+            $monthWoExpr = $isSqlite ? "CAST(strftime('%m', date) AS INTEGER)" : 'MONTH(date)';
+            $stmt = $db->prepare("SELECT {$monthWoExpr} AS month_no, COALESCE(SUM(other_devices_count), 0) AS item_count FROM work_orders WHERE {$yearWoExpr} AND other_devices_count > 0 GROUP BY month_no ORDER BY month_no");
+            $stmt->execute([$yearParam]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $month = (int)($row['month_no'] ?? 0);
+                if ($month >= 1 && $month <= 12) {
+                    $otherByMonthData[$month] = (int)$row['item_count'];
+                }
+            }
+        } catch (Throwable $e) {
+            $statsWarnings[] = 'Nie udało się pobrać miesięcznych urządzeń innych.';
+            error_log('statistics other devices by month failed: ' . $e->getMessage());
+        }
     }
 
     try {
@@ -376,6 +396,10 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body">
                 <div class="text-muted small mb-1">Montaże w <?= $year ?></div>
                 <div class="h3 fw-bold text-primary mb-0"><?= array_sum($installsByMonthData) ?></div>
+                <?php $totalOtherByYear = array_sum($otherByMonthData); ?>
+                <?php if ($totalOtherByYear > 0): ?>
+                <div class="small text-muted mt-1">+ <?= $totalOtherByYear ?> inne</div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -548,6 +572,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var monthLabels     = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'];
     var monthShort      = ['Sty','Lut','Mar','Apr','Maj','Cze','Lip','Sie','Wrz','Paź','Lis','Gru'];
     var installSeries   = <?= json_encode(array_values($installsByMonthData), JSON_UNESCAPED_UNICODE) ?>;
+    var otherSeries     = <?= json_encode(array_values($otherByMonthData), JSON_UNESCAPED_UNICODE) ?>;
     var serviceSeries   = <?= json_encode(array_values($servicesByMonthData), JSON_UNESCAPED_UNICODE) ?>;
     var monthlyDetails  = <?= json_encode(array_values($yearlyMonthlyDetails), JSON_UNESCAPED_UNICODE) ?>;
 
@@ -628,9 +653,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 labels: monthShort,
                 datasets: [
                     {
-                        label: 'Montaże',
+                        label: 'Montaże GPS',
                         data: installSeries,
                         backgroundColor: 'rgba(13, 110, 253, 0.82)',
+                        borderRadius: 6
+                    },
+                    {
+                        label: 'Inne urządzenia',
+                        data: otherSeries,
+                        backgroundColor: 'rgba(255, 193, 7, 0.82)',
                         borderRadius: 6
                     },
                     {
