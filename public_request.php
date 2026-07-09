@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $honeypot = trim((string)($_POST['website'] ?? ''));
     $clientIp = substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45);
     $userAgent = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
-    $validTypes = ['serwis', 'montaz', 'demontaz'];
+    $validTypes = ['serwis', 'montaz', 'demontaz', 'inna'];
 
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Nieprawidłowe żądanie. Odśwież stronę i spróbuj ponownie.';
@@ -301,7 +301,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <div class="col-md-4">
                                 <label class="form-label fw-semibold">Rodzaj usługi <span class="text-danger">*</span></label>
                                 <select name="request_type" class="form-select" required>
-                                    <?php foreach (['serwis' => 'Serwis GPS', 'montaz' => 'Montaż GPS', 'demontaz' => 'Demontaż GPS'] as $value => $label): ?>
+                                    <?php foreach (['serwis' => 'Serwis GPS', 'montaz' => 'Montaż GPS', 'demontaz' => 'Demontaż GPS', 'inna' => 'Inna'] as $value => $label): ?>
                                     <option value="<?= h($value) ?>" <?= $formData['request_type'] === $value ? 'selected' : '' ?>><?= h($label) ?></option>
                                     <?php endforeach; ?>
                                 </select>

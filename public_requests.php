@@ -473,7 +473,7 @@ $requests = $listStmt->fetchAll();
                 <label class="form-label">Typ zgłoszenia</label>
                 <select name="type" class="form-select">
                     <option value="">— wszystkie —</option>
-                    <?php foreach (['serwis' => 'Serwis', 'montaz' => 'Montaż', 'demontaz' => 'Demontaż'] as $value => $label): ?>
+                    <?php foreach (['serwis' => 'Serwis', 'montaz' => 'Montaż', 'demontaz' => 'Demontaż', 'inna' => 'Inna'] as $value => $label): ?>
                     <option value="<?= h($value) ?>" <?= $typeFilter === $value ? 'selected' : '' ?>><?= h($label) ?></option>
                     <?php endforeach; ?>
                 </select>

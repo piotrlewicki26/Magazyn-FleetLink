@@ -319,9 +319,12 @@ function ensurePublicRequestsTable(PDO $db): void {
 
     try {
         $db->query("SELECT 1 FROM public_requests LIMIT 1");
-        // Table exists – ensure 'archiwum' is in the status ENUM
+        // Table exists – ensure 'archiwum' is in the status ENUM and 'inna' in request_type ENUM
         try {
             $db->exec("ALTER TABLE `public_requests` MODIFY COLUMN `status` ENUM('nowe','zweryfikowane','w_realizacji','zamienione_na_zlecenie','odrzucone','archiwum') NOT NULL DEFAULT 'nowe'");
+        } catch (Exception $e) {}
+        try {
+            $db->exec("ALTER TABLE `public_requests` MODIFY COLUMN `request_type` ENUM('serwis','montaz','demontaz','inna') NOT NULL DEFAULT 'serwis'");
         } catch (Exception $e) {}
         return;
     } catch (Exception $e) {}
@@ -330,7 +333,7 @@ function ensurePublicRequestsTable(PDO $db): void {
         CREATE TABLE IF NOT EXISTS `public_requests` (
           `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
           `request_number` VARCHAR(30) NOT NULL UNIQUE,
-          `request_type` ENUM('serwis','montaz','demontaz') NOT NULL DEFAULT 'serwis',
+          `request_type` ENUM('serwis','montaz','demontaz','inna') NOT NULL DEFAULT 'serwis',
           `status` ENUM('nowe','zweryfikowane','w_realizacji','zamienione_na_zlecenie','odrzucone','archiwum') NOT NULL DEFAULT 'nowe',
           `first_name` VARCHAR(100) NOT NULL,
           `last_name` VARCHAR(100) NOT NULL,
@@ -381,6 +384,7 @@ function getPublicRequestTypeLabel(string $type): string {
         'serwis'   => 'Serwis',
         'montaz'   => 'Montaż',
         'demontaz' => 'Demontaż',
+        'inna'     => 'Inna',
     ];
     return $map[$type] ?? ucfirst((string)$type);
 }

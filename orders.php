@@ -864,6 +864,27 @@ if ($action === 'list') {
         $ordersForReassign = $reassignStmt->fetchAll();
     }
 
+    // Devices available for new installation (for Montaż form in quick preview / full view)
+    $installableDevices = [];
+    $orderSimOptions = [];
+    if ($order['status'] !== 'archiwum') {
+        try {
+            $installableDevices = $db->query("
+                SELECT d.id, d.serial_number, d.imei,
+                       m.name as model_name, mf.name as manufacturer_name
+                FROM devices d
+                JOIN models m ON m.id = d.model_id
+                JOIN manufacturers mf ON mf.id = m.manufacturer_id
+                WHERE d.status NOT IN ('zamontowany','wycofany','sprzedany','do_demontazu')
+                ORDER BY mf.name, m.name, d.serial_number
+                LIMIT 500
+            ")->fetchAll();
+        } catch (Exception $e) { $installableDevices = []; }
+        try {
+            $orderSimOptions = $db->query("SELECT phone_number FROM sim_cards WHERE active=1 ORDER BY phone_number")->fetchAll(PDO::FETCH_COLUMN);
+        } catch (Exception $e) { $orderSimOptions = []; }
+    }
+
 } elseif ($action === 'add') {
     // Pre-fill technician to current user
     $prefillTechId = (int)$currentUser['id'];
@@ -1030,7 +1051,7 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                     <tbody>
                         <?php foreach ($orderDevices as $dev): ?>
                         <tr>
-                            <td><?= h($dev['manufacturer_name'] . ' ' . $dev['model_name']) ?><br><small class="text-muted"><?= h($dev['serial_number']) ?></small></td>
+                            <td><?= h($dev['manufacturer_name'] . ' ' . $dev['model_name']) ?><br><small class="text-muted"><?= h($dev['serial_number']) ?></small><?php if ($dev['imei']): ?><br><small class="text-muted">IMEI: <?= h($dev['imei']) ?></small><?php endif; ?><?php if ($dev['sim_number']): ?><br><small class="text-muted">Tel: <?= h($dev['sim_number']) ?></small><?php endif; ?></td>
                             <td><?= h($dev['registration']) ?></td>
                             <td class="small">
                                 <?php if ($dev['ecan_id']): ?>
@@ -1074,10 +1095,70 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                 <a href="<?= getBaseUrl() ?>orders.php?action=view&id=<?= $order['id'] ?>" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-external-link-alt me-1"></i>Pełny widok zlecenia
                 </a>
-                <a href="<?= getBaseUrl() ?>devices.php" class="btn btn-sm btn-outline-success">
+                <?php if ($order['status'] !== 'archiwum'): ?>
+                <button type="button" class="btn btn-sm btn-outline-success" onclick="document.getElementById('modalInstallForm').classList.toggle('d-none')">
                     <i class="fas fa-plus me-1"></i>Przypisz urządzenie
-                </a>
+                </button>
+                <?php endif; ?>
             </div>
+            <?php if ($order['status'] !== 'archiwum'): ?>
+            <!-- Inline Montaż form for quick preview modal -->
+            <div id="modalInstallForm" class="mt-3 d-none border rounded p-3 bg-light">
+                <p class="fw-semibold mb-2"><i class="fas fa-car me-1 text-success"></i>Zarejestruj montaż urządzenia</p>
+                <form method="POST" action="<?= getBaseUrl() ?>devices.php">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="device_install">
+                    <input type="hidden" name="work_order_id" value="<?= $order['id'] ?>">
+                    <input type="hidden" name="return_to_order" value="1">
+                    <?php if ($order['client_id']): ?>
+                    <input type="hidden" name="client_id" value="<?= $order['client_id'] ?>">
+                    <?php endif; ?>
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label form-label-sm mb-1">Urządzenie <span class="text-danger">*</span></label>
+                            <select name="device_id" class="form-select form-select-sm" required>
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php foreach ($installableDevices as $d): ?>
+                                <option value="<?= $d['id'] ?>"><?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?> — <?= h($d['serial_number']) ?><?= $d['imei'] ? ' (' . h($d['imei']) . ')' : '' ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label form-label-sm mb-1">Data montażu <span class="text-danger">*</span></label>
+                            <input type="date" name="installation_date" class="form-control form-control-sm" value="<?= date('Y-m-d') ?>" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label form-label-sm mb-1">Nr rejestracyjny <span class="text-danger">*</span></label>
+                            <input type="text" name="vehicle_registration_new" class="form-control form-control-sm" placeholder="np. WA12345" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label form-label-sm mb-1">Nr telefonu SIM</label>
+                            <input type="text" name="sim_number" class="form-control form-control-sm" list="modalSimList" placeholder="opcjonalnie" autocomplete="off">
+                            <datalist id="modalSimList">
+                                <?php foreach ($orderSimOptions as $sc): ?><option value="<?= h($sc) ?>"><?php endforeach; ?>
+                            </datalist>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label form-label-sm mb-1">Urządzenie ECAN</label>
+                            <select name="ecan_device_id" class="form-select form-select-sm">
+                                <option value="">— brak —</option>
+                                <?php foreach ($ecanDevicesForOrder as $ed): ?>
+                                <option value="<?= $ed['id'] ?>"><?= h($ed['serial_number']) ?> — <?= h($ed['model_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label form-label-sm mb-1">Uwagi</label>
+                            <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
+                        </div>
+                        <div class="col-12 d-flex gap-2">
+                            <button type="submit" class="btn btn-sm btn-success"><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalInstallForm').classList.add('d-none')">Anuluj</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
     <!-- ECAN assign modal for use within order preview modal -->
@@ -2113,46 +2194,79 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
 </div>
 
 <?php if ($order['status'] !== 'archiwum'): ?>
-<!-- Add Device to Order Modal -->
+<!-- Add Device to Order Modal (Montaż form) -->
 <div class="modal fade" id="addDeviceToOrderModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <form method="POST">
+            <form method="POST" action="<?= getBaseUrl() ?>devices.php">
                 <?= csrfField() ?>
-                <input type="hidden" name="action" value="add_device_to_order">
-                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                <input type="hidden" name="action" value="device_install">
+                <input type="hidden" name="work_order_id" value="<?= $order['id'] ?>">
+                <input type="hidden" name="return_to_order" value="1">
+                <?php if ($order['client_id']): ?>
+                <input type="hidden" name="client_id" value="<?= $order['client_id'] ?>">
+                <?php endif; ?>
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-plus me-2 text-success"></i>Dodaj urządzenie do zlecenia <?= h($order['order_number']) ?></h5>
+                    <h5 class="modal-title"><i class="fas fa-car me-2 text-success"></i>Montaż urządzenia – zlecenie <?= h($order['order_number']) ?></h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <?php if (empty($availableInstForOrder)): ?>
-                    <div class="alert alert-info mb-0">
-                        <i class="fas fa-info-circle me-1"></i>
-                        Brak aktywnych montaży nieprzypisanych do żadnego zlecenia.
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label required-star">Urządzenie</label>
+                            <select name="device_id" class="form-select" required>
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php foreach ($installableDevices as $d): ?>
+                                <option value="<?= $d['id'] ?>">
+                                    <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?> — <?= h($d['serial_number']) ?><?= $d['imei'] ? ' (IMEI: ' . h($d['imei']) . ')' : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (empty($installableDevices)): ?><div class="form-text text-warning">Brak dostępnych urządzeń do montażu.</div><?php endif; ?>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data montażu</label>
+                            <input type="date" name="installation_date" class="form-control" value="<?= h($order['date'] ?? date('Y-m-d')) ?>" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Nr rejestracyjny pojazdu</label>
+                            <input type="text" name="vehicle_registration_new" class="form-control" placeholder="np. WA12345" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Nr telefonu SIM</label>
+                            <input type="text" name="sim_number" class="form-control" list="addDevSimList" placeholder="opcjonalnie" autocomplete="off">
+                            <datalist id="addDevSimList">
+                                <?php foreach ($orderSimOptions as $sc): ?><option value="<?= h($sc) ?>"><?php endforeach; ?>
+                            </datalist>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label"><i class="fas fa-microchip me-1 text-secondary"></i>Urządzenie ECAN <small class="text-muted">(opcjonalne)</small></label>
+                            <select name="ecan_device_id" class="form-select">
+                                <option value="">— brak urządzenia ECAN —</option>
+                                <?php foreach ($ecanDevicesForOrder as $ed): ?>
+                                <option value="<?= $ed['id'] ?>"><?= h($ed['serial_number']) ?> — <?= h($ed['model_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php if ($order['client_id'] && $order['company_name']): ?>
+                        <div class="col-12">
+                            <div class="alert alert-info d-flex align-items-center gap-2 mb-0 py-2">
+                                <i class="fas fa-user-check text-primary"></i>
+                                <span class="fw-semibold"><?= h($order['company_name']) ?><?= $order['contact_name'] ? ' — ' . h($order['contact_name']) : '' ?></span>
+                                <span class="text-muted small ms-1">(klient ze zlecenia)</span>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                        <div class="col-12">
+                            <label class="form-label">Uwagi</label>
+                            <textarea name="notes" class="form-control" rows="2"></textarea>
+                        </div>
                     </div>
-                    <?php else: ?>
-                    <div class="mb-3">
-                        <label class="form-label required-star">Wybierz montaż (aktywne, bez przypisanego zlecenia)</label>
-                        <select name="installation_id" class="form-select" required>
-                            <option value="">— wybierz urządzenie —</option>
-                            <?php foreach ($availableInstForOrder as $ai): ?>
-                            <option value="<?= $ai['inst_id'] ?>">
-                                <?= h($ai['serial_number']) ?>
-                                — <?= h($ai['manufacturer_name'] . ' ' . $ai['model_name']) ?>
-                                | <?= h($ai['registration']) ?>
-                                <?= ($ai['company_name'] ?: $ai['contact_name']) ? '| ' . h($ai['company_name'] ?: $ai['contact_name']) : '' ?>
-                                (<?= formatDate($ai['installation_date']) ?>)
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <?php endif; ?>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
-                    <button type="submit" class="btn btn-success btn-sm" <?= empty($availableInstForOrder) ? 'disabled' : '' ?>>
-                        <i class="fas fa-link me-1"></i>Przypisz do zlecenia
+                    <button type="submit" class="btn btn-success btn-sm" <?= empty($installableDevices) ? 'disabled' : '' ?>>
+                        <i class="fas fa-car me-1"></i>Zarejestruj montaż
                     </button>
                 </div>
             </form>

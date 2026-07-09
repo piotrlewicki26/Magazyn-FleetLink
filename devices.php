@@ -536,6 +536,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->rollBack();
             flashError('Błąd podczas rejestracji montażu: ' . $e->getMessage());
         }
+        if (!empty($_POST['return_to_order']) && $instWorkOrderId) {
+            redirect(getBaseUrl() . 'orders.php?action=view&id=' . $instWorkOrderId);
+        }
         redirect(getBaseUrl() . 'devices.php');
 
     } elseif ($postAction === 'bulk_add_devices') {
