@@ -1105,23 +1105,22 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
             <!-- Inline Montaż form for quick preview modal -->
             <div id="modalInstallForm" class="mt-3 d-none border rounded p-3 bg-light">
                 <p class="fw-semibold mb-2"><i class="fas fa-car me-1 text-success"></i>Zarejestruj montaż urządzenia</p>
-                <form method="POST" action="<?= getBaseUrl() ?>devices.php">
+                <script>window._installableDevices = <?= json_encode(array_values($installableDevices), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+                <form method="POST" action="<?= getBaseUrl() ?>devices.php" onsubmit="return validateModalDeviceSearch()">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="device_install">
                     <input type="hidden" name="work_order_id" value="<?= $order['id'] ?>">
-                    <input type="hidden" name="return_to_order" value="1">
+                    <input type="hidden" name="return_to_order_preview" value="<?= (int)$order['id'] ?>">
                     <?php if ($order['client_id']): ?>
                     <input type="hidden" name="client_id" value="<?= $order['client_id'] ?>">
                     <?php endif; ?>
                     <div class="row g-2">
-                        <div class="col-12">
+                        <div class="col-12 position-relative">
                             <label class="form-label form-label-sm mb-1">Urządzenie <span class="text-danger">*</span></label>
-                            <select name="device_id" class="form-select form-select-sm" required>
-                                <option value="">— wybierz urządzenie —</option>
-                                <?php foreach ($installableDevices as $d): ?>
-                                <option value="<?= $d['id'] ?>"><?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?> — <?= h($d['serial_number']) ?><?= $d['imei'] ? ' (' . h($d['imei']) . ')' : '' ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="text" id="modalDeviceSearchInput" class="form-control form-control-sm" placeholder="Wpisz numer seryjny lub IMEI..." autocomplete="off" oninput="filterModalDevices(this.value)">
+                            <input type="hidden" name="device_id" id="modalDeviceIdHidden">
+                            <div id="modalDeviceSearchResults" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index:9999;max-height:180px;overflow-y:auto;top:100%"></div>
+                            <div id="modalDeviceSelected" class="form-text text-success d-none"></div>
                         </div>
                         <div class="col-6">
                             <label class="form-label form-label-sm mb-1">Data montażu <span class="text-danger">*</span></label>
@@ -1152,7 +1151,7 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                             <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
                         </div>
                         <div class="col-12 d-flex gap-2">
-                            <button type="submit" class="btn btn-sm btn-success"><i class="fas fa-car me-1"></i>Zarejestruj montaż</button>
+                            <button type="submit" class="btn btn-sm btn-success"><i class="fas fa-plus me-1"></i>Dodaj</button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalInstallForm').classList.add('d-none')">Anuluj</button>
                         </div>
                     </div>
@@ -2198,7 +2197,7 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
 <div class="modal fade" id="addDeviceToOrderModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <form method="POST" action="<?= getBaseUrl() ?>devices.php">
+            <form method="POST" action="<?= getBaseUrl() ?>devices.php" onsubmit="return validateFullDeviceSearch()">
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="device_install">
                 <input type="hidden" name="work_order_id" value="<?= $order['id'] ?>">
@@ -2212,16 +2211,12 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                 </div>
                 <div class="modal-body">
                     <div class="row g-3">
-                        <div class="col-12">
+                        <div class="col-12 position-relative">
                             <label class="form-label required-star">Urządzenie</label>
-                            <select name="device_id" class="form-select" required>
-                                <option value="">— wybierz urządzenie —</option>
-                                <?php foreach ($installableDevices as $d): ?>
-                                <option value="<?= $d['id'] ?>">
-                                    <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?> — <?= h($d['serial_number']) ?><?= $d['imei'] ? ' (IMEI: ' . h($d['imei']) . ')' : '' ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="text" id="fullDeviceSearchInput" class="form-control" placeholder="Wpisz numer seryjny lub IMEI..." autocomplete="off" oninput="filterFullDevices(this.value)">
+                            <input type="hidden" name="device_id" id="fullDeviceIdHidden">
+                            <div id="fullDeviceSearchResults" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index:9999;max-height:200px;overflow-y:auto;top:100%"></div>
+                            <div id="fullDeviceSelected" class="form-text text-success d-none"></div>
                             <?php if (empty($installableDevices)): ?><div class="form-text text-warning">Brak dostępnych urządzeń do montażu.</div><?php endif; ?>
                         </div>
                         <div class="col-md-6">
@@ -2266,7 +2261,7 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
                     <button type="submit" class="btn btn-success btn-sm" <?= empty($installableDevices) ? 'disabled' : '' ?>>
-                        <i class="fas fa-car me-1"></i>Zarejestruj montaż
+                        <i class="fas fa-plus me-1"></i>Dodaj
                     </button>
                 </div>
             </form>
@@ -2952,6 +2947,96 @@ document.getElementById('newOrderModal').addEventListener('hidden.bs.modal', fun
     var dateInput = document.querySelector('#newOrderForm [name=date]');
     if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
 });
+
+// ── Full-view modal device search ──────────────────────────────────────────
+<?php if ($action === 'view' && isset($installableDevices)): ?>
+var _fullInstallableDevices = <?= json_encode(array_values($installableDevices), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+<?php else: ?>
+var _fullInstallableDevices = [];
+<?php endif; ?>
+
+function filterFullDevices(query) {
+    var results = document.getElementById('fullDeviceSearchResults');
+    var hiddenId = document.getElementById('fullDeviceIdHidden');
+    var selected = document.getElementById('fullDeviceSelected');
+    hiddenId.value = '';
+    selected.classList.add('d-none');
+    if (!query || query.length < 2) { results.classList.add('d-none'); results.innerHTML = ''; return; }
+    var q = query.toLowerCase();
+    var matches = _fullInstallableDevices.filter(function(d) {
+        return (d.serial_number && d.serial_number.toLowerCase().indexOf(q) !== -1)
+            || (d.imei && d.imei.toLowerCase().indexOf(q) !== -1)
+            || (d.model_name && d.model_name.toLowerCase().indexOf(q) !== -1);
+    }).slice(0, 20);
+    if (!matches.length) {
+        results.innerHTML = '<div class="list-group-item text-muted small">Brak wyników</div>';
+        results.classList.remove('d-none');
+        return;
+    }
+    results.innerHTML = matches.map(function(d) {
+        var label = d.manufacturer_name + ' ' + d.model_name + ' — ' + d.serial_number + (d.imei ? ' (IMEI: ' + d.imei + ')' : '');
+        return '<button type="button" class="list-group-item list-group-item-action small py-1 px-2" data-id="' + d.id + '" data-label="' + label.replace(/"/g,'&quot;') + '">' + label + '</button>';
+    }).join('');
+    results.classList.remove('d-none');
+    results.querySelectorAll('button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            hiddenId.value = this.dataset.id;
+            document.getElementById('fullDeviceSearchInput').value = this.dataset.label;
+            selected.textContent = '✓ Wybrano: ' + this.dataset.label;
+            selected.classList.remove('d-none');
+            results.classList.add('d-none');
+            results.innerHTML = '';
+        });
+    });
+}
+
+function validateFullDeviceSearch() {
+    var hiddenId = document.getElementById('fullDeviceIdHidden');
+    if (!hiddenId || !hiddenId.value) {
+        alert('Wybierz urządzenie z listy wyników wyszukiwania.');
+        document.getElementById('fullDeviceSearchInput').focus();
+        return false;
+    }
+    return true;
+}
+
+document.addEventListener('click', function(e) {
+    var results = document.getElementById('fullDeviceSearchResults');
+    if (results && !results.contains(e.target) && e.target.id !== 'fullDeviceSearchInput') {
+        results.classList.add('d-none');
+    }
+});
+
+// Reset full-view modal device search on close
+var addDevModal = document.getElementById('addDeviceToOrderModal');
+if (addDevModal) {
+    addDevModal.addEventListener('hidden.bs.modal', function() {
+        var si = document.getElementById('fullDeviceSearchInput');
+        var hi = document.getElementById('fullDeviceIdHidden');
+        var sr = document.getElementById('fullDeviceSearchResults');
+        var sd = document.getElementById('fullDeviceSelected');
+        if (si) si.value = '';
+        if (hi) hi.value = '';
+        if (sr) { sr.innerHTML = ''; sr.classList.add('d-none'); }
+        if (sd) sd.classList.add('d-none');
+    });
+}
+
+// ── Auto-open quick preview modal on page load (after install redirect) ────
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    var previewId = params.get('open_preview');
+    var previewNum = params.get('order_number');
+    if (previewId && previewNum) {
+        document.addEventListener('DOMContentLoaded', function() {
+            openOrderModal(parseInt(previewId), previewNum);
+        });
+        // Also handle if DOM already loaded
+        if (document.readyState !== 'loading') {
+            setTimeout(function() { openOrderModal(parseInt(previewId), previewNum); }, 200);
+        }
+    }
+})();
 </script>
 <div class="modal fade" id="groupPreviewModal" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -3096,6 +3181,61 @@ function openArchiveStatusModal(orderId, orderNumber, currentStatus) {
     if (sel) sel.value = currentStatus;
     new bootstrap.Modal(document.getElementById('archiveStatusModal')).show();
 }
+
+// ── Quick preview modal device search ────────────────────────────────────────
+function filterModalDevices(query) {
+    var devices = window._installableDevices || [];
+    var results = document.getElementById('modalDeviceSearchResults');
+    var hiddenId = document.getElementById('modalDeviceIdHidden');
+    var selected = document.getElementById('modalDeviceSelected');
+    if (!results || !hiddenId) return;
+    hiddenId.value = '';
+    if (selected) selected.classList.add('d-none');
+    if (!query || query.length < 2) { results.classList.add('d-none'); results.innerHTML = ''; return; }
+    var q = query.toLowerCase();
+    var matches = devices.filter(function(d) {
+        return (d.serial_number && d.serial_number.toLowerCase().indexOf(q) !== -1)
+            || (d.imei && d.imei.toLowerCase().indexOf(q) !== -1)
+            || (d.model_name && d.model_name.toLowerCase().indexOf(q) !== -1);
+    }).slice(0, 20);
+    if (!matches.length) {
+        results.innerHTML = '<div class="list-group-item text-muted small">Brak wyników</div>';
+        results.classList.remove('d-none');
+        return;
+    }
+    results.innerHTML = matches.map(function(d) {
+        var label = d.manufacturer_name + ' ' + d.model_name + ' — ' + d.serial_number + (d.imei ? ' (IMEI: ' + d.imei + ')' : '');
+        return '<button type="button" class="list-group-item list-group-item-action small py-1 px-2" data-id="' + d.id + '" data-label="' + label.replace(/"/g,'&quot;') + '">' + label + '</button>';
+    }).join('');
+    results.classList.remove('d-none');
+    results.querySelectorAll('button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            hiddenId.value = this.dataset.id;
+            document.getElementById('modalDeviceSearchInput').value = this.dataset.label;
+            if (selected) { selected.textContent = '✓ Wybrano: ' + this.dataset.label; selected.classList.remove('d-none'); }
+            results.classList.add('d-none');
+            results.innerHTML = '';
+        });
+    });
+}
+
+function validateModalDeviceSearch() {
+    var hiddenId = document.getElementById('modalDeviceIdHidden');
+    if (!hiddenId || !hiddenId.value) {
+        alert('Wybierz urządzenie z listy wyników wyszukiwania.');
+        var si = document.getElementById('modalDeviceSearchInput');
+        if (si) si.focus();
+        return false;
+    }
+    return true;
+}
+
+document.addEventListener('click', function(e) {
+    var results = document.getElementById('modalDeviceSearchResults');
+    if (results && !results.contains(e.target) && e.target.id !== 'modalDeviceSearchInput') {
+        results.classList.add('d-none');
+    }
+});
 </script>
 
 <!-- Modal: Zmiana statusu (Archiwum) -->

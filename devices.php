@@ -539,6 +539,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($_POST['return_to_order']) && $instWorkOrderId) {
             redirect(getBaseUrl() . 'orders.php?action=view&id=' . $instWorkOrderId);
         }
+        if (!empty($_POST['return_to_order_preview']) && $instWorkOrderId) {
+            // Fetch order number to pass to quick preview modal
+            try {
+                $woNumRow = $db->prepare("SELECT order_number FROM work_orders WHERE id=? LIMIT 1");
+                $woNumRow->execute([$instWorkOrderId]);
+                $woNum = $woNumRow->fetchColumn();
+            } catch (Exception $e) { $woNum = ''; }
+            redirect(getBaseUrl() . 'orders.php?open_preview=' . $instWorkOrderId . '&order_number=' . urlencode((string)$woNum));
+        }
         redirect(getBaseUrl() . 'devices.php');
 
     } elseif ($postAction === 'bulk_add_devices') {
