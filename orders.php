@@ -1065,6 +1065,13 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                             <td><?= getStatusBadge($dev['inst_status'], 'installation') ?></td>
                             <?php if (!in_array($order['status'], ['archiwum'])): ?>
                             <td class="text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                        title="Zmień nr rejestracyjny"
+                                        data-inst-id="<?= $dev['inst_id'] ?>"
+                                        data-registration="<?= h($dev['registration'] ?? '') ?>"
+                                        onclick="openModalChangeReg(this.dataset.instId, this.dataset.registration)">
+                                    <i class="fas fa-hashtag"></i>
+                                </button>
                                 <?php if (!empty($ordersForReassign)): ?>
                                 <button type="button" class="btn btn-sm btn-outline-secondary btn-action"
                                         title="Zmień zlecenie"
@@ -1083,6 +1090,16 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                                         onclick="openModalEcanDevice(this)">
                                     <i class="fas fa-microchip"></i>
                                 </button>
+                                <form method="POST" class="d-inline"
+                                      onsubmit="return confirm('Czy na pewno chcesz odłączyć urządzenie <?= h($dev['serial_number']) ?> od tego zlecenia?')">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="remove_device_from_order">
+                                    <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                                    <input type="hidden" name="installation_id" value="<?= $dev['inst_id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Odłącz od zlecenia">
+                                        <i class="fas fa-unlink"></i>
+                                    </button>
+                                </form>
                             </td>
                             <?php endif; ?>
                         </tr>
@@ -1096,7 +1113,7 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                     <i class="fas fa-external-link-alt me-1"></i>Pełny widok zlecenia
                 </a>
                 <?php if ($order['status'] !== 'archiwum'): ?>
-                <button type="button" class="btn btn-sm btn-outline-success" onclick="document.getElementById('modalInstallForm').classList.toggle('d-none')">
+                <button type="button" class="btn btn-sm btn-outline-success" onclick="toggleModalInstallForm()">
                     <i class="fas fa-plus me-1"></i>Przypisz urządzenie
                 </button>
                 <?php endif; ?>
@@ -1180,6 +1197,24 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                 <div class="col-auto">
                     <button type="submit" class="btn btn-sm btn-info text-white"><i class="fas fa-save me-1"></i>Zapisz ECAN</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalEcanForm').classList.add('d-none')">Anuluj</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    <div id="modalChangeRegForm" class="mt-3 d-none border rounded p-3 bg-light">
+        <form method="POST" id="modalChangeRegAssignForm">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="change_vehicle_registration">
+            <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+            <input type="hidden" name="installation_id" id="modalChangeRegInstId" value="">
+            <div class="row g-2 align-items-end">
+                <div class="col">
+                    <label class="form-label form-label-sm mb-1"><i class="fas fa-hashtag me-1 text-info"></i>Nowy numer rejestracyjny</label>
+                    <input type="text" name="new_registration" id="modalChangeRegInput" class="form-control form-control-sm" placeholder="np. WA12345" required>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-info text-white"><i class="fas fa-save me-1"></i>Zmień</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalChangeRegForm').classList.add('d-none')">Anuluj</button>
                 </div>
             </div>
         </form>
@@ -3140,6 +3175,14 @@ function openModalEcanDevice(btn) {
     form.classList.remove('d-none');
     form.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
+function openModalChangeReg(instId, currentReg) {
+    var form = document.getElementById('modalChangeRegForm');
+    if (!form) return;
+    document.getElementById('modalChangeRegInstId').value = instId;
+    document.getElementById('modalChangeRegInput').value = currentReg || '';
+    form.classList.remove('d-none');
+    form.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
 function openModalReassignDevice(instId, serial) {
     var form = document.getElementById('modalReassignForm');
     if (!form) return;
@@ -3147,6 +3190,23 @@ function openModalReassignDevice(instId, serial) {
     document.getElementById('modalReassignSerial').textContent = serial;
     form.classList.remove('d-none');
     form.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+function toggleModalInstallForm() {
+    var form = document.getElementById('modalInstallForm');
+    if (!form) return;
+    var shouldShow = form.classList.contains('d-none');
+    form.classList.toggle('d-none');
+    if (shouldShow) {
+        setTimeout(function() {
+            form.scrollIntoView({behavior:'smooth', block:'start'});
+            var body = document.getElementById('orderPreviewBody');
+            if (body && typeof body.scrollTo === 'function') {
+                body.scrollTo({ top: body.scrollHeight, behavior: 'smooth' });
+            }
+            var input = document.getElementById('modalDeviceSearchInput');
+            if (input) input.focus();
+        }, 60);
+    }
 }
 
 function openOrderModal(orderId, orderNumber) {

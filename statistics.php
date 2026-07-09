@@ -304,7 +304,7 @@ function statsGetMonthlyReportRows(PDO $db, string $startDate, string $endDate, 
         LEFT JOIN users u ON u.id = i.technician_id
         LEFT JOIN clients ci ON ci.id = i.client_id
         " . ($includeWorkOrders ? "LEFT JOIN work_orders wo ON wo.id = i.work_order_id LEFT JOIN clients cwo ON cwo.id = wo.client_id" : "") . "
-        WHERE i.installation_date >= ? AND i.installation_date < ?
+        WHERE DATE(i.installation_date) >= DATE(?) AND DATE(i.installation_date) < DATE(?)
     ";
 
     $params = [$startDate, $endDate];
@@ -334,7 +334,7 @@ function statsGetMonthlyReportClients(PDO $db, string $startDate, string $endDat
             LEFT JOIN work_orders wo ON wo.id = i.work_order_id
             LEFT JOIN clients cwo ON cwo.id = wo.client_id
             LEFT JOIN clients ci ON ci.id = i.client_id
-            WHERE i.installation_date >= ? AND i.installation_date < ?
+            WHERE DATE(i.installation_date) >= DATE(?) AND DATE(i.installation_date) < DATE(?)
               AND COALESCE(cwo.id, ci.id) IS NOT NULL
             GROUP BY COALESCE(cwo.id, ci.id), COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
             ORDER BY client_name
@@ -345,7 +345,7 @@ function statsGetMonthlyReportClients(PDO $db, string $startDate, string $endDat
                 COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, '')) AS client_name
             FROM installations i
             LEFT JOIN clients ci ON ci.id = i.client_id
-            WHERE i.installation_date >= ? AND i.installation_date < ?
+            WHERE DATE(i.installation_date) >= DATE(?) AND DATE(i.installation_date) < DATE(?)
               AND ci.id IS NOT NULL
             GROUP BY ci.id, COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''))
             ORDER BY client_name
@@ -387,7 +387,8 @@ function statsGetMonthlyServiceRows(PDO $db, string $startDate, string $endDate,
         LEFT JOIN installations inst ON inst.id = s.installation_id
         LEFT JOIN vehicles v ON v.id = inst.vehicle_id
         LEFT JOIN clients c ON c.id = inst.client_id
-        WHERE COALESCE(s.completed_date, s.planned_date) >= ? AND COALESCE(s.completed_date, s.planned_date) < ?
+        WHERE DATE(COALESCE(s.completed_date, s.planned_date)) >= DATE(?)
+          AND DATE(COALESCE(s.completed_date, s.planned_date)) < DATE(?)
     ";
 
     $params = [$startDate, $endDate];
