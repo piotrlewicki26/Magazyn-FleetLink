@@ -333,7 +333,9 @@ include __DIR__ . '/includes/header.php';
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white fw-semibold"><i class="fas fa-calendar-alt me-2 text-primary"></i>Miesięcznie — montaże i serwisy w <?= $year ?> roku</div>
             <div class="card-body">
-                <canvas id="monthlyChart" height="120" style="cursor:pointer"></canvas>
+                <div class="position-relative" style="height: 320px; min-height: 320px;">
+                    <canvas id="monthlyChart" style="cursor:pointer"></canvas>
+                </div>
                 <div class="small text-muted mt-2"><i class="fas fa-hand-pointer me-1"></i>Kliknij na słupek miesiąca, aby zobaczyć szczegóły zleceń.</div>
             </div>
         </div>
@@ -343,7 +345,9 @@ include __DIR__ . '/includes/header.php';
             <div class="card-header bg-white fw-semibold">Statusy urządzeń</div>
             <div class="card-body">
                 <?php if ($deviceStatuses): ?>
-                <canvas id="deviceStatusChart" height="220"></canvas>
+                <div class="position-relative" style="height: 260px; min-height: 260px;">
+                    <canvas id="deviceStatusChart"></canvas>
+                </div>
                 <?php else: ?>
                 <div class="text-center text-muted py-5">Brak danych o statusach urządzeń.</div>
                 <?php endif; ?>

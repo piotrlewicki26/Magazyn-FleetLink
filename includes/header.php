@@ -153,7 +153,6 @@ try {
                     </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php?tab=yearly"><i class="fas fa-chart-bar me-2"></i>Zestawienie roczne</a></li>
-                        <li><a class="dropdown-item" href="<?= getBaseUrl() ?>statistics.php?tab=monthly"><i class="fas fa-file-alt me-2"></i>Raport miesięczny</a></li>
                     </ul>
                 </li>
                 <?php endif; ?>
