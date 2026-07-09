@@ -69,6 +69,7 @@ function statsColumnExists(PDO $db, string $table, string $column): bool
  * Fetch work-order installations grouped by month for the yearly view modal.
  * Returns array indexed 1..12, each element an array of client groups with:
  *   client_name, total_install_count, order_dates, models, other_devices.
+ * The other devices list is populated only when the work_orders.other_devices column exists.
  */
 function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $hasOtherDevicesColumn): array
 {
@@ -108,10 +109,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     foreach ($rows as $row) {
         $month = (int)$row['month_no'];
         if ($month >= 1 && $month <= 12) {
-            $clientName = trim((string)($row['client_name'] ?? ''));
-            if ($clientName === '') {
-                $clientName = '—';
-            }
+            $clientName = trim((string)($row['client_name'] ?? '—'));
 
             if (!isset($byMonth[$month][$clientName])) {
                 $byMonth[$month][$clientName] = [
@@ -128,10 +126,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $byMonth[$month][$clientName]['order_dates'][] = $orderDate;
             }
 
-            $modelName = trim((string)($row['model_name'] ?? ''));
-            if ($modelName === '') {
-                $modelName = '—';
-            }
+            $modelName = trim((string)($row['model_name'] ?? '—'));
 
             if (!isset($byMonth[$month][$clientName]['models'][$modelName])) {
                 $byMonth[$month][$clientName]['models'][$modelName] = 0;
