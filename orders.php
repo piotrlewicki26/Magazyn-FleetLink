@@ -875,7 +875,7 @@ if ($action === 'list') {
                 FROM devices d
                 JOIN models m ON m.id = d.model_id
                 JOIN manufacturers mf ON mf.id = m.manufacturer_id
-                WHERE d.status NOT IN ('zamontowany','wycofany','sprzedany','do_demontazu')
+                WHERE d.status = 'Nowe'
                 ORDER BY mf.name, m.name, d.serial_number
                 LIMIT 500
             ")->fetchAll();
@@ -3157,7 +3157,19 @@ function openOrderModal(orderId, orderNumber) {
     modal.show();
     fetch('orders.php?action=view&id=' + orderId + '&ajax=1')
         .then(function(r) { return r.text(); })
-        .then(function(html) { document.getElementById('orderPreviewBody').innerHTML = html; })
+        .then(function(html) {
+            var body = document.getElementById('orderPreviewBody');
+            body.innerHTML = html;
+            // innerHTML does not execute <script> tags — re-create them so they run
+            body.querySelectorAll('script').forEach(function(oldScript) {
+                var newScript = document.createElement('script');
+                Array.from(oldScript.attributes).forEach(function(attr) {
+                    newScript.setAttribute(attr.name, attr.value);
+                });
+                newScript.textContent = oldScript.textContent;
+                oldScript.parentNode.replaceChild(newScript, oldScript);
+            });
+        })
         .catch(function() { document.getElementById('orderPreviewBody').innerHTML = '<p class="text-danger p-3">Błąd ładowania danych zlecenia.</p>'; });
 }
 
