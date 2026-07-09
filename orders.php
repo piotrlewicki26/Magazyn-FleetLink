@@ -68,6 +68,14 @@ try {
         $db->exec("ALTER TABLE `work_orders` ADD COLUMN `other_devices` TEXT DEFAULT NULL");
     } catch (PDOException $ex) { /* ignore */ }
 }
+// Ensure other_devices_count column exists on work_orders (numeric quantity of non-GPS devices)
+try {
+    $db->query("SELECT other_devices_count FROM work_orders LIMIT 1");
+} catch (PDOException $e) {
+    try {
+        $db->exec("ALTER TABLE `work_orders` ADD COLUMN `other_devices_count` INTEGER DEFAULT 0");
+    } catch (PDOException $ex) { /* ignore */ }
+}
 
 // ── One-time migration: create work_orders for completed/archived installations
 // that were created in the old "Montaże" list and have no work_order_id yet.
@@ -139,6 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $address      = sanitize($_POST['installation_address'] ?? '');
         $notes        = sanitize($_POST['notes'] ?? '');
         $otherDevices = sanitize($_POST['other_devices'] ?? '');
+        $otherDevicesCount = max(0, (int)($_POST['other_devices_count'] ?? 0));
         $isAjax       = !empty($_POST['ajax']);
 
         if (!$techId) $techId = (int)$currentUser['id'];
@@ -151,14 +160,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $orderNumber = '';
         $newOrderId = 0;
-        $insertStmt = $db->prepare("INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, other_devices, created_by) VALUES (?,?,?,?,?,?,?,?,?)");
+        $insertStmt = $db->prepare("INSERT INTO work_orders (order_number, date, client_id, installation_address, technician_id, status, notes, other_devices, other_devices_count, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)");
         try {
             $maxInsertAttempts = 5;
             $inserted = false;
             for ($attempt = 0; $attempt < $maxInsertAttempts && !$inserted; $attempt++) {
                 $orderNumber = generateOrderNumber($orderDate ?: null);
                 try {
-                    $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $otherDevices ?: null, $currentUser['id']]);
+                    $insertStmt->execute([$orderNumber, $orderDate, $clientId, $address ?: null, $techId, 'nowe', $notes ?: null, $otherDevices ?: null, $otherDevicesCount ?: null, $currentUser['id']]);
                     $inserted = true;
                     $newOrderId = (int)$db->lastInsertId();
                 } catch (PDOException $e) {
@@ -241,6 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $address      = sanitize($_POST['installation_address'] ?? '');
         $notes        = sanitize($_POST['notes'] ?? '');
         $otherDevices = sanitize($_POST['other_devices'] ?? '');
+        $otherDevicesCount = max(0, (int)($_POST['other_devices_count'] ?? 0));
         $status       = sanitize($_POST['status'] ?? 'nowe');
         $allowed      = ['nowe','w_trakcie','zakonczone','anulowane','archiwum'];
         if (!in_array($status, $allowed)) $status = 'nowe';
@@ -259,8 +269,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'orders.php?action=view&id=' . $editId);
         }
 
-        $db->prepare("UPDATE work_orders SET date=?, client_id=?, installation_address=?, technician_id=?, status=?, notes=?, other_devices=? WHERE id=?")
-           ->execute([$orderDate, $clientId, $address ?: null, $techId, $status, $notes ?: null, $otherDevices ?: null, $editId]);
+        $db->prepare("UPDATE work_orders SET date=?, client_id=?, installation_address=?, technician_id=?, status=?, notes=?, other_devices=?, other_devices_count=? WHERE id=?")
+           ->execute([$orderDate, $clientId, $address ?: null, $techId, $status, $notes ?: null, $otherDevices ?: null, $otherDevicesCount ?: null, $editId]);
         flashSuccess('Zlecenie zaktualizowane.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $editId);
 
@@ -690,7 +700,8 @@ if ($action === 'list') {
                wo.installation_address, wo.notes,
                c.contact_name, c.company_name, c.phone as client_phone,
                u.name as technician_name,
-               (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count
+               (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count,
+               COALESCE(wo.other_devices_count, 0) as other_devices_count
         FROM work_orders wo
         LEFT JOIN clients c ON c.id=wo.client_id
         LEFT JOIN users u ON u.id=wo.technician_id
@@ -728,7 +739,8 @@ if ($action === 'list') {
               wo.installation_address, wo.notes,
               c.contact_name, c.company_name, c.phone as client_phone,
               u.name as technician_name,
-              (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count
+              (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count,
+              COALESCE(wo.other_devices_count, 0) as other_devices_count
        FROM work_orders wo
        LEFT JOIN clients c ON c.id=wo.client_id
        LEFT JOIN users u ON u.id=wo.technician_id
@@ -765,7 +777,8 @@ if ($action === 'list') {
                wo.installation_address, wo.notes,
                c.contact_name, c.company_name, c.phone as client_phone,
                u.name as technician_name,
-               (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count
+               (SELECT COUNT(*) FROM installations i WHERE i.work_order_id=wo.id) as device_count,
+               COALESCE(wo.other_devices_count, 0) as other_devices_count
         FROM work_orders wo
         LEFT JOIN clients c ON c.id=wo.client_id
         LEFT JOIN users u ON u.id=wo.technician_id
@@ -1013,7 +1026,14 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
                 </td></tr>
                 <tr><th class="text-muted ps-0">Adres instalacji</th><td><?= h($order['installation_address'] ?? '—') ?></td></tr>
                 <?php if ($order['notes']): ?><tr><th class="text-muted ps-0">Uwagi</th><td><?= nl2br(h($order['notes'])) ?></td></tr><?php endif; ?>
-                <?php if (!empty($order['other_devices'])): ?><tr><th class="text-muted ps-0">Inne urządzenia</th><td><?= nl2br(h($order['other_devices'])) ?></td></tr><?php endif; ?>
+                <?php if (!empty($order['other_devices']) || (int)($order['other_devices_count'] ?? 0) > 0): ?>
+                <tr><th class="text-muted ps-0">Inne urządzenia</th><td>
+                    <?php if ((int)($order['other_devices_count'] ?? 0) > 0): ?>
+                    <span class="badge bg-warning text-dark me-1"><?= (int)$order['other_devices_count'] ?> szt.</span>
+                    <?php endif; ?>
+                    <?= nl2br(h($order['other_devices'] ?? '')) ?>
+                </td></tr>
+                <?php endif; ?>
             </table>
             <?php if ($order['client_id']): ?>
             <hr>
@@ -1421,10 +1441,11 @@ include __DIR__ . '/includes/header.php';
                         $firstOrd = $groupOrders[0];
                         $groupDateLabel = !empty($firstOrd['date']) ? formatDate($firstOrd['date']) : 'Brak daty';
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
+                        $totalOtherDevices = array_sum(array_column($groupOrders, 'other_devices_count'));
                         $groupRowId = 'grp' . $groupIdx;
                         $groupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
                         $groupOrdersForModal = array_map(function($o) {
-                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'status'=>$o['status']];
+                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'other_devices_count'=>(int)($o['other_devices_count']??0),'status'=>$o['status']];
                         }, $groupOrders);
                         $groupOrdersModalJson = htmlspecialchars(json_encode($groupOrdersForModal), ENT_QUOTES);
                 ?>
@@ -1432,7 +1453,8 @@ include __DIR__ . '/includes/header.php';
                     <td colspan="5" class="py-2 fw-semibold">
                         <i class="fas fa-calendar-day me-2 opacity-75"></i><?= h($groupDateLabel) ?>
                         <span class="badge bg-primary ms-2"><?= count($groupOrders) ?> zleceń</span>
-                        <span class="badge bg-success ms-1"><?= $totalDevices ?> urządzeń</span>
+                        <?php if ($totalDevices > 0): ?><span class="badge bg-success ms-1"><?= $totalDevices ?> GPS</span><?php endif; ?>
+                        <?php if ($totalOtherDevices > 0): ?><span class="badge bg-warning text-dark ms-1"><?= $totalOtherDevices ?> inne</span><?php endif; ?>
                     </td>
                     <td class="py-2"></td>
                     <td class="py-2"></td>
@@ -1488,8 +1510,12 @@ include __DIR__ . '/includes/header.php';
                     <td><?= h($ord['technician_name'] ?? '—') ?></td>
                     <td>
                         <?php if ($ord['device_count'] > 0): ?>
-                        <span class="badge bg-success"><?= (int)$ord['device_count'] ?></span>
-                        <?php else: ?>
+                        <span class="badge bg-success" title="Urządzenia GPS"><?= (int)$ord['device_count'] ?> GPS</span>
+                        <?php endif; ?>
+                        <?php if ((int)($ord['other_devices_count'] ?? 0) > 0): ?>
+                        <span class="badge bg-warning text-dark" title="Inne urządzenia"><?= (int)$ord['other_devices_count'] ?> inne</span>
+                        <?php endif; ?>
+                        <?php if ($ord['device_count'] == 0 && (int)($ord['other_devices_count'] ?? 0) == 0): ?>
                         <span class="badge bg-secondary">0</span>
                         <?php endif; ?>
                     </td>
@@ -1597,10 +1623,11 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
                         $firstOrd = $groupOrders[0];
                         $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
+                        $totalOtherDevices = array_sum(array_column($groupOrders, 'other_devices_count'));
                         $myGroupRowId = 'mygrp' . $myGroupIdx;
                         $myGroupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
                         $myGroupOrdersForModal = array_map(function($o) {
-                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'status'=>$o['status']];
+                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'other_devices_count'=>(int)($o['other_devices_count']??0),'status'=>$o['status']];
                         }, $groupOrders);
                         $myGroupOrdersModalJson = htmlspecialchars(json_encode($myGroupOrdersForModal), ENT_QUOTES);
                 ?>
@@ -1608,7 +1635,8 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
                     <td colspan="5" class="py-2 fw-semibold">
                         <i class="fas fa-building me-2 opacity-75"></i><?= h($clientLabel) ?>
                         <span class="badge bg-primary ms-2"><?= count($groupOrders) ?> zleceń</span>
-                        <span class="badge bg-success ms-1"><?= $totalDevices ?> urządzeń</span>
+                        <?php if ($totalDevices > 0): ?><span class="badge bg-success ms-1"><?= $totalDevices ?> GPS</span><?php endif; ?>
+                        <?php if ($totalOtherDevices > 0): ?><span class="badge bg-warning text-dark ms-1"><?= $totalOtherDevices ?> inne</span><?php endif; ?>
                     </td>
                     <td class="py-2"></td>
                     <td class="py-2"></td>
@@ -1659,8 +1687,12 @@ echo paginate($totalOrders, $perPage, $page, $_listUrl);
                     <td><?= h($ord['technician_name'] ?? '—') ?></td>
                     <td>
                         <?php if ($ord['device_count'] > 0): ?>
-                        <span class="badge bg-success"><?= (int)$ord['device_count'] ?></span>
-                        <?php else: ?>
+                        <span class="badge bg-success" title="Urządzenia GPS"><?= (int)$ord['device_count'] ?> GPS</span>
+                        <?php endif; ?>
+                        <?php if ((int)($ord['other_devices_count'] ?? 0) > 0): ?>
+                        <span class="badge bg-warning text-dark" title="Inne urządzenia"><?= (int)$ord['other_devices_count'] ?> inne</span>
+                        <?php endif; ?>
+                        <?php if ($ord['device_count'] == 0 && (int)($ord['other_devices_count'] ?? 0) == 0): ?>
                         <span class="badge bg-secondary">0</span>
                         <?php endif; ?>
                     </td>
@@ -1767,10 +1799,11 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                         $firstOrd = $groupOrders[0];
                         $clientLabel = $firstOrd['company_name'] ? $firstOrd['company_name'] : ($firstOrd['contact_name'] ?? '—');
                         $totalDevices = array_sum(array_column($groupOrders, 'device_count'));
+                        $totalOtherDevices = array_sum(array_column($groupOrders, 'other_devices_count'));
                         $archGroupRowId = 'archgrp' . $archGroupIdx;
                         $archGroupIdsJson = htmlspecialchars(json_encode(array_column($groupOrders, 'id')), ENT_QUOTES);
                         $archGroupOrdersForModal = array_map(function($o) {
-                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'status'=>$o['status']];
+                            return ['id'=>$o['id'],'order_number'=>$o['order_number'],'date'=>$o['date'],'technician_name'=>$o['technician_name']??'','device_count'=>(int)$o['device_count'],'other_devices_count'=>(int)($o['other_devices_count']??0),'status'=>$o['status']];
                         }, $groupOrders);
                         $archGroupOrdersModalJson = htmlspecialchars(json_encode($archGroupOrdersForModal), ENT_QUOTES);
                 ?>
@@ -1778,7 +1811,8 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                     <td colspan="5" class="py-2 fw-semibold">
                         <i class="fas fa-building me-2 opacity-75"></i><?= h($clientLabel) ?>
                         <span class="badge bg-primary ms-2"><?= count($groupOrders) ?> zleceń</span>
-                        <span class="badge bg-success ms-1"><?= $totalDevices ?> urządzeń</span>
+                        <?php if ($totalDevices > 0): ?><span class="badge bg-success ms-1"><?= $totalDevices ?> GPS</span><?php endif; ?>
+                        <?php if ($totalOtherDevices > 0): ?><span class="badge bg-warning text-dark ms-1"><?= $totalOtherDevices ?> inne</span><?php endif; ?>
                     </td>
                     <td class="py-2"></td>
                     <td class="py-2"></td>
@@ -1829,8 +1863,12 @@ echo paginate($myTotalOrders, $myPerPage, $myPage, $_myUrl);
                     <td><?= h($ord['technician_name'] ?? '—') ?></td>
                     <td>
                         <?php if ($ord['device_count'] > 0): ?>
-                        <span class="badge bg-success"><?= (int)$ord['device_count'] ?></span>
-                        <?php else: ?>
+                        <span class="badge bg-success" title="Urządzenia GPS"><?= (int)$ord['device_count'] ?> GPS</span>
+                        <?php endif; ?>
+                        <?php if ((int)($ord['other_devices_count'] ?? 0) > 0): ?>
+                        <span class="badge bg-warning text-dark" title="Inne urządzenia"><?= (int)$ord['other_devices_count'] ?> inne</span>
+                        <?php endif; ?>
+                        <?php if ($ord['device_count'] == 0 && (int)($ord['other_devices_count'] ?? 0) == 0): ?>
                         <span class="badge bg-secondary">0</span>
                         <?php endif; ?>
                     </td>
@@ -1926,7 +1964,15 @@ echo paginate($archiveTotalOrders, $archPerPage, $archPage, $_archUrl);
                 <!-- Inne urządzenia (nie z listy urządzeń GPS) -->
                 <div class="col-12">
                     <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
-                    <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, radio, alarm..."></textarea>
+                    <div class="row g-2">
+                        <div class="col-sm-8">
+                            <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, radio, alarm..."></textarea>
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small text-muted">Liczba szt.</label>
+                            <input type="number" name="other_devices_count" class="form-control" min="0" value="0" placeholder="0">
+                        </div>
+                    </div>
                     <div class="form-text">Wpisz urządzenia, które nie figurują na liście urządzeń GPS w systemie.</div>
                 </div>
                 <div class="col-12">
@@ -2053,8 +2099,13 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                     </td></tr>
                     <tr><th class="text-muted ps-3">Adres instalacji</th><td><?= h($order['installation_address'] ?? '—') ?></td></tr>
                     <tr><th class="text-muted ps-3">Uwagi</th><td><?= nl2br(h($order['notes'] ?? '—')) ?></td></tr>
-                    <?php if (!empty($order['other_devices'])): ?>
-                    <tr><th class="text-muted ps-3">Inne urządzenia</th><td><?= nl2br(h($order['other_devices'])) ?></td></tr>
+                    <?php if (!empty($order['other_devices']) || (int)($order['other_devices_count'] ?? 0) > 0): ?>
+                    <tr><th class="text-muted ps-3">Inne urządzenia</th><td>
+                        <?php if ((int)($order['other_devices_count'] ?? 0) > 0): ?>
+                        <span class="badge bg-warning text-dark me-1"><?= (int)$order['other_devices_count'] ?> szt.</span>
+                        <?php endif; ?>
+                        <?= nl2br(h($order['other_devices'] ?? '')) ?>
+                    </td></tr>
                     <?php endif; ?>
                     <tr><th class="text-muted ps-3">Utworzone</th><td><?= formatDateTime($order['created_at']) ?></td></tr>
                 </table>
@@ -2520,7 +2571,15 @@ function openReassignDeviceModal(instId, serial) {
                         </div>
                         <div class="col-12">
                             <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
-                            <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."><?= h($order['other_devices'] ?? '') ?></textarea>
+                            <div class="row g-2">
+                                <div class="col-sm-8">
+                                    <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."><?= h($order['other_devices'] ?? '') ?></textarea>
+                                </div>
+                                <div class="col-sm-4">
+                                    <label class="form-label small text-muted">Liczba szt.</label>
+                                    <input type="number" name="other_devices_count" class="form-control" min="0" value="<?= (int)($order['other_devices_count'] ?? 0) ?>" placeholder="0">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2817,7 +2876,15 @@ function showCompleteDisassemblyModal(deviceId, serial, installationId) {
                         </div>
                         <div class="col-12">
                             <label class="form-label"><i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenia (nie z listy GPS)</label>
-                            <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."></textarea>
+                            <div class="row g-2">
+                                <div class="col-sm-8">
+                                    <textarea name="other_devices" class="form-control" rows="2" placeholder="np. kamera cofania, czujniki parkowania, alarm..."></textarea>
+                                </div>
+                                <div class="col-sm-4">
+                                    <label class="form-label small text-muted">Liczba szt.</label>
+                                    <input type="number" name="other_devices_count" class="form-control" min="0" value="0" placeholder="0">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </form>
@@ -3151,11 +3218,17 @@ function openGroupPreviewModal(ordersJson, clientLabel) {
     };
     var rows = orders.map(function(o) {
         var st = statusLabels[o.status] || ('<span class="badge bg-secondary">'+escHtml(o.status)+'</span>');
+        var gpsCount = parseInt(o.device_count, 10) || 0;
+        var otherCount = parseInt(o.other_devices_count, 10) || 0;
+        var deviceBadges = '';
+        if (gpsCount > 0) deviceBadges += '<span class="badge bg-success" title="Urządzenia GPS">'+gpsCount+' GPS</span> ';
+        if (otherCount > 0) deviceBadges += '<span class="badge bg-warning text-dark" title="Inne urządzenia">'+otherCount+' inne</span>';
+        if (gpsCount === 0 && otherCount === 0) deviceBadges = '<span class="badge bg-secondary">0</span>';
         return '<tr>'
             + '<td class="fw-semibold"><a href="#" data-oid="'+o.id+'" data-onum="'+escHtml(o.order_number)+'" onclick="closeGroupOpenOrder(parseInt(this.dataset.oid),this.dataset.onum);return false;">'+escHtml(o.order_number)+'</a></td>'
             + '<td>'+escHtml(o.date)+'</td>'
             + '<td>'+escHtml(o.technician_name||'—')+'</td>'
-            + '<td><span class="badge '+(o.device_count>0?'bg-success':'bg-secondary')+'">'+o.device_count+'</span></td>'
+            + '<td>'+deviceBadges+'</td>'
             + '<td>'+st+'</td>'
             + '<td><button class="btn btn-sm btn-outline-primary btn-action" title="Podgląd" data-oid="'+o.id+'" data-onum="'+escHtml(o.order_number)+'" onclick="closeGroupOpenOrder(parseInt(this.dataset.oid),this.dataset.onum)"><i class="fas fa-eye"></i></button></td>'
             + '</tr>';

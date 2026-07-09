@@ -53,7 +53,7 @@ function statsColumnExists(PDO $db, string $table, string $column): bool
 {
     try {
         $allowedTable  = statsAllowedIdentifier($table, ['installations', 'work_orders']);
-        $allowedColumn = statsAllowedIdentifier($column, ['work_order_id', 'other_devices']);
+        $allowedColumn = statsAllowedIdentifier($column, ['work_order_id', 'other_devices', 'other_devices_count']);
         if ($allowedTable === null || $allowedColumn === null) {
             return false;
         }
@@ -68,10 +68,10 @@ function statsColumnExists(PDO $db, string $table, string $column): bool
 /**
  * Fetch work-order installations grouped by month for the yearly view modal.
  * Returns array indexed 1..12, each element an array of client groups with:
- *   client_name, total_install_count, order_dates, models, other_devices.
- * The other devices list is populated only when the work_orders.other_devices column exists.
+ *   client_name, total_install_count, total_other_count, order_dates, models, other_devices.
+ * The other devices list and count are populated only when the respective columns exist.
  */
-function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $hasOtherDevicesColumn): array
+function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $hasOtherDevicesColumn, bool $hasOtherDevicesCountColumn = false): array
 {
     $yearExpr  = $isSqlite ? "strftime('%Y', wo.date) = ?" : 'YEAR(wo.date) = ?';
     $monthExpr = $isSqlite
@@ -81,9 +81,13 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
     $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
+    $otherDevicesCountExpr = $hasOtherDevicesCountColumn ? "COALESCE(wo.other_devices_count, 0)" : "0";
     $groupByColumns = 'wo.id, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name';
     if ($hasOtherDevicesColumn) {
         $groupByColumns .= ', wo.other_devices';
+    }
+    if ($hasOtherDevicesCountColumn) {
+        $groupByColumns .= ', wo.other_devices_count';
     }
 
     $sql = "
@@ -93,6 +97,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
             {$modelExpr} AS model_name,
             {$otherDevicesExpr} AS other_devices,
+            {$otherDevicesCountExpr} AS other_devices_count,
             COUNT(i.id) AS install_count
         FROM work_orders wo
         LEFT JOIN clients c ON c.id = wo.client_id
@@ -118,6 +123,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $byMonth[$month][$clientName] = [
                     'client_name' => $clientName,
                     'total_install_count' => 0,
+                    'total_other_count' => 0,
                     'order_dates' => [],
                     'models' => [],
                     'other_devices' => [],
@@ -139,6 +145,16 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             $byMonth[$month][$clientName]['models'][$modelName] += $installCount;
             $byMonth[$month][$clientName]['total_install_count'] += $installCount;
 
+            // Accumulate other_devices_count once per work order date (avoid double-counting when multiple GPS models)
+            $otherCount = (int)($row['other_devices_count'] ?? 0);
+            if ($otherCount > 0 && $orderDate !== '') {
+                $trackKey = '_odc_' . $orderDate;
+                if (!isset($byMonth[$month][$clientName][$trackKey])) {
+                    $byMonth[$month][$clientName][$trackKey] = true;
+                    $byMonth[$month][$clientName]['total_other_count'] += $otherCount;
+                }
+            }
+
             $otherDevices = trim((string)($row['other_devices'] ?? ''));
             if ($otherDevices !== '') {
                 foreach (preg_split('/\r\n|\n|\r/', $otherDevices) as $otherDevice) {
@@ -153,14 +169,18 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
 
     foreach ($byMonth as $month => $groups) {
         $normalizedGroups = [];
-        foreach ($groups as $group) {
+        foreach ($groups as $groupKey => $group) {
+            if (str_starts_with((string)$groupKey, '_odc_')) {
+                continue;
+            }
             $modelLabels = [];
             foreach ($group['models'] as $modelName => $count) {
                 $modelLabels[] = $count > 1 ? ($modelName . ' × ' . $count) : $modelName;
             }
-
-            $group['models'] = $modelLabels;
-            $normalizedGroups[] = $group;
+            // Strip internal tracking keys before output
+            $cleanGroup = array_filter($group, static fn($k) => !str_starts_with((string)$k, '_odc_'), ARRAY_FILTER_USE_KEY);
+            $cleanGroup['models'] = $modelLabels;
+            $normalizedGroups[] = $cleanGroup;
         }
 
         $byMonth[$month] = $normalizedGroups;
@@ -174,6 +194,7 @@ $year = (int)($_GET['year'] ?? date('Y'));
 $hasWorkOrdersTable = statsTableExists($db, 'work_orders');
 $hasWorkOrderColumn = statsColumnExists($db, 'installations', 'work_order_id');
 $hasOtherDevicesColumn = $hasWorkOrdersTable && statsColumnExists($db, 'work_orders', 'other_devices');
+$hasOtherDevicesCountColumn = $hasWorkOrdersTable && statsColumnExists($db, 'work_orders', 'other_devices_count');
 
 // ── Yearly stats data ──────────────────────────────────────────────────
 $installsByMonthData = array_fill(1, 12, 0);
@@ -305,7 +326,7 @@ $statsWarnings = [];
 $yearlyMonthlyDetails = array_fill(1, 12, []);
 if ($hasWorkOrdersTable && $hasWorkOrderColumn) {
     try {
-        $yearlyMonthlyDetails = statsGetYearlyMonthlyDetails($db, $year, $isSqlite, $hasOtherDevicesColumn);
+        $yearlyMonthlyDetails = statsGetYearlyMonthlyDetails($db, $year, $isSqlite, $hasOtherDevicesColumn, $hasOtherDevicesCountColumn);
     } catch (Throwable $e) {
         error_log('statistics yearly monthly details failed: ' . $e->getMessage());
     }
@@ -566,6 +587,13 @@ document.addEventListener('DOMContentLoaded', function () {
                       '</div>'
                     : '';
 
+                var gpsCount = parseInt(row.total_install_count, 10) || 0;
+                var otherCount = parseInt(row.total_other_count, 10) || 0;
+                var countBadges = '';
+                if (gpsCount > 0) countBadges += '<span class="badge bg-primary rounded-pill fs-6 me-1">' + gpsCount + ' GPS</span>';
+                if (otherCount > 0) countBadges += '<span class="badge bg-warning text-dark rounded-pill fs-6">' + otherCount + ' inne</span>';
+                if (!countBadges) countBadges = '<span class="badge bg-secondary rounded-pill fs-6">0</span>';
+
                 return '' +
                     '<div class="card border-0 shadow-sm">' +
                         '<div class="card-body p-3 p-lg-4">' +
@@ -574,7 +602,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                     '<h6 class="mb-1 fw-bold">' + escHtml(row.client_name || '—') + '</h6>' +
                                     '<div class="small text-muted">Pozycje zgrupowane dla tego klienta w wybranym miesiącu.</div>' +
                                 '</div>' +
-                                '<span class="badge bg-primary rounded-pill fs-6">' + (parseInt(row.total_install_count, 10) || 0) + ' GPS</span>' +
+                                '<div class="d-flex gap-1 flex-wrap">' + countBadges + '</div>' +
                             '</div>' +
                             '<div class="mb-3">' +
                                 '<div class="small fw-semibold text-muted text-uppercase mb-2">Daty zleceń</div>' +
