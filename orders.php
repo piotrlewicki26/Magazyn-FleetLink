@@ -3192,7 +3192,8 @@ function openModalReassignDevice(instId, serial) {
     form.classList.remove('d-none');
     form.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
-const QUICK_PREVIEW_SCROLL_DELAY_MS = 60;
+// Delay needed for Bootstrap modal content reflow before smooth scrolling.
+const LAYOUT_UPDATE_DELAY_MS = 60;
 
 function toggleModalInstallForm() {
     var form = document.getElementById('modalInstallForm');
@@ -3209,7 +3210,7 @@ function toggleModalInstallForm() {
             }
             var input = document.getElementById('modalDeviceSearchInput');
             if (input) input.focus();
-        }, QUICK_PREVIEW_SCROLL_DELAY_MS);
+        }, LAYOUT_UPDATE_DELAY_MS);
     }
 }
 function confirmRemoveFromOrder(formEl) {
@@ -3217,7 +3218,7 @@ function confirmRemoveFromOrder(formEl) {
     if (formEl && formEl.dataset) {
         serial = (formEl.dataset.serial || '').trim();
     }
-    if (serial !== '') {
+    if (serial) {
         return confirm('Czy na pewno chcesz odłączyć urządzenie ' + serial + ' od tego zlecenia?');
     }
     return confirm('Czy na pewno chcesz odłączyć to urządzenie od tego zlecenia?');
