@@ -81,6 +81,10 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
     $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
+    $groupByColumns = 'wo.id, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name';
+    if ($hasOtherDevicesColumn) {
+        $groupByColumns .= ', wo.other_devices';
+    }
 
     $sql = "
         SELECT
@@ -97,7 +101,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearExpr}
-        GROUP BY wo.id, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name" . ($hasOtherDevicesColumn ? ", wo.other_devices" : '') . "
+        GROUP BY {$groupByColumns}
         ORDER BY wo.date, wo.id
     ";
 
@@ -109,8 +113,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     foreach ($rows as $row) {
         $month = (int)$row['month_no'];
         if ($month >= 1 && $month <= 12) {
-            $clientName = trim((string)($row['client_name'] ?? '—'));
-
+            $clientName = trim((string)($row['client_name'] ?? ''));
             if (!isset($byMonth[$month][$clientName])) {
                 $byMonth[$month][$clientName] = [
                     'client_name' => $clientName,
@@ -126,7 +129,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $byMonth[$month][$clientName]['order_dates'][] = $orderDate;
             }
 
-            $modelName = trim((string)($row['model_name'] ?? '—'));
+            $modelName = trim((string)($row['model_name'] ?? ''));
 
             if (!isset($byMonth[$month][$clientName]['models'][$modelName])) {
                 $byMonth[$month][$clientName]['models'][$modelName] = 0;
@@ -138,7 +141,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
 
             $otherDevices = trim((string)($row['other_devices'] ?? ''));
             if ($otherDevices !== '') {
-                foreach (preg_split('/\r\n|\r|\n/', $otherDevices) as $otherDevice) {
+                foreach (preg_split('/\r\n|\n|\r/', $otherDevices) as $otherDevice) {
                     $otherDevice = trim((string)$otherDevice);
                     if ($otherDevice !== '' && !in_array($otherDevice, $byMonth[$month][$clientName]['other_devices'], true)) {
                         $byMonth[$month][$clientName]['other_devices'][] = $otherDevice;
@@ -149,11 +152,6 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     }
 
     foreach ($byMonth as $month => $groups) {
-        if (!$groups) {
-            $byMonth[$month] = [];
-            continue;
-        }
-
         $normalizedGroups = [];
         foreach ($groups as $group) {
             $modelLabels = [];
