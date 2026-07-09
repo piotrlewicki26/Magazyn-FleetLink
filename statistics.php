@@ -67,10 +67,10 @@ function statsColumnExists(PDO $db, string $table, string $column): bool
 
 /**
  * Fetch work-order installations grouped by month for the yearly view modal.
- * Returns array indexed 1..12, each element an array of order rows with:
- *   order_date, client_name, model_name, install_count.
+ * Returns array indexed 1..12, each element an array of client groups with:
+ *   client_name, total_install_count, order_dates, models, other_devices.
  */
-function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite): array
+function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $hasOtherDevicesColumn): array
 {
     $yearExpr  = $isSqlite ? "strftime('%Y', wo.date) = ?" : 'YEAR(wo.date) = ?';
     $monthExpr = $isSqlite
@@ -79,6 +79,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite): array
     $modelExpr = $isSqlite
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
+    $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
 
     $sql = "
         SELECT
@@ -86,6 +87,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite): array
             wo.date AS order_date,
             COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
             {$modelExpr} AS model_name,
+            {$otherDevicesExpr} AS other_devices,
             COUNT(i.id) AS install_count
         FROM work_orders wo
         LEFT JOIN clients c ON c.id = wo.client_id
@@ -94,7 +96,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite): array
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearExpr}
-        GROUP BY wo.id, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
+        GROUP BY wo.id, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name" . ($hasOtherDevicesColumn ? ", wo.other_devices" : '') . "
         ORDER BY wo.date, wo.id
     ";
 
@@ -106,8 +108,69 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite): array
     foreach ($rows as $row) {
         $month = (int)$row['month_no'];
         if ($month >= 1 && $month <= 12) {
-            $byMonth[$month][] = $row;
+            $clientName = trim((string)($row['client_name'] ?? ''));
+            if ($clientName === '') {
+                $clientName = '—';
+            }
+
+            if (!isset($byMonth[$month][$clientName])) {
+                $byMonth[$month][$clientName] = [
+                    'client_name' => $clientName,
+                    'total_install_count' => 0,
+                    'order_dates' => [],
+                    'models' => [],
+                    'other_devices' => [],
+                ];
+            }
+
+            $orderDate = trim((string)($row['order_date'] ?? ''));
+            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientName]['order_dates'], true)) {
+                $byMonth[$month][$clientName]['order_dates'][] = $orderDate;
+            }
+
+            $modelName = trim((string)($row['model_name'] ?? ''));
+            if ($modelName === '') {
+                $modelName = '—';
+            }
+
+            if (!isset($byMonth[$month][$clientName]['models'][$modelName])) {
+                $byMonth[$month][$clientName]['models'][$modelName] = 0;
+            }
+
+            $installCount = (int)($row['install_count'] ?? 0);
+            $byMonth[$month][$clientName]['models'][$modelName] += $installCount;
+            $byMonth[$month][$clientName]['total_install_count'] += $installCount;
+
+            $otherDevices = trim((string)($row['other_devices'] ?? ''));
+            if ($otherDevices !== '') {
+                foreach (preg_split('/\r\n|\r|\n/', $otherDevices) as $otherDevice) {
+                    $otherDevice = trim((string)$otherDevice);
+                    if ($otherDevice !== '' && !in_array($otherDevice, $byMonth[$month][$clientName]['other_devices'], true)) {
+                        $byMonth[$month][$clientName]['other_devices'][] = $otherDevice;
+                    }
+                }
+            }
         }
+    }
+
+    foreach ($byMonth as $month => $groups) {
+        if (!$groups) {
+            $byMonth[$month] = [];
+            continue;
+        }
+
+        $normalizedGroups = [];
+        foreach ($groups as $group) {
+            $modelLabels = [];
+            foreach ($group['models'] as $modelName => $count) {
+                $modelLabels[] = $count > 1 ? ($modelName . ' × ' . $count) : $modelName;
+            }
+
+            $group['models'] = $modelLabels;
+            $normalizedGroups[] = $group;
+        }
+
+        $byMonth[$month] = $normalizedGroups;
     }
 
     return $byMonth;
@@ -117,6 +180,7 @@ $year = (int)($_GET['year'] ?? date('Y'));
 
 $hasWorkOrdersTable = statsTableExists($db, 'work_orders');
 $hasWorkOrderColumn = statsColumnExists($db, 'installations', 'work_order_id');
+$hasOtherDevicesColumn = $hasWorkOrdersTable && statsColumnExists($db, 'work_orders', 'other_devices');
 
 // ── Yearly stats data ──────────────────────────────────────────────────
 $installsByMonthData = array_fill(1, 12, 0);
@@ -248,7 +312,7 @@ $statsWarnings = [];
 $yearlyMonthlyDetails = array_fill(1, 12, []);
 if ($hasWorkOrdersTable && $hasWorkOrderColumn) {
     try {
-        $yearlyMonthlyDetails = statsGetYearlyMonthlyDetails($db, $year, $isSqlite);
+        $yearlyMonthlyDetails = statsGetYearlyMonthlyDetails($db, $year, $isSqlite, $hasOtherDevicesColumn);
     } catch (Throwable $e) {
         error_log('statistics yearly monthly details failed: ' . $e->getMessage());
     }
@@ -454,20 +518,8 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="modal-title" id="monthDetailModalLabel"><i class="fas fa-calendar-alt me-2 text-primary"></i>Szczegóły miesiąca</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Data zlecenia</th>
-                                <th>Klient</th>
-                                <th>Model</th>
-                                <th class="text-end">Ilość GPS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="monthDetailBody"></tbody>
-                    </table>
-                </div>
+            <div class="modal-body bg-body-tertiary">
+                <div id="monthDetailBody" class="p-3 d-grid gap-3"></div>
             </div>
         </div>
     </div>
@@ -489,25 +541,60 @@ document.addEventListener('DOMContentLoaded', function () {
         return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
+    function renderBadgeList(items, className) {
+        return (items || []).map(function (item) {
+            return '<span class="badge ' + className + '">' + escHtml(item) + '</span>';
+        }).join('');
+    }
+
+    function renderListGroup(items) {
+        return (items || []).map(function (item) {
+            return '<li class="list-group-item px-0 py-2 border-0 border-bottom bg-transparent">' + escHtml(item) + '</li>';
+        }).join('');
+    }
+
     function openMonthModal(monthIndex) {
         var rows = monthlyDetails[monthIndex] || [];
         var label = monthLabels[monthIndex] + ' <?= $year ?>';
         document.getElementById('monthDetailModalLabel').innerHTML =
             '<i class="fas fa-calendar-alt me-2 text-primary"></i>' + escHtml(label);
-        var tbody = document.getElementById('monthDetailBody');
-        tbody.innerHTML = '';
+        var container = document.getElementById('monthDetailBody');
+        container.innerHTML = '';
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Brak zleceń w tym miesiącu.</td></tr>';
+            container.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-body text-center text-muted py-5">Brak zleceń w tym miesiącu.</div></div>';
         } else {
-            rows.forEach(function (row) {
-                var tr = document.createElement('tr');
-                tr.innerHTML =
-                    '<td class="text-nowrap">' + escHtml(row.order_date || '—') + '</td>' +
-                    '<td class="fw-semibold">' + escHtml(row.client_name || '—') + '</td>' +
-                    '<td>' + escHtml(row.model_name || '—') + '</td>' +
-                    '<td class="text-end"><span class="badge bg-success">' + (parseInt(row.install_count, 10) || 0) + '</span></td>';
-                tbody.appendChild(tr);
-            });
+            container.innerHTML = rows.map(function (row) {
+                var orderDates = renderBadgeList(row.order_dates || [], 'bg-light text-body border');
+                var models = renderListGroup(row.models || []);
+                var otherDevices = row.other_devices && row.other_devices.length
+                    ? '<div class="mt-3">' +
+                        '<div class="small fw-semibold text-muted text-uppercase mb-2">Inne urządzenia</div>' +
+                        '<div class="d-flex flex-wrap gap-2">' + renderBadgeList(row.other_devices, 'bg-warning-subtle text-warning-emphasis') + '</div>' +
+                      '</div>'
+                    : '';
+
+                return '' +
+                    '<div class="card border-0 shadow-sm">' +
+                        '<div class="card-body p-3 p-lg-4">' +
+                            '<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">' +
+                                '<div>' +
+                                    '<h6 class="mb-1 fw-bold">' + escHtml(row.client_name || '—') + '</h6>' +
+                                    '<div class="small text-muted">Pozycje zgrupowane dla tego klienta w wybranym miesiącu.</div>' +
+                                '</div>' +
+                                '<span class="badge bg-primary rounded-pill fs-6">' + (parseInt(row.total_install_count, 10) || 0) + ' GPS</span>' +
+                            '</div>' +
+                            '<div class="mb-3">' +
+                                '<div class="small fw-semibold text-muted text-uppercase mb-2">Daty zleceń</div>' +
+                                '<div class="d-flex flex-wrap gap-2">' + orderDates + '</div>' +
+                            '</div>' +
+                            '<div>' +
+                                '<div class="small fw-semibold text-muted text-uppercase mb-2">Urządzenia GPS</div>' +
+                                '<ul class="list-group list-group-flush">' + models + '</ul>' +
+                            '</div>' +
+                            otherDevices +
+                        '</div>' +
+                    '</div>';
+            }).join('');
         }
         var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('monthDetailModal'));
         modal.show();
