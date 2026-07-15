@@ -1240,7 +1240,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <?php if (isAdmin()): ?>
                     <th style="width:36px"><input type="checkbox" id="checkAll" form="bulkPurchaseForm" title="Zaznacz wszystkie"></th>
                     <?php endif; ?>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Tacho</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th><th>Data zakupu</th>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th title="Podłączenie do tachografu" aria-label="Podłączenie do tachografu">Tacho</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th><th>Data zakupu</th>
                     <?php if (isAdmin()): ?><th>Cena zakupu</th><?php endif; ?>
                     <th>Akcje</th>
                 </tr>
@@ -1422,6 +1422,9 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
     </div>
 </div>
 <script>
+function toggleTachoFwRow(rowId, checked) {
+    document.getElementById(rowId).style.display = checked ? '' : 'none';
+}
 // Remember current list URL (page + per_page) so browser back button restores position
 (function() {
     var url = window.location.href;
@@ -1849,7 +1852,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="col-12">
                             <hr class="my-1">
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="tacho_connected" id="installTachoCheck" value="1" onchange="document.getElementById('installTachoFwRow').style.display=this.checked?'':'none'">
+                                <input class="form-check-input" type="checkbox" name="tacho_connected" id="installTachoCheck" value="1" onchange="toggleTachoFwRow('installTachoFwRow', this.checked)">
                                 <label class="form-check-label fw-semibold" for="installTachoCheck">
                                     🔌 Urządzenie podpięte pod tachograf
                                 </label>
@@ -2727,7 +2730,7 @@ function openSimEdit(deviceId, currentSim) {
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" name="tacho_connected" id="formTachoCheck" value="1"
                                <?= ($device['tacho_connected'] ?? 0) ? 'checked' : '' ?>
-                               onchange="document.getElementById('formTachoFwRow').style.display=this.checked?'':'none'">
+                               onchange="toggleTachoFwRow('formTachoFwRow', this.checked)">
                         <label class="form-check-label fw-semibold" for="formTachoCheck">
                             🔌 Urządzenie podpięte pod tachograf
                         </label>

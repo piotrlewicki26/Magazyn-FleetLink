@@ -1124,6 +1124,10 @@ function toggleBatchRows(groupKey, btn) {
     }
 }
 
+function toggleTachoFwRow(rowId, checked) {
+    document.getElementById(rowId).style.display = checked ? '' : 'none';
+}
+
 function showInstPreview(data) {
     var statusMap = {
         'aktywna':    '<span class="badge bg-success">Aktywna</span>',
@@ -3057,7 +3061,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                             <hr class="my-1">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="tacho_connected" id="instListTachoCheck" value="1"
-                                       onchange="document.getElementById('instListTachoFwRow').style.display=this.checked?'':'none'">
+                                       onchange="toggleTachoFwRow('instListTachoFwRow', this.checked)">
                                 <label class="form-check-label fw-semibold" for="instListTachoCheck">
                                     🔌 Urządzenie(a) podpięte pod tachograf
                                 </label>
