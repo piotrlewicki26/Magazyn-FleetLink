@@ -68,20 +68,21 @@ function ensureTachoColumns(PDO $db): void {
     } catch (Exception $e) {
         $msg = strtolower($e->getMessage());
         // Only proceed if the error is "column not found"; re-throw unexpected errors
-        if (strpos($msg, 'no such column') === false && strpos($msg, 'unknown column') === false && $e->getCode() != 'HY000') {
+        if (strpos($msg, 'no such column') === false && strpos($msg, 'unknown column') === false) {
             throw $e;
         }
     }
     $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-    foreach (['tacho_connected INTEGER NOT NULL DEFAULT 0', 'tacho_firmware_version TEXT DEFAULT NULL'] as $colDef) {
+    $columns = [
+        ['name' => 'tacho_connected',       'sqlite' => 'INTEGER NOT NULL DEFAULT 0',   'mysql' => 'TINYINT(1) NOT NULL DEFAULT 0'],
+        ['name' => 'tacho_firmware_version', 'sqlite' => 'TEXT DEFAULT NULL',             'mysql' => 'VARCHAR(50) DEFAULT NULL'],
+    ];
+    foreach ($columns as $col) {
         try {
             if ($driver === 'sqlite') {
-                $db->exec("ALTER TABLE devices ADD COLUMN $colDef");
+                $db->exec("ALTER TABLE devices ADD COLUMN {$col['name']} {$col['sqlite']}");
             } else {
-                $mysqlDef = $colDef === 'tacho_connected INTEGER NOT NULL DEFAULT 0'
-                    ? '`tacho_connected` TINYINT(1) NOT NULL DEFAULT 0'
-                    : '`tacho_firmware_version` VARCHAR(50) DEFAULT NULL';
-                $db->exec("ALTER TABLE `devices` ADD COLUMN $mysqlDef");
+                $db->exec("ALTER TABLE `devices` ADD COLUMN `{$col['name']}` {$col['mysql']}");
             }
         } catch (Exception $e) {
             $msg = strtolower($e->getMessage());

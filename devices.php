@@ -1234,6 +1234,10 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
         </div>
     </div>
     <div class="table-responsive">
+        <?php
+        // 10 fixed columns + Akcje = 11 base; admin gets +1 for checkbox + 1 for Cena zakupu = 13
+        $devListColspan = isAdmin() ? 13 : 11;
+        ?>
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
@@ -1358,7 +1362,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($devices)): ?>
-                <tr><td colspan="<?= isAdmin() ? 13 : 11 ?>" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
+                <tr><td colspan="<?= $devListColspan ?>" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -1434,11 +1438,15 @@ function toggleTachoFwRow(rowId, checked) {
 })();
 
 var _previewDeviceData = null;
+function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 function buildTachoBadge(tacho_connected, tacho_firmware_version) {
     if (!tacho_connected) return '<span class="text-muted">—</span>';
-    var tip = 'Podpięte pod tachograf' + (tacho_firmware_version ? ' • wersja: ' + tacho_firmware_version : '');
+    var fwSafe = tacho_firmware_version ? escHtml(tacho_firmware_version) : '';
+    var tip = 'Podpięte pod tachograf' + (fwSafe ? ' • wersja: ' + fwSafe : '');
     var badge = '<span class="badge bg-primary" title="' + tip + '">🔌 TACHO</span>';
-    var ver = tacho_firmware_version ? ' <small class="text-muted ms-1">wersja: ' + tacho_firmware_version + '</small>' : '';
+    var ver = fwSafe ? ' <small class="text-muted ms-1">wersja: ' + fwSafe + '</small>' : '';
     return badge + ver;
 }
 function showDevicePreview(data) {
