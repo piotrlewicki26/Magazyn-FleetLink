@@ -65,22 +65,32 @@ function ensureTachoColumns(PDO $db): void {
     try {
         $db->query("SELECT tacho_connected FROM devices LIMIT 1");
         return; // columns present
-    } catch (Exception $e) {}
+    } catch (Exception $e) {
+        $msg = strtolower($e->getMessage());
+        // Only proceed if the error is "column not found"; re-throw unexpected errors
+        if (strpos($msg, 'no such column') === false && strpos($msg, 'unknown column') === false && $e->getCode() != 'HY000') {
+            throw $e;
+        }
+    }
     $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-    try {
-        if ($driver === 'sqlite') {
-            $db->exec("ALTER TABLE devices ADD COLUMN tacho_connected INTEGER NOT NULL DEFAULT 0");
-        } else {
-            $db->exec("ALTER TABLE `devices` ADD COLUMN `tacho_connected` TINYINT(1) NOT NULL DEFAULT 0");
+    foreach (['tacho_connected INTEGER NOT NULL DEFAULT 0', 'tacho_firmware_version TEXT DEFAULT NULL'] as $colDef) {
+        try {
+            if ($driver === 'sqlite') {
+                $db->exec("ALTER TABLE devices ADD COLUMN $colDef");
+            } else {
+                $mysqlDef = $colDef === 'tacho_connected INTEGER NOT NULL DEFAULT 0'
+                    ? '`tacho_connected` TINYINT(1) NOT NULL DEFAULT 0'
+                    : '`tacho_firmware_version` VARCHAR(50) DEFAULT NULL';
+                $db->exec("ALTER TABLE `devices` ADD COLUMN $mysqlDef");
+            }
+        } catch (Exception $e) {
+            $msg = strtolower($e->getMessage());
+            // Ignore "column already exists" errors (race condition / re-migration)
+            if (strpos($msg, 'duplicate column') === false && strpos($msg, 'already exists') === false) {
+                throw $e;
+            }
         }
-    } catch (Exception $e) {}
-    try {
-        if ($driver === 'sqlite') {
-            $db->exec("ALTER TABLE devices ADD COLUMN tacho_firmware_version TEXT DEFAULT NULL");
-        } else {
-            $db->exec("ALTER TABLE `devices` ADD COLUMN `tacho_firmware_version` VARCHAR(50) DEFAULT NULL");
-        }
-    } catch (Exception $e) {}
+    }
 }
 
 function logDeviceFieldChange(PDO $db, int $deviceId, string $fieldName, $oldValue, $newValue, ?int $changedByUserId = null, string $sourceType = 'manual', ?int $sourceId = null): void {

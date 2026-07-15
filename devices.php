@@ -1279,7 +1279,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <td><?= getStatusBadge($d['status'], 'device') ?></td>
                     <td>
                         <?php if ($d['tacho_connected']): ?>
-                        <span class="badge" style="background:#0d6efd;color:#fff"
+                        <span class="badge bg-primary"
                               title="Podpięte pod tachograf<?= $d['tacho_firmware_version'] ? ' • wersja: ' . h($d['tacho_firmware_version']) : '' ?>">
                             🔌 TACHO
                         </span>
@@ -1434,6 +1434,13 @@ function toggleTachoFwRow(rowId, checked) {
 })();
 
 var _previewDeviceData = null;
+function buildTachoBadge(tacho_connected, tacho_firmware_version) {
+    if (!tacho_connected) return '<span class="text-muted">—</span>';
+    var tip = 'Podpięte pod tachograf' + (tacho_firmware_version ? ' • wersja: ' + tacho_firmware_version : '');
+    var badge = '<span class="badge bg-primary" title="' + tip + '">🔌 TACHO</span>';
+    var ver = tacho_firmware_version ? ' <small class="text-muted ms-1">wersja: ' + tacho_firmware_version + '</small>' : '';
+    return badge + ver;
+}
 function showDevicePreview(data) {
     _previewDeviceData = data;
     var statusMap = {
@@ -1462,7 +1469,7 @@ function showDevicePreview(data) {
         (data.minor != null ? '<tr><th class="text-muted">Minor</th><td>' + data.minor + '</td></tr>' : '') +
         (data.mac_address ? '<tr><th class="text-muted">MAC</th><td><code>' + data.mac_address + '</code></td></tr>' : '') +
         '<tr><th class="text-muted">Status</th><td>' + statusBadge + '</td></tr>' +
-        '<tr><th class="text-muted">Tachograf</th><td>' + (data.tacho_connected ? '<span class="badge" style="background:#0d6efd;color:#fff" title="Podpięte pod tachograf' + (data.tacho_firmware_version ? ' • wersja: ' + data.tacho_firmware_version : '') + '">🔌 TACHO</span>' + (data.tacho_firmware_version ? ' <small class="text-muted ms-1">wersja: ' + data.tacho_firmware_version + '</small>' : '') : '<span class="text-muted">—</span>') + '</td></tr>' +
+        '<tr><th class="text-muted">Tachograf</th><td>' + buildTachoBadge(data.tacho_connected, data.tacho_firmware_version) + '</td></tr>' +
         '<tr><th class="text-muted">Producent / Model</th><td>' + data.manufacturer_name + ' ' + data.model_name + '</td></tr>' +
         '<tr><th class="text-muted">Rejestracja</th><td>' + (data.vehicle_registration || '—') + '</td></tr>' +
         '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
