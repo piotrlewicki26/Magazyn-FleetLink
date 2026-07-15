@@ -145,3 +145,12 @@ function ajaxPost(url, data, callback) {
         .then(callback)
         .catch(function (err) { console.error('AJAX error:', err); });
 }
+
+/* ── Tachograph helpers ────────────────────────────────── */
+function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function toggleTachoFwRow(rowId, checked) {
+    document.getElementById(rowId).style.display = checked ? '' : 'none';
+}

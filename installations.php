@@ -1124,10 +1124,6 @@ function toggleBatchRows(groupKey, btn) {
     }
 }
 
-function toggleTachoFwRow(rowId, checked) {
-    document.getElementById(rowId).style.display = checked ? '' : 'none';
-}
-
 function showInstPreview(data) {
     var statusMap = {
         'aktywna':    '<span class="badge bg-success">Aktywna</span>',

@@ -1426,9 +1426,6 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
     </div>
 </div>
 <script>
-function toggleTachoFwRow(rowId, checked) {
-    document.getElementById(rowId).style.display = checked ? '' : 'none';
-}
 // Remember current list URL (page + per_page) so browser back button restores position
 (function() {
     var url = window.location.href;
@@ -1438,9 +1435,6 @@ function toggleTachoFwRow(rowId, checked) {
 })();
 
 var _previewDeviceData = null;
-function escHtml(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
 function buildTachoBadge(tacho_connected, tacho_firmware_version) {
     if (!tacho_connected) return '<span class="text-muted">—</span>';
     var fwSafe = tacho_firmware_version ? escHtml(tacho_firmware_version) : '';
@@ -1887,6 +1881,8 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
     </div>
 </div>
+
+<!-- Sub-modal: Utwórz nowe zlecenie (wewnątrz modalu montażu) -->
 <div class="modal fade" id="instNewOrderModal" tabindex="-1" style="z-index:1090">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
