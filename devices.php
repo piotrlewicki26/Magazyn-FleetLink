@@ -1437,11 +1437,9 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
 var _previewDeviceData = null;
 function buildTachoBadge(tacho_connected, tacho_firmware_version) {
     if (!tacho_connected) return '<span class="text-muted">—</span>';
-    var fwSafe = tacho_firmware_version ? escHtml(tacho_firmware_version) : '';
-    var tip = 'Podpięte pod tachograf' + (fwSafe ? ' • wersja: ' + fwSafe : '');
-    var badge = '<span class="badge bg-primary" title="' + tip + '">🔌 TACHO</span>';
-    var ver = fwSafe ? ' <small class="text-muted ms-1">wersja: ' + fwSafe + '</small>' : '';
-    return badge + ver;
+    var tip = escHtml('Podpięte pod tachograf' + (tacho_firmware_version ? ' \u2022 wersja: ' + tacho_firmware_version : ''));
+    var ver = tacho_firmware_version ? ' <small class="text-muted ms-1">wersja: ' + escHtml(tacho_firmware_version) + '</small>' : '';
+    return '<span class="badge bg-primary" title="' + tip + '">🔌 TACHO</span>' + ver;
 }
 function showDevicePreview(data) {
     _previewDeviceData = data;
@@ -2365,7 +2363,7 @@ function openSimEdit(deviceId, currentSim) {
                         <th class="text-muted">Tachograf</th>
                         <td>
                             <?php if (!empty($device['tacho_connected'])): ?>
-                            <span class="badge" style="background:#0d6efd;color:#fff">🔌 TACHO</span>
+                            <span class="badge bg-primary">🔌 TACHO</span>
                             <?php if (!empty($device['tacho_firmware_version'])): ?>
                             <small class="text-muted ms-1">wersja: <?= h($device['tacho_firmware_version']) ?></small>
                             <?php endif; ?>

@@ -74,8 +74,16 @@ function ensureTachoColumns(PDO $db): void {
     }
     $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
     $columns = [
-        ['name' => 'tacho_connected',        'sqlite' => 'INTEGER NOT NULL DEFAULT 0', 'mysql' => 'TINYINT(1) NOT NULL DEFAULT 0'],
-        ['name' => 'tacho_firmware_version', 'sqlite' => 'TEXT DEFAULT NULL',          'mysql' => 'VARCHAR(50) DEFAULT NULL'],
+        [
+            'name'   => 'tacho_connected',
+            'sqlite' => 'INTEGER NOT NULL DEFAULT 0',
+            'mysql'  => 'TINYINT(1) NOT NULL DEFAULT 0',
+        ],
+        [
+            'name'   => 'tacho_firmware_version',
+            'sqlite' => 'TEXT DEFAULT NULL',
+            'mysql'  => 'VARCHAR(50) DEFAULT NULL',
+        ],
     ];
     foreach ($columns as $col) {
         try {
