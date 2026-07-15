@@ -14,6 +14,7 @@ requireLogin();
 $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
+ensureTachoColumns($db);
 
 // One-time migration: add 'archiwum' to installations.status ENUM if not already present
 try {
@@ -147,7 +148,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Update device status + auto inventory adjust
                 $oldStatus = $devRow['status'];
-                $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$dId]);
+                $tachoConnectedInst = isset($_POST['tacho_connected']) ? 1 : 0;
+                $tachoFirmwareInst  = sanitize($_POST['tacho_firmware_version'] ?? '');
+                if ($tachoConnectedInst) {
+                    $db->prepare("UPDATE devices SET status='zamontowany', tacho_connected=1, tacho_firmware_version=? WHERE id=?")->execute([$tachoFirmwareInst ?: null, $dId]);
+                } else {
+                    $db->prepare("UPDATE devices SET status='zamontowany' WHERE id=?")->execute([$dId]);
+                }
                 adjustInventoryForStatusChange($db, $devRow['model_id'], $oldStatus, 'zamontowany');
 
                 $allocatedDeviceIds[] = $dId;
@@ -3045,6 +3052,20 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                         <div class="col-12">
                             <label class="form-label">Uwagi</label>
                             <textarea name="notes" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <hr class="my-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="tacho_connected" id="instListTachoCheck" value="1"
+                                       onchange="document.getElementById('instListTachoFwRow').style.display=this.checked?'':'none'">
+                                <label class="form-check-label fw-semibold" for="instListTachoCheck">
+                                    🔌 Urządzenie(a) podpięte pod tachograf
+                                </label>
+                            </div>
+                            <div id="instListTachoFwRow" class="mt-2" style="display:none">
+                                <label class="form-label form-label-sm">Wersja firmware tacho</label>
+                                <input type="text" name="tacho_firmware_version" class="form-control form-control-sm" placeholder="np. TACHO-4.2.1">
+                            </div>
                         </div>
                     </div>
                 </div>

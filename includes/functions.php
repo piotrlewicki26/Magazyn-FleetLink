@@ -57,6 +57,32 @@ function ensureDeviceChangeLogTable(PDO $db): void {
     }
 }
 
+function ensureTachoColumns(PDO $db): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+    // Check if columns already exist
+    try {
+        $db->query("SELECT tacho_connected FROM devices LIMIT 1");
+        return; // columns present
+    } catch (Exception $e) {}
+    $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+    try {
+        if ($driver === 'sqlite') {
+            $db->exec("ALTER TABLE devices ADD COLUMN tacho_connected INTEGER NOT NULL DEFAULT 0");
+        } else {
+            $db->exec("ALTER TABLE `devices` ADD COLUMN `tacho_connected` TINYINT(1) NOT NULL DEFAULT 0");
+        }
+    } catch (Exception $e) {}
+    try {
+        if ($driver === 'sqlite') {
+            $db->exec("ALTER TABLE devices ADD COLUMN tacho_firmware_version TEXT DEFAULT NULL");
+        } else {
+            $db->exec("ALTER TABLE `devices` ADD COLUMN `tacho_firmware_version` VARCHAR(50) DEFAULT NULL");
+        }
+    } catch (Exception $e) {}
+}
+
 function logDeviceFieldChange(PDO $db, int $deviceId, string $fieldName, $oldValue, $newValue, ?int $changedByUserId = null, string $sourceType = 'manual', ?int $sourceId = null): void {
     $oldNorm = $oldValue === null ? null : (string)$oldValue;
     $newNorm = $newValue === null ? null : (string)$newValue;

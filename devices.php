@@ -14,6 +14,7 @@ requireLogin();
 $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
+ensureTachoColumns($db);
 
 function ensureDeviceConfigFilesTable(PDO $db): void {
     static $checked = false;
@@ -167,6 +168,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $saleDate      = sanitize($_POST['sale_date'] ?? '');
     $leaseEndDate  = sanitize($_POST['lease_end_date'] ?? '');
     $notes         = sanitize($_POST['notes'] ?? '');
+    $tachoConnected = isset($_POST['tacho_connected']) ? 1 : 0;
+    $tachoFirmwareVersion = sanitize($_POST['tacho_firmware_version'] ?? '');
 
     if ($postAction === 'sim_edit') {
         // Administrator, Technik and Użytkownik may update SIM number (requireLogin enforces auth)
@@ -235,8 +238,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         try {
-            $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, ble_id, major, minor, mac_address, status, purchase_date, purchase_price, sale_date, lease_end_date, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes]);
+            $stmt = $db->prepare("INSERT INTO devices (model_id, serial_number, imei, sim_number, ble_id, major, minor, mac_address, status, purchase_date, purchase_price, sale_date, lease_end_date, notes, tacho_connected, tacho_firmware_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes, $tachoConnected, $tachoFirmwareVersion ?: null]);
             $newDeviceId = (int)$db->lastInsertId();
             // Auto-adjust inventory: new device with status 'nowy' enters stock
             adjustInventoryForStatusChange($db, $modelId, '', $status);
@@ -285,18 +288,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         // Fetch old status and old sim_number for inventory/SIM sync
-        $oldRow = $db->prepare("SELECT model_id, serial_number, imei, sim_number, status FROM devices WHERE id=?");
+        $oldRow = $db->prepare("SELECT model_id, serial_number, imei, sim_number, status, tacho_connected, tacho_firmware_version FROM devices WHERE id=?");
         $oldRow->execute([$editId]);
         $oldDevice = $oldRow->fetch();
         try {
-            $stmt = $db->prepare("UPDATE devices SET model_id=?, serial_number=?, imei=?, sim_number=?, ble_id=?, major=?, minor=?, mac_address=?, status=?, purchase_date=?, purchase_price=?, sale_date=?, lease_end_date=?, notes=? WHERE id=?");
-            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes, $editId]);
+            $stmt = $db->prepare("UPDATE devices SET model_id=?, serial_number=?, imei=?, sim_number=?, ble_id=?, major=?, minor=?, mac_address=?, status=?, purchase_date=?, purchase_price=?, sale_date=?, lease_end_date=?, notes=?, tacho_connected=?, tacho_firmware_version=? WHERE id=?");
+            $stmt->execute([$modelId, $serialNumber, $imei, $simNumber, $bleId ?: null, $major, $minor, $macAddress ?: null, $status, $purchaseDate ?: null, $purchasePrice, $saleDate ?: null, $leaseEndDate ?: null, $notes, $tachoConnected, $tachoFirmwareVersion ?: null, $editId]);
             if ($oldDevice) {
                 logDeviceFieldChange($db, $editId, 'model_id', $oldDevice['model_id'] ?? null, $modelId, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
                 logDeviceFieldChange($db, $editId, 'status', $oldDevice['status'] ?? null, $status, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
                 logDeviceFieldChange($db, $editId, 'sim_number', $oldDevice['sim_number'] ?? null, $simNumber ?: null, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
                 logDeviceFieldChange($db, $editId, 'serial_number', $oldDevice['serial_number'] ?? null, $serialNumber, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
                 logDeviceFieldChange($db, $editId, 'imei', $oldDevice['imei'] ?? null, $imei ?: null, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
+                logDeviceFieldChange($db, $editId, 'tacho_connected', $oldDevice['tacho_connected'] ?? 0, $tachoConnected, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
+                logDeviceFieldChange($db, $editId, 'tacho_firmware_version', $oldDevice['tacho_firmware_version'] ?? null, $tachoFirmwareVersion ?: null, (int)(getCurrentUser()['id'] ?? 0), 'device_edit', $editId);
             }
             // Auto-adjust inventory on status change
             if ($oldDevice) {
@@ -489,8 +494,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Update device status and optionally SIM number
             $prevStatus = $devRow['status'];
+            $instTachoConnected = isset($_POST['tacho_connected']) ? 1 : 0;
+            $instTachoFirmware  = sanitize($_POST['tacho_firmware_version'] ?? '');
+            $instStatusFields = ['status' => 'zamontowany'];
+            if ($instTachoConnected) {
+                $instStatusFields['tacho_connected'] = 1;
+                $instStatusFields['tacho_firmware_version'] = $instTachoFirmware ?: null;
+            }
             if ($instSimNumber !== '') {
-                updateDeviceFieldsWithHistory($db, $instDeviceId, ['status' => 'zamontowany', 'sim_number' => $instSimNumber], (int)$currentUser['id'], 'device_install', $instWorkOrderId ?: null);
+                $instStatusFields['sim_number'] = $instSimNumber;
+                updateDeviceFieldsWithHistory($db, $instDeviceId, $instStatusFields, (int)$currentUser['id'], 'device_install', $instWorkOrderId ?: null);
                 // Sync sim_cards
                 try {
                     $exSim = $db->prepare("SELECT id FROM sim_cards WHERE device_id=? LIMIT 1");
@@ -509,7 +522,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 } catch (PDOException $e) {}
             } else {
-                updateDeviceFieldsWithHistory($db, $instDeviceId, ['status' => 'zamontowany'], (int)$currentUser['id'], 'device_install', $instWorkOrderId ?: null);
+                updateDeviceFieldsWithHistory($db, $instDeviceId, $instStatusFields, (int)$currentUser['id'], 'device_install', $instWorkOrderId ?: null);
             }
             adjustInventoryForStatusChange($db, $devRow['model_id'], $prevStatus, 'zamontowany');
 
@@ -937,6 +950,7 @@ if ($action === 'list') {
     $search = sanitize($_GET['search'] ?? '');
     $filterModel = (int)($_GET['model'] ?? 0);
     $filterStatus = sanitize($_GET['status'] ?? '');
+    $filterTacho = sanitize($_GET['tacho'] ?? '');
 
     $sql = "
         SELECT d.id, d.serial_number, d.imei, d.sim_number,
@@ -944,6 +958,8 @@ if ($action === 'list') {
                d.status, d.purchase_date,
                d.sale_date, d.notes,
                d.purchase_price,
+               COALESCE(d.tacho_connected, 0) AS tacho_connected,
+               d.tacho_firmware_version,
                m.name as model_name, mf.name as manufacturer_name,
                v.registration as vehicle_registration,
                c.contact_name, c.company_name,
@@ -978,6 +994,8 @@ if ($action === 'list') {
     }
     if ($filterModel) { $sql .= " AND d.model_id=?"; $params[] = $filterModel; }
     if ($filterStatus) { $sql .= " AND d.status=?"; $params[] = $filterStatus; }
+    if ($filterTacho === '1') { $sql .= " AND COALESCE(d.tacho_connected,0)=1"; }
+    elseif ($filterTacho === '0') { $sql .= " AND COALESCE(d.tacho_connected,0)=0"; }
     // Pagination params – persist via URL; remember choice in session
     $allowedPerPage = [15, 50, 100, 150];
     if (isset($_GET['per_page']) && in_array((int)$_GET['per_page'], $allowedPerPage)) {
@@ -999,6 +1017,8 @@ if ($action === 'list') {
     }
     if ($filterModel) { $countSql .= " AND d.model_id=?"; $countParams[] = $filterModel; }
     if ($filterStatus) { $countSql .= " AND d.status=?"; $countParams[] = $filterStatus; }
+    if ($filterTacho === '1') { $countSql .= " AND COALESCE(d.tacho_connected,0)=1"; }
+    elseif ($filterTacho === '0') { $countSql .= " AND COALESCE(d.tacho_connected,0)=0"; }
     $countStmt = $db->prepare($countSql);
     $countStmt->execute($countParams);
     $totalDevices = (int)$countStmt->fetchColumn();
@@ -1122,6 +1142,13 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <div class="col-auto">
+                <select name="tacho" class="form-select form-select-sm" title="Filtruj po tachografie">
+                    <option value="">Tachograf: wszystkie</option>
+                    <option value="1" <?= ($_GET['tacho'] ?? '') === '1' ? 'selected' : '' ?>>🔌 Podpięte pod tacho</option>
+                    <option value="0" <?= ($_GET['tacho'] ?? '') === '0' ? 'selected' : '' ?>>Bez tacho</option>
+                </select>
+            </div>
+            <div class="col-auto">
                 <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-search me-1"></i>Filtruj</button>
                 <a href="devices.php" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
             </div>
@@ -1213,7 +1240,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <?php if (isAdmin()): ?>
                     <th style="width:36px"><input type="checkbox" id="checkAll" form="bulkPurchaseForm" title="Zaznacz wszystkie"></th>
                     <?php endif; ?>
-                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th><th>Data zakupu</th>
+                    <th>Nr seryjny</th><th>IMEI</th><th>Producent / Model</th><th>Status</th><th>Tacho</th><th>Rejestracja</th><th>Nr telefonu SIM</th><th>Klient</th><th>Data montażu</th><th>Data zakupu</th>
                     <?php if (isAdmin()): ?><th>Cena zakupu</th><?php endif; ?>
                     <th>Akcje</th>
                 </tr>
@@ -1226,28 +1253,40 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <?php endif; ?>
                     <td class="fw-semibold">
                         <a href="#" onclick="showDevicePreview(<?= htmlspecialchars(json_encode([
-                            'id'                   => $d['id'],
-                            'serial_number'        => $d['serial_number'],
-                            'imei'                 => $d['imei'] ?? '',
-                            'sim_number'           => $d['sim_number'] ?? '',
-                            'ble_id'               => $d['ble_id'] ?? '',
-                            'major'                => $d['major'] ?? null,
-                            'minor'                => $d['minor'] ?? null,
-                            'mac_address'          => $d['mac_address'] ?? '',
-                            'status'               => $d['status'],
-                            'manufacturer_name'    => $d['manufacturer_name'],
-                            'model_name'           => $d['model_name'],
-                            'vehicle_registration' => $d['vehicle_registration'] ?? '',
-                            'client'               => $d['company_name'] ?: ($d['contact_name'] ?? ''),
-                            'installation_date'    => $d['installation_date'] ?? '',
-                            'purchase_date'        => $d['purchase_date'] ?? '',
-                            'sale_date'            => $d['sale_date'] ?? '',
-                            'notes'                => $d['notes'] ?? '',
+                            'id'                      => $d['id'],
+                            'serial_number'           => $d['serial_number'],
+                            'imei'                    => $d['imei'] ?? '',
+                            'sim_number'              => $d['sim_number'] ?? '',
+                            'ble_id'                  => $d['ble_id'] ?? '',
+                            'major'                   => $d['major'] ?? null,
+                            'minor'                   => $d['minor'] ?? null,
+                            'mac_address'             => $d['mac_address'] ?? '',
+                            'status'                  => $d['status'],
+                            'manufacturer_name'       => $d['manufacturer_name'],
+                            'model_name'              => $d['model_name'],
+                            'vehicle_registration'    => $d['vehicle_registration'] ?? '',
+                            'client'                  => $d['company_name'] ?: ($d['contact_name'] ?? ''),
+                            'installation_date'       => $d['installation_date'] ?? '',
+                            'purchase_date'           => $d['purchase_date'] ?? '',
+                            'sale_date'               => $d['sale_date'] ?? '',
+                            'notes'                   => $d['notes'] ?? '',
+                            'tacho_connected'         => (int)($d['tacho_connected'] ?? 0),
+                            'tacho_firmware_version'  => $d['tacho_firmware_version'] ?? '',
                         ]), ENT_QUOTES) ?>); return false;"><?= h($d['serial_number']) ?></a>
                     </td>
                     <td><?= h($d['imei'] ?? '—') ?></td>
                     <td><?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?></td>
                     <td><?= getStatusBadge($d['status'], 'device') ?></td>
+                    <td>
+                        <?php if ($d['tacho_connected']): ?>
+                        <span class="badge" style="background:#0d6efd;color:#fff"
+                              title="Podpięte pod tachograf<?= $d['tacho_firmware_version'] ? ' • wersja: ' . h($d['tacho_firmware_version']) : '' ?>">
+                            🔌 TACHO
+                        </span>
+                        <?php else: ?>
+                        <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td><?= $d['vehicle_registration'] ? h($d['vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?= $d['sim_number'] ? h($d['sim_number']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?php $clientLabel = $d['company_name'] ?: ($d['contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
@@ -1263,23 +1302,25 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <td>
                         <button type="button" class="btn btn-sm btn-outline-info btn-action"
                                 onclick="showDevicePreview(<?= htmlspecialchars(json_encode([
-                                    'id'                   => $d['id'],
-                                    'serial_number'        => $d['serial_number'],
-                                    'imei'                 => $d['imei'] ?? '',
-                                    'sim_number'           => $d['sim_number'] ?? '',
-                                    'ble_id'               => $d['ble_id'] ?? '',
-                                    'major'                => $d['major'] ?? null,
-                                    'minor'                => $d['minor'] ?? null,
-                                    'mac_address'          => $d['mac_address'] ?? '',
-                                    'status'               => $d['status'],
-                                    'manufacturer_name'    => $d['manufacturer_name'],
-                                    'model_name'           => $d['model_name'],
-                                    'vehicle_registration' => $d['vehicle_registration'] ?? '',
-                                    'client'               => $d['company_name'] ?: ($d['contact_name'] ?? ''),
-                                    'installation_date'    => $d['installation_date'] ?? '',
-                                    'purchase_date'        => $d['purchase_date'] ?? '',
-                                    'sale_date'            => $d['sale_date'] ?? '',
-                                    'notes'                => $d['notes'] ?? '',
+                                    'id'                     => $d['id'],
+                                    'serial_number'          => $d['serial_number'],
+                                    'imei'                   => $d['imei'] ?? '',
+                                    'sim_number'             => $d['sim_number'] ?? '',
+                                    'ble_id'                 => $d['ble_id'] ?? '',
+                                    'major'                  => $d['major'] ?? null,
+                                    'minor'                  => $d['minor'] ?? null,
+                                    'mac_address'            => $d['mac_address'] ?? '',
+                                    'status'                 => $d['status'],
+                                    'manufacturer_name'      => $d['manufacturer_name'],
+                                    'model_name'             => $d['model_name'],
+                                    'vehicle_registration'   => $d['vehicle_registration'] ?? '',
+                                    'client'                 => $d['company_name'] ?: ($d['contact_name'] ?? ''),
+                                    'installation_date'      => $d['installation_date'] ?? '',
+                                    'purchase_date'          => $d['purchase_date'] ?? '',
+                                    'sale_date'              => $d['sale_date'] ?? '',
+                                    'notes'                  => $d['notes'] ?? '',
+                                    'tacho_connected'        => (int)($d['tacho_connected'] ?? 0),
+                                    'tacho_firmware_version' => $d['tacho_firmware_version'] ?? '',
                                 ]), ENT_QUOTES) ?>)"
                                 title="Podgląd"><i class="fas fa-eye"></i></button>
                         <?php if (isAdmin()): ?>
@@ -1317,7 +1358,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($devices)): ?>
-                <tr><td colspan="<?= isAdmin() ? 12 : 10 ?>" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
+                <tr><td colspan="<?= isAdmin() ? 13 : 11 ?>" class="text-center text-muted p-3">Brak urządzeń. <a href="devices.php?action=add">Dodaj pierwsze urządzenie.</a></td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -1418,6 +1459,7 @@ function showDevicePreview(data) {
         (data.minor != null ? '<tr><th class="text-muted">Minor</th><td>' + data.minor + '</td></tr>' : '') +
         (data.mac_address ? '<tr><th class="text-muted">MAC</th><td><code>' + data.mac_address + '</code></td></tr>' : '') +
         '<tr><th class="text-muted">Status</th><td>' + statusBadge + '</td></tr>' +
+        '<tr><th class="text-muted">Tachograf</th><td>' + (data.tacho_connected ? '<span class="badge" style="background:#0d6efd;color:#fff" title="Podpięte pod tachograf' + (data.tacho_firmware_version ? ' • wersja: ' + data.tacho_firmware_version : '') + '">🔌 TACHO</span>' + (data.tacho_firmware_version ? ' <small class="text-muted ms-1">wersja: ' + data.tacho_firmware_version + '</small>' : '') : '<span class="text-muted">—</span>') + '</td></tr>' +
         '<tr><th class="text-muted">Producent / Model</th><td>' + data.manufacturer_name + ' ' + data.model_name + '</td></tr>' +
         '<tr><th class="text-muted">Rejestracja</th><td>' + (data.vehicle_registration || '—') + '</td></tr>' +
         '<tr><th class="text-muted">Klient</th><td>' + (data.client || '—') + '</td></tr>' +
@@ -1804,6 +1846,19 @@ document.addEventListener('DOMContentLoaded', function() {
                             <label class="form-label">Uwagi</label>
                             <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
                         </div>
+                        <div class="col-12">
+                            <hr class="my-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="tacho_connected" id="installTachoCheck" value="1" onchange="document.getElementById('installTachoFwRow').style.display=this.checked?'':'none'">
+                                <label class="form-check-label fw-semibold" for="installTachoCheck">
+                                    🔌 Urządzenie podpięte pod tachograf
+                                </label>
+                            </div>
+                            <div id="installTachoFwRow" class="mt-2" style="display:none">
+                                <label class="form-label form-label-sm">Wersja firmware tacho</label>
+                                <input type="text" name="tacho_firmware_version" class="form-control form-control-sm" placeholder="np. TACHO-4.2.1">
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1814,8 +1869,6 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
     </div>
 </div>
-
-<!-- Sub-modal: Utwórz nowe zlecenie (wewnątrz modalu montażu) -->
 <div class="modal fade" id="instNewOrderModal" tabindex="-1" style="z-index:1090">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -1895,6 +1948,10 @@ function openInstallModal(deviceId, serial, currentSim) {
     document.getElementById('installVehicleReg').value = '';
     document.getElementById('installClientSelect').value = '';
     document.getElementById('installWorkOrderSelect').value = '';
+    var tachoChk = document.getElementById('installTachoCheck');
+    if (tachoChk) { tachoChk.checked = false; }
+    var tachoFwRow = document.getElementById('installTachoFwRow');
+    if (tachoFwRow) { tachoFwRow.style.display = 'none'; }
     installClientSetFree();
     var modal = new bootstrap.Modal(document.getElementById('installModal'));
     modal.show();
@@ -2290,6 +2347,19 @@ function openSimEdit(deviceId, currentSim) {
                     <tr><td colspan="2"><hr class="my-1"></td></tr>
                     <?php endif; ?>
                     <tr><th class="text-muted">Status</th><td><?= getStatusBadge($device['status'], 'device') ?></td></tr>
+                    <tr>
+                        <th class="text-muted">Tachograf</th>
+                        <td>
+                            <?php if (!empty($device['tacho_connected'])): ?>
+                            <span class="badge" style="background:#0d6efd;color:#fff">🔌 TACHO</span>
+                            <?php if (!empty($device['tacho_firmware_version'])): ?>
+                            <small class="text-muted ms-1">wersja: <?= h($device['tacho_firmware_version']) ?></small>
+                            <?php endif; ?>
+                            <?php else: ?>
+                            <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
                     <?php
                         $activeInst = null;
                         foreach ($deviceInstallations as $inst) {
@@ -2651,6 +2721,21 @@ function openSimEdit(deviceId, currentSim) {
                 <div class="col-12">
                     <label class="form-label">Uwagi</label>
                     <textarea name="notes" class="form-control" rows="3"><?= h($device['notes'] ?? '') ?></textarea>
+                </div>
+                <div class="col-12">
+                    <hr class="my-1">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="tacho_connected" id="formTachoCheck" value="1"
+                               <?= ($device['tacho_connected'] ?? 0) ? 'checked' : '' ?>
+                               onchange="document.getElementById('formTachoFwRow').style.display=this.checked?'':'none'">
+                        <label class="form-check-label fw-semibold" for="formTachoCheck">
+                            🔌 Urządzenie podpięte pod tachograf
+                        </label>
+                    </div>
+                    <div id="formTachoFwRow" class="mt-2" style="display:<?= ($device['tacho_connected'] ?? 0) ? '' : 'none' ?>">
+                        <label class="form-label">Wersja firmware tacho</label>
+                        <input type="text" name="tacho_firmware_version" class="form-control" value="<?= h($device['tacho_firmware_version'] ?? '') ?>" placeholder="np. TACHO-4.2.1">
+                    </div>
                 </div>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i><?= $action === 'add' ? 'Dodaj' : 'Zapisz' ?></button>
