@@ -3063,7 +3063,7 @@ window.flDevices = <?= json_encode(array_values(array_map(function($d) {
                                 </label>
                             </div>
                             <div id="instListTachoFwRow" class="mt-2" style="display:none">
-                                <label class="form-label form-label-sm">Wersja firmware tacho</label>
+                                <label class="form-label form-label-sm">Wersja firmware urządzenia</label>
                                 <input type="text" name="tacho_firmware_version" class="form-control form-control-sm" placeholder="np. TACHO-4.2.1">
                             </div>
                         </div>

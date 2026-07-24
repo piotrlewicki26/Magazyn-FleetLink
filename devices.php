@@ -212,6 +212,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'devices.php');
     }
 
+    if ($postAction === 'update_tacho') {
+        $utDeviceId = (int)($_POST['device_id'] ?? 0);
+        if (!$utDeviceId) {
+            flashError('Nieprawidłowe dane.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        $utTacho = isset($_POST['tacho_connected']) ? 1 : 0;
+        $utFirmware = sanitize($_POST['tacho_firmware_version'] ?? '');
+        $actor = getCurrentUser();
+        updateDeviceFieldsWithHistory($db, $utDeviceId, [
+            'tacho_connected' => $utTacho,
+            'tacho_firmware_version' => $utTacho ? ($utFirmware ?: null) : null,
+        ], (int)($actor['id'] ?? 0), 'tacho_update', $utDeviceId);
+        flashSuccess('Ustawienie tachografu zostało zaktualizowane.');
+        redirect(getBaseUrl() . 'devices.php');
+    }
+
     $validStatuses = ['nowy','sprawny','w_serwisie','uszkodzony','zamontowany','wycofany','sprzedany','dzierżawa','do_demontazu'];
     if (!in_array($status, $validStatuses)) $status = 'nowy';
 
@@ -1358,6 +1375,14 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
                             <i class="fas fa-sim-card"></i>
                         </button>
+                        <?php if (stripos($d['model_name'], 'ECAN') === false): ?>
+                        <button type="button"
+                                class="btn btn-sm <?= $d['tacho_connected'] ? 'btn-primary' : 'btn-outline-secondary' ?> btn-action"
+                                title="<?= $d['tacho_connected'] ? 'Podpięte pod tachograf — kliknij aby zmienić' : 'Podepnij pod tachograf' ?>"
+                                onclick="openTachoModal(<?= $d['id'] ?>, <?= (int)($d['tacho_connected'] ?? 0) ?>, <?= htmlspecialchars(json_encode($d['tacho_firmware_version'] ?? '')) ?>)">
+                            🔌
+                        </button>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -1497,7 +1522,52 @@ function openMoveDeviceModalFromPreview() {
 }
 </script>
 
-<!-- Add Devices Modal -->
+<!-- Tacho Modal -->
+<div class="modal fade" id="tachoModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST" id="tachoForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="update_tacho">
+                <input type="hidden" name="device_id" id="tachoDeviceId" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title">🔌 Tachograf</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="tacho_connected" id="tachoModalCheck" value="1"
+                               onchange="toggleTachoFwRow('tachoModalFwRow', this.checked)">
+                        <label class="form-check-label fw-semibold" for="tachoModalCheck">
+                            Urządzenie podpięte pod tachograf
+                        </label>
+                    </div>
+                    <div id="tachoModalFwRow" style="display:none">
+                        <label class="form-label form-label-sm">Wersja firmware urządzenia</label>
+                        <input type="text" name="tacho_firmware_version" id="tachoModalFwInput" class="form-control form-control-sm" placeholder="np. TACHO-4.2.1">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>Zapisz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+function openTachoModal(deviceId, tachoConnected, firmwareVersion) {
+    document.getElementById('tachoDeviceId').value = deviceId;
+    var check = document.getElementById('tachoModalCheck');
+    check.checked = !!tachoConnected;
+    var fwInput = document.getElementById('tachoModalFwInput');
+    fwInput.value = firmwareVersion || '';
+    toggleTachoFwRow('tachoModalFwRow', !!tachoConnected);
+    new bootstrap.Modal(document.getElementById('tachoModal')).show();
+}
+</script>
+
+
 <?php if (isAdmin()): ?>
 <div class="modal fade" id="addDevicesModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
@@ -1630,14 +1700,14 @@ function addDeviceRow() {
     var bleCellDisplay = isAddBtsModel() ? '' : 'none';
     tr.innerHTML =
         '<td class="text-muted text-center align-middle">' + n + '</td>' +
-        '<td><input type="text" name="serial_numbers[]" class="form-control form-control-sm" placeholder="np. SN123456" required></td>' +
-        '<td><input type="text" name="imeis[]" class="form-control form-control-sm" placeholder="15 cyfr" maxlength="20"></td>' +
-        '<td><input type="text" name="sim_numbers[]" class="form-control form-control-sm" placeholder="np. +48 600 000 000" list="addSimList"></td>' +
-        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="text" name="ble_ids[]" class="form-control form-control-sm font-monospace" placeholder="UUID"></td>' +
-        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="number" name="majors[]" class="form-control form-control-sm" min="0" max="65535" placeholder="0-65535"></td>' +
-        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="number" name="minors[]" class="form-control form-control-sm" min="0" max="65535" placeholder="0-65535"></td>' +
-        '<td class="add-ble-cell" style="display:' + bleCellDisplay + '"><input type="text" name="mac_addresses[]" class="form-control form-control-sm font-monospace" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17"></td>' +
-        '<td><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
+        '<td style="min-width:130px"><input type="text" name="serial_numbers[]" class="form-control form-control-sm" placeholder="np. SN123456" required></td>' +
+        '<td style="min-width:150px"><input type="text" name="imeis[]" class="form-control form-control-sm" placeholder="15 cyfr" maxlength="20"></td>' +
+        '<td style="min-width:150px"><input type="text" name="sim_numbers[]" class="form-control form-control-sm" placeholder="np. +48 600 000 000" list="addSimList"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + ';min-width:220px"><input type="text" name="ble_ids[]" class="form-control form-control-sm font-monospace" placeholder="UUID"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + ';min-width:90px"><input type="number" name="majors[]" class="form-control form-control-sm" min="0" max="65535" placeholder="0-65535"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + ';min-width:90px"><input type="number" name="minors[]" class="form-control form-control-sm" min="0" max="65535" placeholder="0-65535"></td>' +
+        '<td class="add-ble-cell" style="display:' + bleCellDisplay + ';min-width:160px"><input type="text" name="mac_addresses[]" class="form-control form-control-sm font-monospace" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17"></td>' +
+        '<td style="min-width:120px"><input type="text" name="notes_list[]" class="form-control form-control-sm" placeholder="Opcjonalne"></td>' +
         '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeDeviceRow(' + n + ')" title="Usuń wiersz"><i class="fas fa-times"></i></button></td>';
     tbody.appendChild(tr);
     tr.querySelector('input[name="serial_numbers[]"]').focus();
@@ -1865,7 +1935,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 </label>
                             </div>
                             <div id="installTachoFwRow" class="mt-2" style="display:none">
-                                <label class="form-label form-label-sm">Wersja firmware tacho</label>
+                                <label class="form-label form-label-sm">Wersja firmware urządzenia</label>
                                 <input type="text" name="tacho_firmware_version" class="form-control form-control-sm" placeholder="np. TACHO-4.2.1">
                             </div>
                         </div>
@@ -2745,7 +2815,7 @@ function openSimEdit(deviceId, currentSim) {
                         </label>
                     </div>
                     <div id="formTachoFwRow" class="mt-2" style="display:<?= ($device['tacho_connected'] ?? 0) ? '' : 'none' ?>">
-                        <label class="form-label">Wersja firmware tacho</label>
+                        <label class="form-label">Wersja firmware urządzenia</label>
                         <input type="text" name="tacho_firmware_version" class="form-control" value="<?= h($device['tacho_firmware_version'] ?? '') ?>" placeholder="np. TACHO-4.2.1">
                     </div>
                 </div>

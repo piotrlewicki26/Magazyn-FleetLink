@@ -544,6 +544,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flashSuccess('Urządzenie zostało dodane do zlecenia.');
         redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId);
 
+    } elseif ($postAction === 'update_other_devices') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $otherDevices = sanitize($_POST['other_devices'] ?? '');
+        $otherDevicesCount = max(0, (int)($_POST['other_devices_count'] ?? 0));
+        if (!$orderId) { flashError('Nieprawidłowe dane.'); redirect(getBaseUrl() . 'orders.php'); }
+        $orderCheck = $db->prepare("SELECT status FROM work_orders WHERE id=?");
+        $orderCheck->execute([$orderId]);
+        $orderRow = $orderCheck->fetch();
+        if (!$orderRow) { flashError('Zlecenie nie istnieje.'); redirect(getBaseUrl() . 'orders.php'); }
+        if ($orderRow['status'] === 'archiwum') { flashError('Nie można edytować zarchiwizowanego zlecenia.'); redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId); }
+        $db->prepare("UPDATE work_orders SET other_devices=?, other_devices_count=? WHERE id=?")
+           ->execute([$otherDevices ?: null, $otherDevicesCount, $orderId]);
+        flashSuccess('Inne urządzenia zostały zaktualizowane.');
+        redirect(getBaseUrl() . 'orders.php?action=view&id=' . $orderId);
+
     } elseif ($postAction === 'reassign_device_order') {
         $fromOrderId = (int)($_POST['from_order_id'] ?? 0);
         $instId      = (int)($_POST['installation_id'] ?? 0);
@@ -1155,59 +1170,106 @@ if ($action === 'view' && $id && !empty($_GET['ajax'])) {
             <?php if ($order['status'] !== 'archiwum'): ?>
             <!-- Inline Montaż form for quick preview modal -->
             <div id="modalInstallForm" class="mt-3 d-none border rounded p-3 bg-light">
-                <p class="fw-semibold mb-2"><i class="fas fa-car me-1 text-success"></i>Zarejestruj montaż urządzenia</p>
-                <script>window._installableDevices = <?= json_encode(array_values($installableDevices), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-                <form method="POST" action="<?= getBaseUrl() ?>devices.php" onsubmit="return validateModalDeviceSearch()">
-                    <?= csrfField() ?>
-                    <input type="hidden" name="action" value="device_install">
-                    <input type="hidden" name="work_order_id" value="<?= $order['id'] ?>">
-                    <input type="hidden" name="return_to_order_preview" value="<?= (int)$order['id'] ?>">
-                    <?php if ($order['client_id']): ?>
-                    <input type="hidden" name="client_id" value="<?= $order['client_id'] ?>">
-                    <?php endif; ?>
-                    <div class="row g-2">
-                        <div class="col-12 position-relative">
-                            <label class="form-label form-label-sm mb-1">Urządzenie <span class="text-danger">*</span></label>
-                            <input type="text" id="modalDeviceSearchInput" class="form-control form-control-sm" placeholder="Wpisz numer seryjny lub IMEI..." autocomplete="off" oninput="filterModalDevices(this.value)">
-                            <input type="hidden" name="device_id" id="modalDeviceIdHidden">
-                            <div id="modalDeviceSearchResults" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index:9999;max-height:180px;overflow-y:auto;top:100%"></div>
-                            <div id="modalDeviceSelected" class="form-text text-success d-none"></div>
+                <!-- Tab switcher -->
+                <ul class="nav nav-pills nav-sm mb-3" id="modalInstallTabs">
+                    <li class="nav-item">
+                        <button class="nav-link active py-1 px-2 small" id="modalTabGps" type="button" onclick="switchModalInstallTab('gps')">
+                            <i class="fas fa-car me-1 text-success"></i>Urządzenie GPS
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link py-1 px-2 small" id="modalTabOther" type="button" onclick="switchModalInstallTab('other')">
+                            <i class="fas fa-plug me-1 text-secondary"></i>Inne urządzenie
+                        </button>
+                    </li>
+                </ul>
+                <!-- GPS device form -->
+                <div id="modalInstallGpsPanel">
+                    <script>window._installableDevices = <?= json_encode(array_values($installableDevices), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+                    <form method="POST" action="<?= getBaseUrl() ?>devices.php" onsubmit="return validateModalDeviceSearch()">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="device_install">
+                        <input type="hidden" name="work_order_id" value="<?= $order['id'] ?>">
+                        <input type="hidden" name="return_to_order_preview" value="<?= (int)$order['id'] ?>">
+                        <?php if ($order['client_id']): ?>
+                        <input type="hidden" name="client_id" value="<?= $order['client_id'] ?>">
+                        <?php endif; ?>
+                        <div class="row g-2">
+                            <div class="col-12 position-relative">
+                                <label class="form-label form-label-sm mb-1">Urządzenie <span class="text-danger">*</span></label>
+                                <input type="text" id="modalDeviceSearchInput" class="form-control form-control-sm" placeholder="Wpisz numer seryjny lub IMEI..." autocomplete="off" oninput="filterModalDevices(this.value)">
+                                <input type="hidden" name="device_id" id="modalDeviceIdHidden">
+                                <div id="modalDeviceSearchResults" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index:9999;max-height:180px;overflow-y:auto;top:100%"></div>
+                                <div id="modalDeviceSelected" class="form-text text-success d-none"></div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm mb-1">Data montażu <span class="text-danger">*</span></label>
+                                <input type="date" name="installation_date" class="form-control form-control-sm" value="<?= date('Y-m-d') ?>" required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm mb-1">Nr rejestracyjny <span class="text-danger">*</span></label>
+                                <input type="text" name="vehicle_registration_new" class="form-control form-control-sm" placeholder="np. WA12345" required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm mb-1">Nr telefonu SIM</label>
+                                <input type="text" name="sim_number" class="form-control form-control-sm" list="modalSimList" placeholder="opcjonalnie" autocomplete="off">
+                                <datalist id="modalSimList">
+                                    <?php foreach ($orderSimOptions as $sc): ?><option value="<?= h($sc) ?>"><?php endforeach; ?>
+                                </datalist>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm mb-1">Urządzenie ECAN</label>
+                                <select name="ecan_device_id" class="form-select form-select-sm">
+                                    <option value="">— brak —</option>
+                                    <?php foreach ($ecanDevicesForOrder as $ed): ?>
+                                    <option value="<?= $ed['id'] ?>"><?= h($ed['serial_number']) ?> — <?= h($ed['model_name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label form-label-sm mb-1">Uwagi</label>
+                                <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
+                            </div>
+                            <div class="col-12 d-flex gap-2">
+                                <button type="submit" class="btn btn-sm btn-success"><i class="fas fa-plus me-1"></i>Dodaj</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalInstallForm').classList.add('d-none')">Anuluj</button>
+                            </div>
                         </div>
-                        <div class="col-6">
-                            <label class="form-label form-label-sm mb-1">Data montażu <span class="text-danger">*</span></label>
-                            <input type="date" name="installation_date" class="form-control form-control-sm" value="<?= date('Y-m-d') ?>" required>
+                    </form>
+                </div>
+                <!-- Inne urządzenie (not from GPS list) form -->
+                <div id="modalInstallOtherPanel" class="d-none">
+                    <form method="POST" action="<?= getBaseUrl() ?>orders.php">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="update_other_devices">
+                        <input type="hidden" name="order_id" value="<?= (int)$order['id'] ?>">
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <label class="form-label form-label-sm mb-1"><i class="fas fa-plug me-1 text-secondary"></i>Opis urządzeń</label>
+                                <textarea name="other_devices" class="form-control form-control-sm" rows="3"
+                                          placeholder="np. kamera cofania, czujniki parkowania, radio, alarm..."><?= h($order['other_devices'] ?? '') ?></textarea>
+                                <div class="form-text">Wpisz urządzenia, które nie figurują na liście urządzeń GPS.</div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm mb-1">Liczba sztuk</label>
+                                <input type="number" name="other_devices_count" class="form-control form-control-sm" min="0" value="<?= (int)($order['other_devices_count'] ?? 0) ?>">
+                            </div>
+                            <div class="col-12 d-flex gap-2">
+                                <button type="submit" class="btn btn-sm btn-secondary"><i class="fas fa-save me-1"></i>Zapisz</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalInstallForm').classList.add('d-none')">Anuluj</button>
+                            </div>
                         </div>
-                        <div class="col-6">
-                            <label class="form-label form-label-sm mb-1">Nr rejestracyjny <span class="text-danger">*</span></label>
-                            <input type="text" name="vehicle_registration_new" class="form-control form-control-sm" placeholder="np. WA12345" required>
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label form-label-sm mb-1">Nr telefonu SIM</label>
-                            <input type="text" name="sim_number" class="form-control form-control-sm" list="modalSimList" placeholder="opcjonalnie" autocomplete="off">
-                            <datalist id="modalSimList">
-                                <?php foreach ($orderSimOptions as $sc): ?><option value="<?= h($sc) ?>"><?php endforeach; ?>
-                            </datalist>
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label form-label-sm mb-1">Urządzenie ECAN</label>
-                            <select name="ecan_device_id" class="form-select form-select-sm">
-                                <option value="">— brak —</option>
-                                <?php foreach ($ecanDevicesForOrder as $ed): ?>
-                                <option value="<?= $ed['id'] ?>"><?= h($ed['serial_number']) ?> — <?= h($ed['model_name']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label form-label-sm mb-1">Uwagi</label>
-                            <textarea name="notes" class="form-control form-control-sm" rows="2"></textarea>
-                        </div>
-                        <div class="col-12 d-flex gap-2">
-                            <button type="submit" class="btn btn-sm btn-success"><i class="fas fa-plus me-1"></i>Dodaj</button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modalInstallForm').classList.add('d-none')">Anuluj</button>
-                        </div>
-                    </div>
-                </form>
+                    </form>
+                </div>
             </div>
+            <script>
+            function switchModalInstallTab(tab) {
+                document.getElementById('modalInstallGpsPanel').classList.toggle('d-none', tab !== 'gps');
+                document.getElementById('modalInstallOtherPanel').classList.toggle('d-none', tab !== 'other');
+                document.getElementById('modalTabGps').classList.toggle('active', tab === 'gps');
+                document.getElementById('modalTabOther').classList.toggle('active', tab === 'other');
+            }
+            </script>
             <?php endif; ?>
         </div>
     </div>
@@ -2210,9 +2272,14 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-microchip me-2"></i>Przypisane urządzenia GPS (<?= count($orderDevices) ?>)</span>
                 <?php if ($order['status'] !== 'archiwum'): ?>
-                <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addDeviceToOrderModal">
-                    <i class="fas fa-plus me-1"></i>Dodaj urządzenie
-                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addDeviceToOrderModal">
+                        <i class="fas fa-plus me-1"></i>Dodaj urządzenie
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#otherDevicesModal">
+                        <i class="fas fa-plug me-1"></i>Inne urządzenie
+                    </button>
+                </div>
                 <?php endif; ?>
             </div>
             <?php if (empty($orderDevices)): ?>
@@ -2372,6 +2439,39 @@ document.getElementById('orderQCSaveBtn').addEventListener('click', function() {
                     <button type="submit" class="btn btn-success btn-sm" <?= empty($installableDevices) ? 'disabled' : '' ?>>
                         <i class="fas fa-plus me-1"></i>Dodaj
                     </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Change Vehicle Registration Modal -->
+<div class="modal fade" id="otherDevicesModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="<?= getBaseUrl() ?>orders.php">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="update_other_devices">
+                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plug me-2 text-secondary"></i>Inne urządzenia (spoza listy GPS)</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Tutaj możesz wpisać urządzenia, które nie figurują na liście urządzeń GPS w systemie (np. kamery, alarmy, czujniki parkowania).</p>
+                    <div class="mb-3">
+                        <label class="form-label">Opis urządzeń</label>
+                        <textarea name="other_devices" class="form-control" rows="4"
+                                  placeholder="np. kamera cofania, czujniki parkowania, radio, alarm..."><?= h($order['other_devices'] ?? '') ?></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Liczba sztuk</label>
+                        <input type="number" name="other_devices_count" class="form-control" min="0" value="<?= (int)($order['other_devices_count'] ?? 0) ?>" placeholder="0">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-save me-1"></i>Zapisz</button>
                 </div>
             </form>
         </div>
