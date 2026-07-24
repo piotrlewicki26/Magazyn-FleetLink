@@ -1379,6 +1379,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                         <button type="button"
                                 class="btn btn-sm <?= $d['tacho_connected'] ? 'btn-primary' : 'btn-outline-secondary' ?> btn-action"
                                 title="<?= $d['tacho_connected'] ? 'Podpięte pod tachograf — kliknij aby zmienić' : 'Podepnij pod tachograf' ?>"
+                                aria-label="<?= $d['tacho_connected'] ? 'Tachograf: podpięte — zmień ustawienie' : 'Tachograf: niepodpięte — zmień ustawienie' ?>"
                                 onclick="openTachoModal(<?= $d['id'] ?>, <?= (int)($d['tacho_connected'] ?? 0) ?>, <?= htmlspecialchars(json_encode($d['tacho_firmware_version'] ?? '')) ?>)">
                             🔌
                         </button>
