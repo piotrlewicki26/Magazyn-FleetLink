@@ -69,6 +69,8 @@ function statsColumnExists(PDO $db, string $table, string $column): bool
  * Fetch work-order installations grouped by month for the yearly view modal.
  * Returns array indexed 1..12, each element an array of client groups with:
  *   client_name, total_install_count, total_other_count, order_dates, models, other_devices.
+ * `order_dates` intentionally combines installation dates (for GPS installs) and work-order dates
+ * (for "inne urządzenia"), so in UI it should be treated as an event-date list.
  * The other devices list and count are populated only when the respective columns exist.
  */
 function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $hasOtherDevicesColumn, bool $hasOtherDevicesCountColumn = false): array
@@ -97,7 +99,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         SELECT
             {$monthInstallExpr} AS month_no,
             {$installClientExpr} AS client_id,
-            {$installDateExpr} AS order_date,
+            {$installDateExpr} AS event_date,
             {$installClientNameExpr} AS client_name,
             {$modelExpr} AS model_name
         FROM installations i
@@ -108,7 +110,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearInstallExpr}
-        ORDER BY month_no, order_date, i.id
+        ORDER BY month_no, event_date, i.id
     ";
 
     $byMonth = array_fill(1, 12, []);
@@ -131,9 +133,9 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 ];
             }
 
-            $orderDate = trim((string)($row['order_date'] ?? ''));
-            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
-                $byMonth[$month][$clientKey]['order_dates'][] = $orderDate;
+            $eventDate = trim((string)($row['event_date'] ?? ''));
+            if ($eventDate !== '' && !in_array($eventDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
+                $byMonth[$month][$clientKey]['order_dates'][] = $eventDate;
             }
 
             $modelName = trim((string)($row['model_name'] ?? ''));
@@ -159,13 +161,13 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         } else {
             $otherDevicesFilterExpr = "(wo.other_devices IS NOT NULL AND TRIM(wo.other_devices) != '')";
         }
-        $otherClientExpr = "COALESCE((SELECT MIN(i6.client_id) FROM installations i6 WHERE i6.work_order_id = wo.id AND i6.client_id IS NOT NULL), wo.client_id, 0)";
+        $otherClientExpr = "COALESCE((SELECT i6.client_id FROM installations i6 WHERE i6.work_order_id = wo.id AND i6.client_id IS NOT NULL ORDER BY i6.installation_date DESC, i6.id DESC LIMIT 1), wo.client_id, 0)";
         $sqlOthers = "
             SELECT
                 o.order_id,
                 o.month_no,
                 o.client_id,
-                o.order_date,
+                o.event_date,
                 COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
                 o.other_devices,
                 o.other_devices_count
@@ -174,7 +176,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                     wo.id AS order_id,
                     {$monthOrderExpr} AS month_no,
                     {$otherClientExpr} AS client_id,
-                    wo.date AS order_date,
+                    wo.date AS event_date,
                     {$otherDevicesExpr} AS other_devices,
                     {$otherDevicesCountExpr} AS other_devices_count
                 FROM work_orders wo
@@ -182,7 +184,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                   AND {$otherDevicesFilterExpr}
             ) o
             LEFT JOIN clients c ON c.id = o.client_id
-            ORDER BY o.month_no, o.order_date, o.order_id
+            ORDER BY o.month_no, o.event_date, o.order_id
         ";
 
         $otherStmt = $db->prepare($sqlOthers);
@@ -207,9 +209,9 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 ];
             }
 
-            $orderDate = trim((string)($row['order_date'] ?? ''));
-            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
-                $byMonth[$month][$clientKey]['order_dates'][] = $orderDate;
+            $eventDate = trim((string)($row['event_date'] ?? ''));
+            if ($eventDate !== '' && !in_array($eventDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
+                $byMonth[$month][$clientKey]['order_dates'][] = $eventDate;
             }
 
             $otherDevices = trim((string)($row['other_devices'] ?? ''));
@@ -232,7 +234,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $orderId = (string)($row['order_id'] ?? '');
                 $trackKey = $orderId !== ''
                     ? ('_odc_id_' . $orderId)
-                    : ('_odc_fallback_' . $month . '|' . $clientKey . '|' . (string)($row['order_date'] ?? '') . '|' . (string)($row['other_devices'] ?? '') . '|' . $otherCount);
+                    : ('_odc_fallback_' . $month . '|' . $clientKey . '|' . (string)($row['event_date'] ?? '') . '|' . (string)($row['other_devices'] ?? '') . '|' . $otherCount);
                 $trackerKey = $month . '|' . $clientKey . '|' . $trackKey;
                 if (!isset($otherCountTracker[$trackerKey])) {
                     $otherCountTracker[$trackerKey] = true;
