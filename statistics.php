@@ -88,21 +88,35 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     $installClientExpr = "COALESCE(wo.client_id, i.client_id, 0)";
     $sqlInstalls = "
         SELECT
-            {$monthInstallExpr} AS month_no,
-            {$installClientExpr} AS client_id,
-            i.installation_date AS order_date,
-            COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
-            {$modelExpr} AS model_name,
-            COUNT(i.id) AS install_count
-        FROM installations i
-        LEFT JOIN work_orders wo ON wo.id = i.work_order_id
-        LEFT JOIN clients c ON c.id = {$installClientExpr}
-        LEFT JOIN devices d ON d.id = i.device_id
-        LEFT JOIN models m ON m.id = d.model_id
-        LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
-        WHERE {$yearInstallExpr}
-        GROUP BY {$monthInstallExpr}, {$installClientExpr}, i.installation_date, c.company_name, c.contact_name, m.id, mf.name, m.name
-        ORDER BY month_no, i.installation_date
+            x.month_no,
+            x.client_id,
+            x.order_date,
+            x.client_name,
+            x.model_name,
+            COUNT(x.install_id) AS install_count
+        FROM (
+            SELECT
+                {$monthInstallExpr} AS month_no,
+                {$installClientExpr} AS client_id,
+                i.installation_date AS order_date,
+                COALESCE(
+                    NULLIF(COALESCE(cwo.company_name, ci.company_name), ''),
+                    NULLIF(COALESCE(cwo.contact_name, ci.contact_name), ''),
+                    '—'
+                ) AS client_name,
+                {$modelExpr} AS model_name,
+                i.id AS install_id
+            FROM installations i
+            LEFT JOIN work_orders wo ON wo.id = i.work_order_id
+            LEFT JOIN clients cwo ON cwo.id = wo.client_id
+            LEFT JOIN clients ci ON ci.id = i.client_id
+            LEFT JOIN devices d ON d.id = i.device_id
+            LEFT JOIN models m ON m.id = d.model_id
+            LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
+            WHERE {$yearInstallExpr}
+        ) x
+        GROUP BY x.month_no, x.client_id, x.order_date, x.client_name, x.model_name
+        ORDER BY x.month_no, x.order_date
     ";
 
     $byMonth = array_fill(1, 12, []);
@@ -638,10 +652,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function openMonthModal(monthIndex) {
         var rows = monthlyDetails[monthIndex] || [];
+        var seriesIndex = monthIndex;
         var label = monthLabels[monthIndex] + ' <?= $year ?>';
-        var monthlyInstallCount = Number(installSeries[monthIndex] || 0);
-        var monthlyOtherCount = Number(otherSeries[monthIndex] || 0);
-        var monthlyServiceCount = Number(serviceSeries[monthIndex] || 0);
+        var monthlyInstallCount = Number(installSeries[seriesIndex] || 0);
+        var monthlyOtherCount = Number(otherSeries[seriesIndex] || 0);
+        var monthlyServiceCount = Number(serviceSeries[seriesIndex] || 0);
         var modalTitleText = document.getElementById('monthDetailModalLabelText');
         if (modalTitleText) modalTitleText.textContent = label;
         var container = document.getElementById('monthDetailBody');
