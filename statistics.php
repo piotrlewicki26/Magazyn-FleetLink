@@ -73,7 +73,7 @@ function statsColumnExists(PDO $db, string $table, string $column): bool
  */
 function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $hasOtherDevicesColumn, bool $hasOtherDevicesCountColumn = false): array
 {
-    $installDateExpr = "COALESCE(i.installation_date, wo.date)";
+    $installDateExpr = "i.installation_date";
     $yearInstallExpr = $isSqlite ? "strftime('%Y', {$installDateExpr}) = ?" : "YEAR({$installDateExpr}) = ?";
     $monthInstallExpr = $isSqlite
         ? "CAST(strftime('%m', {$installDateExpr}) AS INTEGER)"
@@ -86,11 +86,11 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
 
-    $installClientExpr = "CASE WHEN wo.id IS NOT NULL THEN COALESCE(wo.client_id, 0) ELSE COALESCE(i.client_id, 0) END";
+    $installClientExpr = "COALESCE(i.client_id, wo.client_id, 0)";
     $installClientNameExpr = "
         CASE
-            WHEN wo.id IS NOT NULL THEN COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), '—')
-            ELSE COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''), '—')
+            WHEN i.client_id IS NOT NULL THEN COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''), '—')
+            ELSE COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), '—')
         END
     ";
     $sqlInstalls = "
@@ -159,17 +159,18 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         } else {
             $otherDevicesFilterExpr = "(wo.other_devices IS NOT NULL AND TRIM(wo.other_devices) != '')";
         }
+        $otherClientExpr = "COALESCE((SELECT MIN(i6.client_id) FROM installations i6 WHERE i6.work_order_id = wo.id AND i6.client_id IS NOT NULL), wo.client_id, 0)";
         $sqlOthers = "
             SELECT
                 wo.id AS order_id,
                 {$monthOrderExpr} AS month_no,
-                COALESCE(wo.client_id, 0) AS client_id,
+                {$otherClientExpr} AS client_id,
                 wo.date AS order_date,
                 COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
                 {$otherDevicesExpr} AS other_devices,
                 {$otherDevicesCountExpr} AS other_devices_count
             FROM work_orders wo
-            LEFT JOIN clients c ON c.id = wo.client_id
+            LEFT JOIN clients c ON c.id = {$otherClientExpr}
             WHERE {$yearOrderExpr}
               AND {$otherDevicesFilterExpr}
             ORDER BY month_no, wo.date, wo.id
@@ -281,15 +282,15 @@ $deviceStatuses = [];
 $statsWarnings = [];
 
 {
-    $monthInstallExpr = $isSqlite ? "CAST(strftime('%m', COALESCE(i.installation_date, wo.date)) AS INTEGER)" : 'MONTH(COALESCE(i.installation_date, wo.date))';
+    $monthInstallExpr = $isSqlite ? "CAST(strftime('%m', installation_date) AS INTEGER)" : 'MONTH(installation_date)';
     $monthServiceExpr = $isSqlite ? "CAST(strftime('%m', completed_date) AS INTEGER)" : 'MONTH(completed_date)';
-    $yearInstallExpr = $isSqlite ? "strftime('%Y', COALESCE(i.installation_date, wo.date)) = ?" : 'YEAR(COALESCE(i.installation_date, wo.date)) = ?';
+    $yearInstallExpr = $isSqlite ? "strftime('%Y', installation_date) = ?" : 'YEAR(installation_date) = ?';
     $yearServiceExpr = $isSqlite ? "strftime('%Y', completed_date) = ?" : 'YEAR(completed_date) = ?';
     $yearCreatedExpr = $isSqlite ? "strftime('%Y', created_at) = ?" : 'YEAR(created_at) = ?';
     $yearParam = (string)$year;
 
     try {
-        $stmt = $db->prepare("SELECT {$monthInstallExpr} AS month_no, COUNT(*) AS item_count FROM installations i LEFT JOIN work_orders wo ON wo.id = i.work_order_id WHERE {$yearInstallExpr} GROUP BY month_no ORDER BY month_no");
+        $stmt = $db->prepare("SELECT {$monthInstallExpr} AS month_no, COUNT(*) AS item_count FROM installations WHERE {$yearInstallExpr} GROUP BY month_no ORDER BY month_no");
         $stmt->execute([$yearParam]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $month = (int)($row['month_no'] ?? 0);
