@@ -100,7 +100,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearInstallExpr}
-        GROUP BY month_no, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
+        GROUP BY month_no, COALESCE(i.client_id, wo.client_id, 0), wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
         ORDER BY month_no, wo.date
     ";
 
