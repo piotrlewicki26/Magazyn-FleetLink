@@ -140,7 +140,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         $allowedMimes = ['text/plain','application/json','application/xml','text/xml','application/octet-stream','application/x-empty'];
-        if ($detectedMime !== '' && !in_array($detectedMime, $allowedMimes, true)) {
+        $isLenientConfigExt = in_array($ext, ['cfg', 'conf'], true);
+        if ($detectedMime !== '' && !in_array($detectedMime, $allowedMimes, true) && !$isLenientConfigExt) {
             flashError('Nieprawidłowy typ pliku konfiguracji.');
             redirect(getBaseUrl() . 'devices.php?action=configs');
         }
