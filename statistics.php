@@ -161,7 +161,19 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         } else {
             $otherDevicesFilterExpr = "(wo.other_devices IS NOT NULL AND TRIM(wo.other_devices) != '')";
         }
-        $otherClientExpr = "COALESCE((SELECT i6.client_id FROM installations i6 WHERE i6.work_order_id = wo.id AND i6.client_id IS NOT NULL ORDER BY i6.installation_date DESC, i6.id DESC LIMIT 1), wo.client_id, 0)";
+        $latestInstallClientJoin = "
+            LEFT JOIN (
+                SELECT i7.work_order_id, i7.client_id
+                FROM installations i7
+                INNER JOIN (
+                    SELECT work_order_id, MAX(id) AS max_install_id
+                    FROM installations
+                    WHERE client_id IS NOT NULL
+                    GROUP BY work_order_id
+                ) li ON li.max_install_id = i7.id
+            ) lic ON lic.work_order_id = wo.id
+        ";
+        $otherClientExpr = "COALESCE(lic.client_id, wo.client_id, 0)";
         $sqlOthers = "
             SELECT
                 o.order_id,
@@ -180,6 +192,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                     {$otherDevicesExpr} AS other_devices,
                     {$otherDevicesCountExpr} AS other_devices_count
                 FROM work_orders wo
+                {$latestInstallClientJoin}
                 WHERE {$yearOrderExpr}
                   AND {$otherDevicesFilterExpr}
             ) o
