@@ -163,14 +163,19 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         }
         $latestInstallClientJoin = "
             LEFT JOIN (
-                SELECT i7.work_order_id, i7.client_id
-                FROM installations i7
-                INNER JOIN (
-                    SELECT work_order_id, MAX(id) AS max_install_id
-                    FROM installations
-                    WHERE client_id IS NOT NULL
-                    GROUP BY work_order_id
-                ) li ON li.max_install_id = i7.id
+                SELECT work_order_id, client_id
+                FROM (
+                    SELECT
+                        i7.work_order_id,
+                        i7.client_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY i7.work_order_id
+                            ORDER BY i7.installation_date DESC, i7.id DESC
+                        ) AS rn
+                    FROM installations i7
+                    WHERE i7.client_id IS NOT NULL
+                ) lic_ranked
+                WHERE rn = 1
             ) lic ON lic.work_order_id = wo.id
         ";
         $otherClientExpr = "COALESCE(lic.client_id, wo.client_id, 0)";
@@ -273,7 +278,11 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $modelLabels[] = $count > 1 ? ($modelName . ' × ' . $count) : $modelName;
             }
             $cleanGroup = $group;
-            sort($cleanGroup['order_dates']);
+            usort($cleanGroup['order_dates'], static function (string $a, string $b): int {
+                $ta = strtotime($a) ?: 0;
+                $tb = strtotime($b) ?: 0;
+                return $ta <=> $tb;
+            });
             $cleanGroup['models'] = $modelLabels;
             $normalizedGroups[] = $cleanGroup;
         }
