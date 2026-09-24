@@ -619,7 +619,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ecanStmt = $db->prepare("SELECT model_id, status FROM devices WHERE id=? LIMIT 1");
                 $ecanStmt->execute([$ecanId]);
                 $ecanDevice = $ecanStmt->fetch();
-                if ($ecanDevice) {
+                if ($ecanDevice && in_array($ecanDevice['status'], ['zamontowany', 'do_demontazu'], true)) {
                     updateDeviceFieldsWithHistory($db, $ecanId, ['status' => 'sprawny'], (int)(getCurrentUser()['id'] ?? 0), 'device_uninstall', (int)$activeInst['id']);
                     adjustInventoryForStatusChange($db, $ecanDevice['model_id'], $ecanDevice['status'], 'sprawny');
                 }
