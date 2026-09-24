@@ -184,7 +184,7 @@ include __DIR__ . '/includes/header.php';
                         <?php foreach ($lowStock as $item): ?>
                         <a href="inventory.php" class="dropdown-item small d-flex justify-content-between gap-2">
                             <span><?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?></span>
-                            <span class="fw-semibold text-warning"><?= (int)$item['quantity'] ?> / min <?= (int)$item['min_quantity'] ?></span>
+                            <span class="fw-semibold text-warning">Niski: <?= (int)$item['quantity'] ?> / min <?= (int)$item['min_quantity'] ?></span>
                         </a>
                         <?php endforeach; ?>
                         <div class="dropdown-divider m-0"></div>
