@@ -177,6 +177,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="dropdown">
                     <button class="btn btn-sm btn-outline-warning position-relative" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Powiadomienia magazynowe" aria-label="Powiadomienia magazynowe: <?= count($lowStock) ?> modeli z niskim stanem">
                         <i class="fas fa-bell"></i>
+                        <span class="visually-hidden">Powiadomienia magazynowe: <?= count($lowStock) ?> modeli z niskim stanem</span>
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" aria-hidden="true"><?= count($lowStock) ?></span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-end p-0" style="min-width: 320px;">
