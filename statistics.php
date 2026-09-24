@@ -89,7 +89,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         SELECT
             {$monthInstallExpr} AS month_no,
             COALESCE(i.client_id, wo.client_id, 0) AS client_id,
-            wo.date AS order_date,
+            i.installation_date AS order_date,
             COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
             {$modelExpr} AS model_name,
             COUNT(i.id) AS install_count
@@ -100,8 +100,8 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearInstallExpr}
-        GROUP BY {$monthInstallExpr}, COALESCE(i.client_id, wo.client_id, 0), wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
-        ORDER BY month_no, wo.date
+        GROUP BY {$monthInstallExpr}, COALESCE(i.client_id, wo.client_id, 0), i.installation_date, c.company_name, c.contact_name, m.id, mf.name, m.name
+        ORDER BY month_no, i.installation_date
     ";
 
     $byMonth = array_fill(1, 12, []);
@@ -659,7 +659,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     '<div class="card border-0 shadow-sm h-100">' +
                         '<div class="card-body py-3">' +
                             '<div class="small text-muted text-uppercase mb-1"><i class="fas fa-boxes-stacked me-1"></i>Inne urządzenia</div>' +
-                            '<div class="h4 mb-0 text-warning-emphasis fw-bold">' + monthlyOtherCount + '</div>' +
+                            '<div class="h4 mb-0 text-dark fw-bold">' + monthlyOtherCount + '</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
