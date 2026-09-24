@@ -175,12 +175,12 @@ include __DIR__ . '/includes/header.php';
             <div class="d-flex align-items-center gap-2">
                 <?php if (!empty($lowStock)): ?>
                 <div class="dropdown">
-                    <button class="btn btn-sm btn-outline-warning position-relative d-flex align-items-center gap-2" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Powiadomienia magazynowe" aria-label="Powiadomienia magazynowe: <?= count($lowStock) ?> modeli z niskim stanem">
+                    <button class="btn btn-sm btn-outline-warning position-relative d-flex align-items-center gap-2" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Powiadomienia magazynowe" aria-label="Powiadomienia magazynowe: <?= count($lowStock) ?> modeli z niskim stanem" aria-controls="lowStockNotificationsMenu" aria-haspopup="true">
                         <i class="fas fa-bell"></i>
                         <span class="small fw-semibold">Niski stan: <?= count($lowStock) ?></span>
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" aria-hidden="true"><?= count($lowStock) ?></span>
                     </button>
-                    <div class="dropdown-menu dropdown-menu-end p-0" style="min-width: 320px;">
+                    <div class="dropdown-menu dropdown-menu-end p-0" style="min-width: 320px;" id="lowStockNotificationsMenu">
                         <div class="dropdown-header fw-semibold text-warning"><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</div>
                         <?php foreach ($lowStock as $item): ?>
                         <a href="inventory.php" class="dropdown-item small d-flex justify-content-between gap-2" aria-label="Niski stan: <?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?>, dostępne <?= (int)$item['quantity'] ?>, minimum <?= (int)$item['min_quantity'] ?>">

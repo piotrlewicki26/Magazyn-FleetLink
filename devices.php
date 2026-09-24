@@ -15,14 +15,14 @@ $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
 ensureTachoColumns($db);
-$canShowUninstallAction = static function (array $deviceData, array $installationData): bool {
+function canShowDeviceUninstallAction(array $deviceData, array $installationData): bool {
     return in_array((string)($deviceData['status'] ?? ''), ['zamontowany', 'do_demontazu'], true)
         && (
             !empty($installationData['registration'])
             || !empty($deviceData['sim_number'])
             || !empty($installationData['installation_date'])
         );
-};
+}
 
 function ensureDeviceConfigFilesTable(PDO $db): void {
     static $checked = false;
@@ -621,7 +621,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashError('Brak aktywnej instalacji dla tego urządzenia.');
             redirect(getBaseUrl() . 'devices.php');
         }
-        if (!$canShowUninstallAction($uninstDevice, $activeInst)) {
+        if (!canShowDeviceUninstallAction($uninstDevice, $activeInst)) {
             flashError('Opcja odinstalowania jest dostępna tylko gdy urządzenie ma rejestrację, numer SIM lub datę montażu.');
             redirect(getBaseUrl() . 'devices.php');
         }
@@ -1069,15 +1069,17 @@ if ($action === 'list') {
         JOIN models m ON m.id = d.model_id
         JOIN manufacturers mf ON mf.id = m.manufacturer_id
         LEFT JOIN (
-            SELECT i4.device_id, i4.installation_date, v4.registration,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY i4.device_id
-                       ORDER BY i4.id DESC
-                   ) AS rn
+            SELECT i4.device_id, i4.installation_date, v4.registration
             FROM installations i4
             LEFT JOIN vehicles v4 ON v4.id = i4.vehicle_id
             WHERE i4.status = 'aktywna'
-        ) ai ON ai.device_id = d.id AND ai.rn = 1
+              AND i4.id = (
+                  SELECT MAX(i5.id)
+                  FROM installations i5
+                  WHERE i5.device_id = i4.device_id
+                    AND i5.status = 'aktywna'
+              )
+        ) ai ON ai.device_id = d.id
         LEFT JOIN (
             SELECT i2.*,
                    ROW_NUMBER() OVER (
@@ -1417,7 +1419,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <td>
                         <?php
                         $isMountedLike = in_array($d['status'], ['zamontowany', 'do_demontazu'], true);
-                        $canUninstallFromData = $canShowUninstallAction($d, [
+                        $canUninstallFromData = canShowDeviceUninstallAction($d, [
                             'registration' => $d['active_vehicle_registration'] ?? null,
                             'installation_date' => $d['active_installation_date'] ?? null,
                         ]);
@@ -1498,7 +1500,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 <?php if ($d['status'] === 'zamontowany'): ?>
                                 <li>
                                     <button type="button" class="dropdown-item"
-                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['vehicle_registration'] ?? '')) ?>)">
+                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['active_vehicle_registration'] ?? ($d['vehicle_registration'] ?? ''))) ?>)">
                                         <i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny
                                     </button>
                                 </li>
