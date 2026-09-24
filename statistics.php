@@ -296,11 +296,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $modelLabels[] = $count > 1 ? ($modelName . ' × ' . $count) : $modelName;
             }
             $cleanGroup = $group;
-            usort($cleanGroup['order_dates'], static function (string $a, string $b): int {
-                $ta = strtotime($a) ?: 0;
-                $tb = strtotime($b) ?: 0;
-                return $ta <=> $tb;
-            });
+            sort($cleanGroup['order_dates'], SORT_STRING);
             $cleanGroup['models'] = $modelLabels;
             $normalizedGroups[] = $cleanGroup;
         }
