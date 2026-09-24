@@ -184,7 +184,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="dropdown-menu dropdown-menu-end p-0" style="min-width: 320px;">
                         <div class="dropdown-header fw-semibold text-warning"><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</div>
                         <?php foreach ($lowStock as $item): ?>
-                        <a href="inventory.php" class="dropdown-item small d-flex justify-content-between gap-2">
+                        <a href="inventory.php" class="dropdown-item small d-flex justify-content-between gap-2" aria-label="Niski stan: <?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?>, dostępne <?= (int)$item['quantity'] ?>, minimum <?= (int)$item['min_quantity'] ?>">
                             <span><?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?></span>
                             <span class="fw-semibold text-warning">Niski: <?= (int)$item['quantity'] ?> / min <?= (int)$item['min_quantity'] ?></span>
                         </a>
