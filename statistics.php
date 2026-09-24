@@ -85,26 +85,29 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
 
-    $installClientExpr = "CASE WHEN wo.client_id IS NOT NULL THEN wo.client_id ELSE COALESCE(i.client_id, 0) END";
+    $installClientExpr = "CASE WHEN wo.id IS NOT NULL THEN COALESCE(wo.client_id, 0) ELSE COALESCE(i.client_id, 0) END";
     $installClientNameExpr = "
         CASE
-            WHEN wo.client_id IS NOT NULL THEN COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), '—')
+            WHEN wo.id IS NOT NULL THEN COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), '—')
             ELSE COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''), '—')
         END
     ";
+    $installDatesAggExpr = $isSqlite
+        ? "GROUP_CONCAT(DISTINCT x.installation_date)"
+        : "GROUP_CONCAT(DISTINCT x.installation_date ORDER BY x.installation_date SEPARATOR ',')";
     $sqlInstalls = "
         SELECT
             x.month_no,
             x.client_id,
-            x.order_date,
             x.client_name,
             x.model_name,
+            {$installDatesAggExpr} AS order_dates_csv,
             COUNT(x.install_id) AS install_count
         FROM (
             SELECT
                 {$monthInstallExpr} AS month_no,
                 {$installClientExpr} AS client_id,
-                i.installation_date AS order_date,
+                i.installation_date AS installation_date,
                 {$installClientNameExpr} AS client_name,
                 {$modelExpr} AS model_name,
                 i.id AS install_id
@@ -117,8 +120,8 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
             WHERE {$yearInstallExpr}
         ) x
-        GROUP BY x.month_no, x.client_id, x.order_date, x.client_name, x.model_name
-        ORDER BY x.month_no, x.order_date
+        GROUP BY x.month_no, x.client_id, x.client_name, x.model_name
+        ORDER BY x.month_no, x.client_name, x.model_name
     ";
 
     $byMonth = array_fill(1, 12, []);
@@ -141,9 +144,14 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 ];
             }
 
-            $orderDate = trim((string)($row['order_date'] ?? ''));
-            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
-                $byMonth[$month][$clientKey]['order_dates'][] = $orderDate;
+            $orderDatesCsv = trim((string)($row['order_dates_csv'] ?? ''));
+            if ($orderDatesCsv !== '') {
+                foreach (explode(',', $orderDatesCsv) as $orderDate) {
+                    $orderDate = trim((string)$orderDate);
+                    if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
+                        $byMonth[$month][$clientKey]['order_dates'][] = $orderDate;
+                    }
+                }
             }
 
             $modelName = trim((string)($row['model_name'] ?? ''));
