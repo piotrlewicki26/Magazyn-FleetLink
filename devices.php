@@ -580,6 +580,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(getBaseUrl() . 'devices.php');
 
+    } elseif ($postAction === 'uninstall_device') {
+        $uninstDeviceId = (int)($_POST['id'] ?? 0);
+        $returnTo = sanitize($_POST['return_to'] ?? 'list');
+        if (!$uninstDeviceId) {
+            flashError('Nieprawidłowe urządzenie do odinstalowania.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+
+        $devStmt = $db->prepare("SELECT id, model_id, status, serial_number FROM devices WHERE id=? LIMIT 1");
+        $devStmt->execute([$uninstDeviceId]);
+        $uninstDevice = $devStmt->fetch();
+        if (!$uninstDevice) {
+            flashError('Urządzenie nie istnieje.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        if (!in_array($uninstDevice['status'], ['zamontowany', 'do_demontazu'], true)) {
+            flashError('Odinstalować można tylko urządzenie zamontowane lub oznaczone do demontażu.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+
+        $activeInstStmt = $db->prepare("SELECT id, ecan_device_id FROM installations WHERE device_id=? AND status='aktywna' LIMIT 1");
+        $activeInstStmt->execute([$uninstDeviceId]);
+        $activeInst = $activeInstStmt->fetch();
+        if (!$activeInst) {
+            flashError('Brak aktywnej instalacji dla tego urządzenia.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+
+        $uninstDate = date('Y-m-d');
+        $db->beginTransaction();
+        try {
+            $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE id=?")
+               ->execute([$uninstDate, $activeInst['id']]);
+
+            if (!empty($activeInst['ecan_device_id'])) {
+                $ecanId = (int)$activeInst['ecan_device_id'];
+                $ecanStmt = $db->prepare("SELECT model_id, status FROM devices WHERE id=? LIMIT 1");
+                $ecanStmt->execute([$ecanId]);
+                $ecanDevice = $ecanStmt->fetch();
+                if ($ecanDevice) {
+                    updateDeviceFieldsWithHistory($db, $ecanId, ['status' => 'sprawny'], (int)(getCurrentUser()['id'] ?? 0), 'device_uninstall', (int)$activeInst['id']);
+                    adjustInventoryForStatusChange($db, $ecanDevice['model_id'], $ecanDevice['status'], 'sprawny');
+                }
+            }
+
+            updateDeviceFieldsWithHistory($db, $uninstDeviceId, ['status' => 'sprawny'], (int)(getCurrentUser()['id'] ?? 0), 'device_uninstall', (int)$activeInst['id']);
+            adjustInventoryForStatusChange($db, $uninstDevice['model_id'], $uninstDevice['status'], 'sprawny');
+
+            $db->commit();
+            flashSuccess('Urządzenie ' . $uninstDevice['serial_number'] . ' zostało odinstalowane i ustawione jako Sprawne.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            flashError('Błąd podczas odinstalowania: ' . $e->getMessage());
+        }
+
+        if ($returnTo === 'view') {
+            redirect(getBaseUrl() . 'devices.php?action=view&id=' . $uninstDeviceId);
+        }
+        redirect(getBaseUrl() . 'devices.php');
+
     } elseif ($postAction === 'bulk_add_devices') {
         if (!isAdmin()) { flashError('Dodawanie urządzeń jest dostępne tylko dla Administratora.'); redirect(getBaseUrl() . 'devices.php'); }
         $sharedModelId      = (int)($_POST['model_id'] ?? 0);
@@ -925,7 +985,8 @@ if ($action === 'view' && $id) {
 // Models for select (with device counts for filter tiles)
 $models = $db->query("
     SELECT m.id, m.name, mf.name as manufacturer_name,
-           (SELECT COUNT(*) FROM devices d2 WHERE d2.model_id = m.id) as device_count
+           (SELECT COUNT(*) FROM devices d2 WHERE d2.model_id = m.id AND d2.status = 'nowy') as new_count,
+           (SELECT COUNT(*) FROM devices d2 WHERE d2.model_id = m.id AND d2.status = 'sprawny') as working_count
     FROM models m
     JOIN manufacturers mf ON mf.id = m.manufacturer_id
     WHERE m.active = 1
@@ -1175,7 +1236,7 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Model filter tiles -->
 <?php
-$modelsWithDevices = array_filter($models, fn($m) => $m['device_count'] > 0);
+$modelsWithDevices = array_filter($models, fn($m) => ((int)$m['new_count'] + (int)$m['working_count']) > 0);
 $activeModelFilter = (int)($_GET['model'] ?? 0);
 ?>
 <?php if (!empty($modelsWithDevices)): ?>
@@ -1185,7 +1246,8 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
     <a href="devices.php?<?= http_build_query(array_merge($_GET, ['model' => $m['id']])) ?>"
        class="btn btn-sm <?= $activeModelFilter === (int)$m['id'] ? 'btn-primary' : 'btn-outline-secondary' ?>">
         <?= h($m['manufacturer_name'] . ' ' . $m['name']) ?>
-        <span class="badge <?= $activeModelFilter === (int)$m['id'] ? 'bg-white text-primary' : 'bg-secondary' ?> ms-1"><?= (int)$m['device_count'] ?></span>
+        <span class="badge <?= $activeModelFilter === (int)$m['id'] ? 'bg-white text-primary' : 'bg-secondary' ?> ms-1">N: <?= (int)$m['new_count'] ?></span>
+        <span class="badge <?= $activeModelFilter === (int)$m['id'] ? 'bg-white text-primary' : 'bg-secondary' ?> ms-1">S: <?= (int)$m['working_count'] ?></span>
     </a>
     <?php endforeach; ?>
     <?php if ($activeModelFilter): ?>
@@ -1364,6 +1426,13 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 onclick="openMoveDeviceModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, 'list')">
                             <i class="fas fa-exchange-alt"></i>
                         </button>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Czy na pewno odinstalować urządzenie <?= h($d['serial_number']) ?>?\\n\\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\\nNie = anuluj.')">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="uninstall_device">
+                            <input type="hidden" name="id" value="<?= $d['id'] ?>">
+                            <input type="hidden" name="return_to" value="list">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Odinstaluj">Odinstaluj</button>
+                        </form>
                         <?php endif; ?>
                         <?php if ($d['status'] === 'zamontowany'): ?>
                         <button type="button" class="btn btn-sm btn-outline-info btn-action" title="Zmień nr rejestracyjny"

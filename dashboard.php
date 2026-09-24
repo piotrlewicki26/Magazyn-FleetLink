@@ -261,6 +261,24 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php if (!empty($lowStock)): ?>
+<div class="alert alert-warning d-flex justify-content-between align-items-start mb-4" role="alert">
+    <div>
+        <div class="fw-semibold mb-1"><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</div>
+        <ul class="mb-0 ps-3 small">
+            <?php foreach ($lowStock as $item): ?>
+            <li>
+                <?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?>:
+                <strong><?= (int)$item['quantity'] ?> szt.</strong>
+                <span class="text-muted">(min <?= (int)$item['min_quantity'] ?>)</span>
+            </li>
+            <?php endforeach; ?>
+        </ul>
+    </div>
+    <a href="inventory.php" class="btn btn-sm btn-outline-warning ms-3 flex-shrink-0">Magazyn</a>
+</div>
+<?php endif; ?>
+
 <div class="row g-3">
     <!-- Recent Orders (Ostatnie zlecenia) -->
     <div class="col-md-4">
@@ -443,36 +461,6 @@ include __DIR__ . '/includes/header.php';
                         </a>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Low Stock Alert -->
-    <div class="col-12">
-        <div class="card border-danger">
-            <div class="card-header bg-danger bg-opacity-10 text-danger d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</span>
-                <a href="inventory.php" class="btn btn-sm btn-outline-danger">Magazyn</a>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <tbody>
-                        <?php if (empty($lowStock)): ?>
-                        <tr><td colspan="2" class="text-center text-muted p-2">Brak pozycji poniżej minimalnego stanu.</td></tr>
-                        <?php else: ?>
-                        <?php foreach ($lowStock as $item): ?>
-                        <tr>
-                            <td><?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?></td>
-                            <td class="text-end">
-                                <span class="<?= $item['quantity'] == 0 ? 'text-danger fw-bold' : 'text-warning fw-bold' ?>">
-                                    <?= $item['quantity'] ?> szt
-                                </span>
-                                <span class="text-muted"> / min <?= $item['min_quantity'] ?></span>
-                            </td>
-                        </tr>
-                        <?php endforeach; endif; ?>
-                    </tbody>
-                </table>
             </div>
         </div>
     </div>
