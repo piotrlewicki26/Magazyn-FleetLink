@@ -653,14 +653,20 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function openMonthModal(monthIndex) {
-        var rows = monthlyDetails[monthIndex] || [];
-        var seriesIndex = Number(monthIndex);
-        if (seriesIndex > 11) seriesIndex = seriesIndex - 1;
-        if (seriesIndex < 0 || !Number.isFinite(seriesIndex)) seriesIndex = 0;
-        var label = monthLabels[monthIndex] + ' <?= $year ?>';
-        var monthlyInstallCount = Number(installSeries[seriesIndex] || 0);
-        var monthlyOtherCount = Number(otherSeries[seriesIndex] || 0);
-        var monthlyServiceCount = Number(serviceSeries[seriesIndex] || 0);
+        var rawIndex = Number(monthIndex);
+        if (!Number.isFinite(rawIndex)) rawIndex = 0;
+        var normalizedIndex = rawIndex;
+        if (rawIndex >= 1 && rawIndex <= 12 && typeof monthlyDetails[rawIndex] === 'undefined' && typeof monthlyDetails[rawIndex - 1] !== 'undefined') {
+            normalizedIndex = rawIndex - 1;
+        }
+        if (normalizedIndex < 0) normalizedIndex = 0;
+        if (normalizedIndex > 11) normalizedIndex = 11;
+
+        var rows = monthlyDetails[normalizedIndex] || [];
+        var label = monthLabels[normalizedIndex] + ' <?= $year ?>';
+        var monthlyInstallCount = Number(installSeries[normalizedIndex] || 0);
+        var monthlyOtherCount = Number(otherSeries[normalizedIndex] || 0);
+        var monthlyServiceCount = Number(serviceSeries[normalizedIndex] || 0);
         var modalTitleText = document.getElementById('monthDetailModalLabelText');
         if (modalTitleText) modalTitleText.textContent = label;
         var container = document.getElementById('monthDetailBody');
