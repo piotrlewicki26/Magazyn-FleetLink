@@ -161,23 +161,41 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         } else {
             $otherDevicesFilterExpr = "(wo.other_devices IS NOT NULL AND TRIM(wo.other_devices) != '')";
         }
-        $latestInstallClientJoin = "
-            LEFT JOIN (
-                SELECT work_order_id, client_id
-                FROM (
-                    SELECT
-                        i7.work_order_id,
-                        i7.client_id,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY i7.work_order_id
-                            ORDER BY i7.installation_date DESC, i7.id DESC
-                        ) AS rn
+        if ($isSqlite) {
+            $latestInstallClientJoin = "
+                LEFT JOIN (
+                    SELECT i7.work_order_id, i7.client_id
                     FROM installations i7
                     WHERE i7.client_id IS NOT NULL
-                ) lic_ranked
-                WHERE rn = 1
-            ) lic ON lic.work_order_id = wo.id
-        ";
+                      AND i7.id = (
+                          SELECT i8.id
+                          FROM installations i8
+                          WHERE i8.work_order_id = i7.work_order_id
+                            AND i8.client_id IS NOT NULL
+                          ORDER BY i8.installation_date DESC, i8.id DESC
+                          LIMIT 1
+                      )
+                ) lic ON lic.work_order_id = wo.id
+            ";
+        } else {
+            $latestInstallClientJoin = "
+                LEFT JOIN (
+                    SELECT work_order_id, client_id
+                    FROM (
+                        SELECT
+                            i7.work_order_id,
+                            i7.client_id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY i7.work_order_id
+                                ORDER BY i7.installation_date DESC, i7.id DESC
+                            ) AS rn
+                        FROM installations i7
+                        WHERE i7.client_id IS NOT NULL
+                    ) lic_ranked
+                    WHERE rn = 1
+                ) lic ON lic.work_order_id = wo.id
+            ";
+        }
         $otherClientExpr = "COALESCE(lic.client_id, wo.client_id, 0)";
         $sqlOthers = "
             SELECT
@@ -244,7 +262,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             }
 
             $otherCount = (int)($row['other_devices_count'] ?? 0);
-            if ($otherCount <= 0 && !empty($parsedOtherDevices)) {
+            if (!$hasOtherDevicesCountColumn && $otherCount <= 0 && !empty($parsedOtherDevices)) {
                 $otherCount = count($parsedOtherDevices);
             }
 
