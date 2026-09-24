@@ -85,22 +85,23 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
 
+    $installClientExpr = "COALESCE(wo.client_id, i.client_id, 0)";
     $sqlInstalls = "
         SELECT
             {$monthInstallExpr} AS month_no,
-            COALESCE(i.client_id, wo.client_id, 0) AS client_id,
+            {$installClientExpr} AS client_id,
             i.installation_date AS order_date,
             COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
             {$modelExpr} AS model_name,
             COUNT(i.id) AS install_count
         FROM installations i
         LEFT JOIN work_orders wo ON wo.id = i.work_order_id
-        LEFT JOIN clients c ON c.id = COALESCE(i.client_id, wo.client_id)
+        LEFT JOIN clients c ON c.id = {$installClientExpr}
         LEFT JOIN devices d ON d.id = i.device_id
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearInstallExpr}
-        GROUP BY {$monthInstallExpr}, COALESCE(i.client_id, wo.client_id, 0), i.installation_date, c.company_name, c.contact_name, m.id, mf.name, m.name
+        GROUP BY {$monthInstallExpr}, {$installClientExpr}, i.installation_date, c.company_name, c.contact_name, m.id, mf.name, m.name
         ORDER BY month_no, i.installation_date
     ";
 
@@ -145,18 +146,17 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     if ($hasOtherDevicesCountColumn || $hasOtherDevicesColumn) {
         $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
         $otherDevicesCountExpr = $hasOtherDevicesCountColumn ? "COALESCE(wo.other_devices_count, 0)" : "0";
-        $resolvedOrderClientExpr = "COALESCE((SELECT i6.client_id FROM installations i6 WHERE i6.work_order_id = wo.id AND i6.client_id IS NOT NULL ORDER BY i6.id DESC LIMIT 1), wo.client_id, 0)";
         $sqlOthers = "
             SELECT
                 wo.id AS order_id,
                 {$monthOrderExpr} AS month_no,
-                {$resolvedOrderClientExpr} AS client_id,
+                COALESCE(wo.client_id, 0) AS client_id,
                 wo.date AS order_date,
                 COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
                 {$otherDevicesExpr} AS other_devices,
                 {$otherDevicesCountExpr} AS other_devices_count
             FROM work_orders wo
-            LEFT JOIN clients c ON c.id = {$resolvedOrderClientExpr}
+            LEFT JOIN clients c ON c.id = wo.client_id
             WHERE {$yearOrderExpr}
               AND ({$otherDevicesCountExpr} > 0 OR {$otherDevicesExpr} != '')
             ORDER BY month_no, wo.date, wo.id
@@ -193,7 +193,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $orderId = (string)($row['order_id'] ?? '');
                 $trackKey = $orderId !== ''
                     ? ('_odc_id_' . $orderId)
-                    : ('_odc_fallback_' . $month . '|' . $clientKey . '|' . (string)($row['order_date'] ?? '') . '|' . $otherCount);
+                    : ('_odc_fallback_' . $month . '|' . $clientKey . '|' . (string)($row['order_date'] ?? '') . '|' . (string)($row['other_devices'] ?? '') . '|' . $otherCount);
                 if (!isset($byMonth[$month][$clientKey][$trackKey])) {
                     $byMonth[$month][$clientKey][$trackKey] = true;
                     $byMonth[$month][$clientKey]['total_other_count'] += $otherCount;
@@ -597,7 +597,7 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content border-0 shadow-lg">
             <div class="modal-header bg-white border-bottom">
-                <h5 class="modal-title" id="monthDetailModalLabel"><i class="fas fa-calendar-alt me-2 text-primary"></i>Szczegóły miesiąca</h5>
+                <h5 class="modal-title" id="monthDetailModalLabel"><i class="fas fa-calendar-alt me-2 text-primary"></i><span id="monthDetailModalLabelText">Szczegóły miesiąca</span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body bg-body-tertiary">
@@ -642,8 +642,8 @@ document.addEventListener('DOMContentLoaded', function () {
         var monthlyInstallCount = Number(installSeries[monthIndex] || 0);
         var monthlyOtherCount = Number(otherSeries[monthIndex] || 0);
         var monthlyServiceCount = Number(serviceSeries[monthIndex] || 0);
-        document.getElementById('monthDetailModalLabel').innerHTML =
-            '<i class="fas fa-calendar-alt me-2 text-primary"></i>' + escHtml(label);
+        var modalTitleText = document.getElementById('monthDetailModalLabelText');
+        if (modalTitleText) modalTitleText.textContent = label;
         var container = document.getElementById('monthDetailBody');
         container.innerHTML = '';
         var summaryCards = '' +
