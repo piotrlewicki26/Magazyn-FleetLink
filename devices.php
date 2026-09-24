@@ -611,6 +611,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $uninstDate = date('Y-m-d');
         $db->beginTransaction();
         try {
+            $markAsWorking = function (int $deviceId, int $modelId, string $previousStatus, int $sourceId) use ($db): void {
+                updateDeviceFieldsWithHistory($db, $deviceId, ['status' => 'sprawny'], (int)(getCurrentUser()['id'] ?? 0), 'device_uninstall', $sourceId);
+                adjustInventoryForStatusChange($db, $modelId, $previousStatus, 'sprawny');
+            };
+
             $db->prepare("UPDATE installations SET status='zakonczona', uninstallation_date=? WHERE id=?")
                ->execute([$uninstDate, $activeInst['id']]);
 
@@ -620,19 +625,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ecanStmt->execute([$ecanId]);
                 $ecanDevice = $ecanStmt->fetch();
                 if ($ecanDevice && in_array($ecanDevice['status'], ['zamontowany', 'do_demontazu'], true)) {
-                    updateDeviceFieldsWithHistory($db, $ecanId, ['status' => 'sprawny'], (int)(getCurrentUser()['id'] ?? 0), 'device_uninstall', (int)$activeInst['id']);
-                    adjustInventoryForStatusChange($db, $ecanDevice['model_id'], $ecanDevice['status'], 'sprawny');
+                    $markAsWorking($ecanId, (int)$ecanDevice['model_id'], (string)$ecanDevice['status'], (int)$activeInst['id']);
                 }
             }
 
-            updateDeviceFieldsWithHistory($db, $uninstDeviceId, ['status' => 'sprawny'], (int)(getCurrentUser()['id'] ?? 0), 'device_uninstall', (int)$activeInst['id']);
-            adjustInventoryForStatusChange($db, $uninstDevice['model_id'], $uninstDevice['status'], 'sprawny');
+            $markAsWorking($uninstDeviceId, (int)$uninstDevice['model_id'], (string)$uninstDevice['status'], (int)$activeInst['id']);
 
             $db->commit();
             flashSuccess('Urządzenie ' . $uninstDevice['serial_number'] . ' zostało odinstalowane i ustawione jako Sprawne.');
         } catch (Exception $e) {
             $db->rollBack();
-            flashError('Błąd podczas odinstalowania: ' . $e->getMessage());
+            error_log('FleetLink devices uninstall_device error: ' . $e->getMessage());
+            flashError('Wystąpił błąd podczas odinstalowania urządzenia.');
         }
 
         if ($returnTo === 'view') {
