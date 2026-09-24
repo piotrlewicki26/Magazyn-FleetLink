@@ -88,6 +88,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     $sqlInstalls = "
         SELECT
             {$monthInstallExpr} AS month_no,
+            COALESCE(i.client_id, wo.client_id, 0) AS client_id,
             wo.date AS order_date,
             COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
             {$modelExpr} AS model_name,
@@ -111,8 +112,9 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         $month = (int)$row['month_no'];
         if ($month >= 1 && $month <= 12) {
             $clientName = trim((string)($row['client_name'] ?? ''));
-            if (!isset($byMonth[$month][$clientName])) {
-                $byMonth[$month][$clientName] = [
+            $clientKey = (string)((int)($row['client_id'] ?? 0)) . '|' . $clientName;
+            if (!isset($byMonth[$month][$clientKey])) {
+                $byMonth[$month][$clientKey] = [
                     'client_name' => $clientName,
                     'total_install_count' => 0,
                     'total_other_count' => 0,
@@ -123,19 +125,19 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             }
 
             $orderDate = trim((string)($row['order_date'] ?? ''));
-            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientName]['order_dates'], true)) {
-                $byMonth[$month][$clientName]['order_dates'][] = $orderDate;
+            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
+                $byMonth[$month][$clientKey]['order_dates'][] = $orderDate;
             }
 
             $modelName = trim((string)($row['model_name'] ?? ''));
 
             $installCount = (int)($row['install_count'] ?? 0);
             if ($installCount > 0 && $modelName !== '') {
-                if (!isset($byMonth[$month][$clientName]['models'][$modelName])) {
-                    $byMonth[$month][$clientName]['models'][$modelName] = 0;
+                if (!isset($byMonth[$month][$clientKey]['models'][$modelName])) {
+                    $byMonth[$month][$clientKey]['models'][$modelName] = 0;
                 }
-                $byMonth[$month][$clientName]['models'][$modelName] += $installCount;
-                $byMonth[$month][$clientName]['total_install_count'] += $installCount;
+                $byMonth[$month][$clientKey]['models'][$modelName] += $installCount;
+                $byMonth[$month][$clientKey]['total_install_count'] += $installCount;
             }
         }
     }
@@ -147,6 +149,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             SELECT
                 wo.id AS order_id,
                 {$monthOrderExpr} AS month_no,
+                COALESCE(wo.client_id, 0) AS client_id,
                 wo.date AS order_date,
                 COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
                 {$otherDevicesExpr} AS other_devices,
@@ -167,8 +170,9 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 continue;
             }
             $clientName = trim((string)($row['client_name'] ?? ''));
-            if (!isset($byMonth[$month][$clientName])) {
-                $byMonth[$month][$clientName] = [
+            $clientKey = (string)((int)($row['client_id'] ?? 0)) . '|' . $clientName;
+            if (!isset($byMonth[$month][$clientKey])) {
+                $byMonth[$month][$clientKey] = [
                     'client_name' => $clientName,
                     'total_install_count' => 0,
                     'total_other_count' => 0,
@@ -179,16 +183,16 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             }
 
             $orderDate = trim((string)($row['order_date'] ?? ''));
-            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientName]['order_dates'], true)) {
-                $byMonth[$month][$clientName]['order_dates'][] = $orderDate;
+            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientKey]['order_dates'], true)) {
+                $byMonth[$month][$clientKey]['order_dates'][] = $orderDate;
             }
 
             $otherCount = (int)($row['other_devices_count'] ?? 0);
             if ($otherCount > 0) {
                 $trackKey = '_odc_' . (string)($row['order_id'] ?? '');
-                if ($trackKey !== '_odc_' && !isset($byMonth[$month][$clientName][$trackKey])) {
-                    $byMonth[$month][$clientName][$trackKey] = true;
-                    $byMonth[$month][$clientName]['total_other_count'] += $otherCount;
+                if ($trackKey !== '_odc_' && !isset($byMonth[$month][$clientKey][$trackKey])) {
+                    $byMonth[$month][$clientKey][$trackKey] = true;
+                    $byMonth[$month][$clientKey]['total_other_count'] += $otherCount;
                 }
             }
 
@@ -196,8 +200,8 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             if ($otherDevices !== '') {
                 foreach (preg_split('/\r\n|\n|\r/', $otherDevices) as $otherDevice) {
                     $otherDevice = trim((string)$otherDevice);
-                    if ($otherDevice !== '' && !in_array($otherDevice, $byMonth[$month][$clientName]['other_devices'], true)) {
-                        $byMonth[$month][$clientName]['other_devices'][] = $otherDevice;
+                    if ($otherDevice !== '' && !in_array($otherDevice, $byMonth[$month][$clientKey]['other_devices'], true)) {
+                        $byMonth[$month][$clientKey]['other_devices'][] = $otherDevice;
                     }
                 }
             }
