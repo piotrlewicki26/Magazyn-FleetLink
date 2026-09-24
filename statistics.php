@@ -162,23 +162,33 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         $otherClientExpr = "COALESCE((SELECT MIN(i6.client_id) FROM installations i6 WHERE i6.work_order_id = wo.id AND i6.client_id IS NOT NULL), wo.client_id, 0)";
         $sqlOthers = "
             SELECT
-                wo.id AS order_id,
-                {$monthOrderExpr} AS month_no,
-                {$otherClientExpr} AS client_id,
-                wo.date AS order_date,
+                o.order_id,
+                o.month_no,
+                o.client_id,
+                o.order_date,
                 COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
-                {$otherDevicesExpr} AS other_devices,
-                {$otherDevicesCountExpr} AS other_devices_count
-            FROM work_orders wo
-            LEFT JOIN clients c ON c.id = {$otherClientExpr}
-            WHERE {$yearOrderExpr}
-              AND {$otherDevicesFilterExpr}
-            ORDER BY month_no, wo.date, wo.id
+                o.other_devices,
+                o.other_devices_count
+            FROM (
+                SELECT
+                    wo.id AS order_id,
+                    {$monthOrderExpr} AS month_no,
+                    {$otherClientExpr} AS client_id,
+                    wo.date AS order_date,
+                    {$otherDevicesExpr} AS other_devices,
+                    {$otherDevicesCountExpr} AS other_devices_count
+                FROM work_orders wo
+                WHERE {$yearOrderExpr}
+                  AND {$otherDevicesFilterExpr}
+            ) o
+            LEFT JOIN clients c ON c.id = o.client_id
+            ORDER BY o.month_no, o.order_date, o.order_id
         ";
 
         $otherStmt = $db->prepare($sqlOthers);
         $otherStmt->execute([(string)$year]);
         $otherRows = $otherStmt->fetchAll(PDO::FETCH_ASSOC);
+        $otherCountTracker = [];
         foreach ($otherRows as $row) {
             $month = (int)($row['month_no'] ?? 0);
             if ($month < 1 || $month > 12) {
@@ -223,8 +233,9 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $trackKey = $orderId !== ''
                     ? ('_odc_id_' . $orderId)
                     : ('_odc_fallback_' . $month . '|' . $clientKey . '|' . (string)($row['order_date'] ?? '') . '|' . (string)($row['other_devices'] ?? '') . '|' . $otherCount);
-                if (!isset($byMonth[$month][$clientKey][$trackKey])) {
-                    $byMonth[$month][$clientKey][$trackKey] = true;
+                $trackerKey = $month . '|' . $clientKey . '|' . $trackKey;
+                if (!isset($otherCountTracker[$trackerKey])) {
+                    $otherCountTracker[$trackerKey] = true;
                     $byMonth[$month][$clientKey]['total_other_count'] += $otherCount;
                 }
             }
@@ -241,16 +252,12 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
 
     foreach ($byMonth as $month => $groups) {
         $normalizedGroups = [];
-        foreach ($groups as $groupKey => $group) {
-            if (strpos((string)$groupKey, '_odc_') === 0) {
-                continue;
-            }
+        foreach ($groups as $group) {
             $modelLabels = [];
             foreach ($group['models'] as $modelName => $count) {
                 $modelLabels[] = $count > 1 ? ($modelName . ' × ' . $count) : $modelName;
             }
-            // Strip internal tracking keys before output
-            $cleanGroup = array_filter($group, static fn($k) => strpos((string)$k, '_odc_') !== 0, ARRAY_FILTER_USE_KEY);
+            $cleanGroup = $group;
             sort($cleanGroup['order_dates']);
             $cleanGroup['models'] = $modelLabels;
             $normalizedGroups[] = $cleanGroup;
