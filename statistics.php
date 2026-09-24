@@ -85,7 +85,13 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
 
-    $installClientExpr = "COALESCE(wo.client_id, i.client_id, 0)";
+    $installClientExpr = "CASE WHEN wo.client_id IS NOT NULL THEN wo.client_id ELSE COALESCE(i.client_id, 0) END";
+    $installClientNameExpr = "
+        CASE
+            WHEN wo.client_id IS NOT NULL THEN COALESCE(NULLIF(cwo.company_name, ''), NULLIF(cwo.contact_name, ''), '—')
+            ELSE COALESCE(NULLIF(ci.company_name, ''), NULLIF(ci.contact_name, ''), '—')
+        END
+    ";
     $sqlInstalls = "
         SELECT
             x.month_no,
@@ -99,11 +105,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 {$monthInstallExpr} AS month_no,
                 {$installClientExpr} AS client_id,
                 i.installation_date AS order_date,
-                COALESCE(
-                    NULLIF(COALESCE(cwo.company_name, ci.company_name), ''),
-                    NULLIF(COALESCE(cwo.contact_name, ci.contact_name), ''),
-                    '—'
-                ) AS client_name,
+                {$installClientNameExpr} AS client_name,
                 {$modelExpr} AS model_name,
                 i.id AS install_id
             FROM installations i
@@ -652,7 +654,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function openMonthModal(monthIndex) {
         var rows = monthlyDetails[monthIndex] || [];
-        var seriesIndex = monthIndex;
+        var seriesIndex = Number(monthIndex);
+        if (seriesIndex > 11) seriesIndex = seriesIndex - 1;
+        if (seriesIndex < 0 || !Number.isFinite(seriesIndex)) seriesIndex = 0;
         var label = monthLabels[monthIndex] + ' <?= $year ?>';
         var monthlyInstallCount = Number(installSeries[seriesIndex] || 0);
         var monthlyOtherCount = Number(otherSeries[seriesIndex] || 0);
