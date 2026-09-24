@@ -1052,6 +1052,17 @@ if ($action === 'list') {
                COALESCE(d.tacho_connected, 0) AS tacho_connected,
                d.tacho_firmware_version,
                m.name as model_name, mf.name as manufacturer_name,
+               (SELECT v2.registration
+                  FROM installations i3
+                  LEFT JOIN vehicles v2 ON v2.id = i3.vehicle_id
+                 WHERE i3.device_id = d.id AND i3.status = 'aktywna'
+                 ORDER BY i3.id DESC
+                 LIMIT 1) as active_vehicle_registration,
+               (SELECT i3.installation_date
+                  FROM installations i3
+                 WHERE i3.device_id = d.id AND i3.status = 'aktywna'
+                 ORDER BY i3.id DESC
+                 LIMIT 1) as active_installation_date,
                v.registration as vehicle_registration,
                c.contact_name, c.company_name,
                i.installation_date, i.status as inst_status
@@ -1397,7 +1408,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <td>
                         <?php
                         $isMountedLike = in_array($d['status'], ['zamontowany', 'do_demontazu'], true);
-                        $canUninstallFromData = $isMountedLike && (!empty($d['vehicle_registration']) || !empty($d['sim_number']) || !empty($d['installation_date']));
+                        $canUninstallFromData = $isMountedLike && (!empty($d['active_vehicle_registration']) || !empty($d['sim_number']) || !empty($d['active_installation_date']));
                         ?>
                         <?php if ($canUninstallFromData): ?>
                         <form id="uninstallDeviceForm<?= $d['id'] ?>" method="POST" class="d-none">

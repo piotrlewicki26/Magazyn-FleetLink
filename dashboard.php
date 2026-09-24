@@ -193,6 +193,9 @@ include __DIR__ . '/includes/header.php';
                         <a href="inventory.php" class="dropdown-item small text-primary"><i class="fas fa-warehouse me-1"></i>Przejdź do magazynu</a>
                     </div>
                 </div>
+                <a href="inventory.php" class="small text-warning fw-semibold text-decoration-none">
+                    <i class="fas fa-exclamation-triangle me-1"></i>Wykryto niski stan magazynowy
+                </a>
                 <?php endif; ?>
                 <span class="text-muted"><?= formatPolishDate() ?></span>
             </div>
