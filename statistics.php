@@ -170,6 +170,13 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     if ($hasOtherDevicesCountColumn || $hasOtherDevicesColumn) {
         $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
         $otherDevicesCountExpr = $hasOtherDevicesCountColumn ? "COALESCE(wo.other_devices_count, 0)" : "0";
+        if ($hasOtherDevicesCountColumn && $hasOtherDevicesColumn) {
+            $otherDevicesFilterExpr = "(wo.other_devices_count > 0 OR (wo.other_devices IS NOT NULL AND wo.other_devices != ''))";
+        } elseif ($hasOtherDevicesCountColumn) {
+            $otherDevicesFilterExpr = "wo.other_devices_count > 0";
+        } else {
+            $otherDevicesFilterExpr = "(wo.other_devices IS NOT NULL AND wo.other_devices != '')";
+        }
         $sqlOthers = "
             SELECT
                 wo.id AS order_id,
@@ -182,7 +189,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             FROM work_orders wo
             LEFT JOIN clients c ON c.id = wo.client_id
             WHERE {$yearOrderExpr}
-              AND ({$otherDevicesCountExpr} > 0 OR {$otherDevicesExpr} != '')
+              AND {$otherDevicesFilterExpr}
             ORDER BY month_no, wo.date, wo.id
         ";
 
@@ -248,6 +255,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
             }
             // Strip internal tracking keys before output
             $cleanGroup = array_filter($group, static fn($k) => strpos((string)$k, '_odc_') !== 0, ARRAY_FILTER_USE_KEY);
+            sort($cleanGroup['order_dates']);
             $cleanGroup['models'] = $modelLabels;
             $normalizedGroups[] = $cleanGroup;
         }
