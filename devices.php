@@ -1399,6 +1399,21 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                         $isMountedLike = in_array($d['status'], ['zamontowany', 'do_demontazu'], true);
                         $canUninstallFromData = $isMountedLike && (!empty($d['vehicle_registration']) || !empty($d['sim_number']) || !empty($d['installation_date']));
                         ?>
+                        <?php if ($canUninstallFromData): ?>
+                        <form id="uninstallDeviceForm<?= $d['id'] ?>" method="POST" class="d-none">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="uninstall_device">
+                            <input type="hidden" name="id" value="<?= $d['id'] ?>">
+                            <input type="hidden" name="return_to" value="list">
+                        </form>
+                        <?php endif; ?>
+                        <?php if (isAdmin()): ?>
+                        <form id="deleteDeviceForm<?= $d['id'] ?>" method="POST" class="d-none">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $d['id'] ?>">
+                        </form>
+                        <?php endif; ?>
                         <div class="dropdown">
                             <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 Akcje
@@ -1451,13 +1466,10 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 <?php endif; ?>
                                 <?php if ($canUninstallFromData): ?>
                                 <li>
-                                    <form method="POST" onsubmit="return confirm('Czy na pewno odinstalować urządzenie <?= h($d['serial_number']) ?>?\\n\\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\\nNie = anuluj.')">
-                                        <?= csrfField() ?>
-                                        <input type="hidden" name="action" value="uninstall_device">
-                                        <input type="hidden" name="id" value="<?= $d['id'] ?>">
-                                        <input type="hidden" name="return_to" value="list">
-                                        <button type="submit" class="dropdown-item text-danger"><i class="fas fa-unlink me-2"></i>Odinstaluj</button>
-                                    </form>
+                                    <button type="button" class="dropdown-item text-danger"
+                                            onclick="if(confirm('Czy na pewno odinstalować urządzenie <?= h($d['serial_number']) ?>?\\n\\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\\nNie = anuluj.')){document.getElementById('uninstallDeviceForm<?= $d['id'] ?>').submit();}">
+                                        <i class="fas fa-unlink me-2"></i>Odinstaluj
+                                    </button>
                                 </li>
                                 <?php endif; ?>
                                 <?php if ($d['status'] === 'zamontowany'): ?>
@@ -1485,12 +1497,10 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 <?php if (isAdmin()): ?>
                                 <li><hr class="dropdown-divider"></li>
                                 <li>
-                                    <form method="POST" onsubmit="return confirm('Czy na pewno chcesz usunąć urządzenie <?= h($d['serial_number']) ?>? Tej operacji nie można cofnąć.')">
-                                        <?= csrfField() ?>
-                                        <input type="hidden" name="action" value="delete">
-                                        <input type="hidden" name="id" value="<?= $d['id'] ?>">
-                                        <button type="submit" class="dropdown-item text-danger"><i class="fas fa-trash me-2"></i>Usuń urządzenie</button>
-                                    </form>
+                                    <button type="button" class="dropdown-item text-danger"
+                                            onclick="if(confirm('Czy na pewno chcesz usunąć urządzenie <?= h($d['serial_number']) ?>? Tej operacji nie można cofnąć.')){document.getElementById('deleteDeviceForm<?= $d['id'] ?>').submit();}">
+                                        <i class="fas fa-trash me-2"></i>Usuń urządzenie
+                                    </button>
                                 </li>
                                 <?php endif; ?>
                             </ul>

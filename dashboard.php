@@ -175,7 +175,7 @@ include __DIR__ . '/includes/header.php';
             <div class="d-flex align-items-center gap-2">
                 <?php if (!empty($lowStock)): ?>
                 <div class="dropdown">
-                    <button class="btn btn-sm btn-outline-warning position-relative" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Powiadomienia magazynowe">
+                    <button class="btn btn-sm btn-outline-warning position-relative" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Powiadomienia magazynowe" aria-label="Powiadomienia magazynowe: <?= count($lowStock) ?> modeli z niskim stanem">
                         <i class="fas fa-bell"></i>
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"><?= count($lowStock) ?></span>
                     </button>
