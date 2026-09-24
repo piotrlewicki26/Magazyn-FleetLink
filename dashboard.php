@@ -172,7 +172,28 @@ include __DIR__ . '/includes/header.php';
     <div class="col-12">
         <div class="page-header">
             <h1><i class="fas fa-tachometer-alt me-2 text-primary"></i>Panel główny</h1>
-            <span class="text-muted"><?= formatPolishDate() ?></span>
+            <div class="d-flex align-items-center gap-2">
+                <?php if (!empty($lowStock)): ?>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-warning position-relative" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Powiadomienia magazynowe">
+                        <i class="fas fa-bell"></i>
+                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"><?= count($lowStock) ?></span>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end p-0" style="min-width: 320px;">
+                        <div class="dropdown-header fw-semibold text-warning"><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</div>
+                        <?php foreach ($lowStock as $item): ?>
+                        <a href="inventory.php" class="dropdown-item small d-flex justify-content-between gap-2">
+                            <span><?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?></span>
+                            <span class="fw-semibold text-warning"><?= (int)$item['quantity'] ?> / min <?= (int)$item['min_quantity'] ?></span>
+                        </a>
+                        <?php endforeach; ?>
+                        <div class="dropdown-divider m-0"></div>
+                        <a href="inventory.php" class="dropdown-item small text-primary"><i class="fas fa-warehouse me-1"></i>Przejdź do magazynu</a>
+                    </div>
+                </div>
+                <?php endif; ?>
+                <span class="text-muted"><?= formatPolishDate() ?></span>
+            </div>
         </div>
     </div>
 </div>
@@ -260,24 +281,6 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
-
-<?php if (!empty($lowStock)): ?>
-<div class="alert alert-warning d-flex justify-content-between align-items-start mb-4" role="alert">
-    <div>
-        <div class="fw-semibold mb-1"><i class="fas fa-exclamation-triangle me-2"></i>Niski stan magazynowy</div>
-        <ul class="mb-0 ps-3 small">
-            <?php foreach ($lowStock as $item): ?>
-            <li>
-                <?= h($item['manufacturer_name'] . ' ' . $item['model_name']) ?>:
-                <strong><?= (int)$item['quantity'] ?> szt.</strong>
-                <span class="text-muted">(min <?= (int)$item['min_quantity'] ?>)</span>
-            </li>
-            <?php endforeach; ?>
-        </ul>
-    </div>
-    <a href="inventory.php" class="btn btn-sm btn-outline-warning ms-3 flex-shrink-0">Magazyn</a>
-</div>
-<?php endif; ?>
 
 <div class="row g-3">
     <!-- Recent Orders (Ostatnie zlecenia) -->

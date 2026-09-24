@@ -588,7 +588,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'devices.php');
         }
 
-        $devStmt = $db->prepare("SELECT id, model_id, status, serial_number FROM devices WHERE id=? LIMIT 1");
+        $devStmt = $db->prepare("SELECT id, model_id, status, serial_number, sim_number FROM devices WHERE id=? LIMIT 1");
         $devStmt->execute([$uninstDeviceId]);
         $uninstDevice = $devStmt->fetch();
         if (!$uninstDevice) {
@@ -600,11 +600,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(getBaseUrl() . 'devices.php');
         }
 
-        $activeInstStmt = $db->prepare("SELECT id, ecan_device_id FROM installations WHERE device_id=? AND status='aktywna' LIMIT 1");
+        $activeInstStmt = $db->prepare("
+            SELECT i.id, i.ecan_device_id, i.installation_date, v.registration
+            FROM installations i
+            LEFT JOIN vehicles v ON v.id=i.vehicle_id
+            WHERE i.device_id=? AND i.status='aktywna'
+            LIMIT 1
+        ");
         $activeInstStmt->execute([$uninstDeviceId]);
         $activeInst = $activeInstStmt->fetch();
         if (!$activeInst) {
             flashError('Brak aktywnej instalacji dla tego urządzenia.');
+            redirect(getBaseUrl() . 'devices.php');
+        }
+        if (empty($activeInst['registration']) && empty($uninstDevice['sim_number']) && empty($activeInst['installation_date'])) {
+            flashError('Opcja odinstalowania jest dostępna tylko gdy urządzenie ma rejestrację, numer SIM lub datę montażu.');
             redirect(getBaseUrl() . 'devices.php');
         }
 
@@ -989,8 +999,7 @@ if ($action === 'view' && $id) {
 // Models for select (with device counts for filter tiles)
 $models = $db->query("
     SELECT m.id, m.name, mf.name as manufacturer_name,
-           (SELECT COUNT(*) FROM devices d2 WHERE d2.model_id = m.id AND d2.status = 'nowy') as new_count,
-           (SELECT COUNT(*) FROM devices d2 WHERE d2.model_id = m.id AND d2.status = 'sprawny') as working_count
+           (SELECT COUNT(*) FROM devices d2 WHERE d2.model_id = m.id AND d2.status IN ('nowy','sprawny')) as available_count
     FROM models m
     JOIN manufacturers mf ON mf.id = m.manufacturer_id
     WHERE m.active = 1
@@ -1240,7 +1249,7 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Model filter tiles -->
 <?php
-$modelsWithDevices = array_filter($models, fn($m) => ((int)$m['new_count'] + (int)$m['working_count']) > 0);
+$modelsWithDevices = array_filter($models, fn($m) => (int)$m['available_count'] > 0);
 $activeModelFilter = (int)($_GET['model'] ?? 0);
 ?>
 <?php if (!empty($modelsWithDevices)): ?>
@@ -1250,8 +1259,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
     <a href="devices.php?<?= http_build_query(array_merge($_GET, ['model' => $m['id']])) ?>"
        class="btn btn-sm <?= $activeModelFilter === (int)$m['id'] ? 'btn-primary' : 'btn-outline-secondary' ?>">
         <?= h($m['manufacturer_name'] . ' ' . $m['name']) ?>
-        <span class="badge <?= $activeModelFilter === (int)$m['id'] ? 'bg-white text-primary' : 'bg-secondary' ?> ms-1">N: <?= (int)$m['new_count'] ?></span>
-        <span class="badge <?= $activeModelFilter === (int)$m['id'] ? 'bg-white text-primary' : 'bg-secondary' ?> ms-1">S: <?= (int)$m['working_count'] ?></span>
+        <span class="badge <?= $activeModelFilter === (int)$m['id'] ? 'bg-white text-primary' : 'bg-secondary' ?> ms-1"><?= (int)$m['available_count'] ?></span>
     </a>
     <?php endforeach; ?>
     <?php if ($activeModelFilter): ?>
@@ -1387,76 +1395,106 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <td><?= $d['purchase_price'] > 0 ? formatMoney($d['purchase_price']) : '<span class="text-muted">—</span>' ?></td>
                     <?php endif; ?>
                     <td>
-                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
-                                onclick="showDevicePreview(<?= htmlspecialchars(json_encode([
-                                    'id'                     => $d['id'],
-                                    'serial_number'          => $d['serial_number'],
-                                    'imei'                   => $d['imei'] ?? '',
-                                    'sim_number'             => $d['sim_number'] ?? '',
-                                    'ble_id'                 => $d['ble_id'] ?? '',
-                                    'major'                  => $d['major'] ?? null,
-                                    'minor'                  => $d['minor'] ?? null,
-                                    'mac_address'            => $d['mac_address'] ?? '',
-                                    'status'                 => $d['status'],
-                                    'manufacturer_name'      => $d['manufacturer_name'],
-                                    'model_name'             => $d['model_name'],
-                                    'vehicle_registration'   => $d['vehicle_registration'] ?? '',
-                                    'client'                 => $d['company_name'] ?: ($d['contact_name'] ?? ''),
-                                    'installation_date'      => $d['installation_date'] ?? '',
-                                    'purchase_date'          => $d['purchase_date'] ?? '',
-                                    'sale_date'              => $d['sale_date'] ?? '',
-                                    'notes'                  => $d['notes'] ?? '',
-                                    'tacho_connected'        => (int)($d['tacho_connected'] ?? 0),
-                                    'tacho_firmware_version' => $d['tacho_firmware_version'] ?? '',
-                                ]), ENT_QUOTES) ?>)"
-                                title="Podgląd"><i class="fas fa-eye"></i></button>
-                        <?php if (isAdmin()): ?>
-                        <a href="devices.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-primary btn-action" title="Edytuj"><i class="fas fa-edit"></i></a>
-                        <form method="POST" class="d-inline" onsubmit="return confirm('Czy na pewno chcesz usunąć urządzenie <?= h($d['serial_number']) ?>? Tej operacji nie można cofnąć.')">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="id" value="<?= $d['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Usuń urządzenie"><i class="fas fa-trash"></i></button>
-                        </form>
-                        <?php endif; ?>
-                        <?php if (in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false): ?>
-                        <button type="button" class="btn btn-sm btn-outline-success btn-action" title="Montaż"
-                                onclick="openInstallModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
-                            <i class="fas fa-car"></i>
-                        </button>
-                        <?php endif; ?>
-                        <?php if ($d['status'] === 'zamontowany' || $d['status'] === 'do_demontazu'): ?>
-                        <button type="button" class="btn btn-sm btn-outline-warning btn-action" title="Przenieś do innej firmy"
-                                onclick="openMoveDeviceModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, 'list')">
-                            <i class="fas fa-exchange-alt"></i>
-                        </button>
-                        <form method="POST" class="d-inline" onsubmit="return confirm('Czy na pewno odinstalować urządzenie <?= h($d['serial_number']) ?>?\\n\\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\\nNie = anuluj.')">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="uninstall_device">
-                            <input type="hidden" name="id" value="<?= $d['id'] ?>">
-                            <input type="hidden" name="return_to" value="list">
-                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action" title="Odinstaluj">Odinstaluj</button>
-                        </form>
-                        <?php endif; ?>
-                        <?php if ($d['status'] === 'zamontowany'): ?>
-                        <button type="button" class="btn btn-sm btn-outline-info btn-action" title="Zmień nr rejestracyjny"
-                                onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['vehicle_registration'] ?? '')) ?>)">
-                            <i class="fas fa-hashtag"></i>
-                        </button>
-                        <?php endif; ?>
-                        <button type="button" class="btn btn-sm btn-outline-secondary btn-action" title="Zmień nr SIM"
-                                onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
-                            <i class="fas fa-sim-card"></i>
-                        </button>
-                        <?php if (stripos($d['model_name'], 'ECAN') === false): ?>
-                        <button type="button"
-                                class="btn btn-sm <?= $d['tacho_connected'] ? 'btn-primary' : 'btn-outline-secondary' ?> btn-action"
-                                title="<?= $d['tacho_connected'] ? 'Podpięte pod tachograf — kliknij aby zmienić' : 'Podepnij pod tachograf' ?>"
-                                aria-label="<?= $d['tacho_connected'] ? 'Tachograf: podpięte — zmień ustawienie' : 'Tachograf: niepodpięte — zmień ustawienie' ?>"
-                                onclick="openTachoModal(<?= $d['id'] ?>, <?= (int)($d['tacho_connected'] ?? 0) ?>, <?= htmlspecialchars(json_encode($d['tacho_firmware_version'] ?? '')) ?>)">
-                            🔌
-                        </button>
-                        <?php endif; ?>
+                        <?php
+                        $isMountedLike = in_array($d['status'], ['zamontowany', 'do_demontazu'], true);
+                        $canUninstallFromData = $isMountedLike && (!empty($d['vehicle_registration']) || !empty($d['sim_number']) || !empty($d['installation_date']));
+                        ?>
+                        <div class="dropdown">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                Akcje
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li>
+                                    <button type="button" class="dropdown-item"
+                                            onclick="showDevicePreview(<?= htmlspecialchars(json_encode([
+                                                'id'                     => $d['id'],
+                                                'serial_number'          => $d['serial_number'],
+                                                'imei'                   => $d['imei'] ?? '',
+                                                'sim_number'             => $d['sim_number'] ?? '',
+                                                'ble_id'                 => $d['ble_id'] ?? '',
+                                                'major'                  => $d['major'] ?? null,
+                                                'minor'                  => $d['minor'] ?? null,
+                                                'mac_address'            => $d['mac_address'] ?? '',
+                                                'status'                 => $d['status'],
+                                                'manufacturer_name'      => $d['manufacturer_name'],
+                                                'model_name'             => $d['model_name'],
+                                                'vehicle_registration'   => $d['vehicle_registration'] ?? '',
+                                                'client'                 => $d['company_name'] ?: ($d['contact_name'] ?? ''),
+                                                'installation_date'      => $d['installation_date'] ?? '',
+                                                'purchase_date'          => $d['purchase_date'] ?? '',
+                                                'sale_date'              => $d['sale_date'] ?? '',
+                                                'notes'                  => $d['notes'] ?? '',
+                                                'tacho_connected'        => (int)($d['tacho_connected'] ?? 0),
+                                                'tacho_firmware_version' => $d['tacho_firmware_version'] ?? '',
+                                            ]), ENT_QUOTES) ?>)">
+                                        <i class="fas fa-eye me-2 text-info"></i>Podgląd
+                                    </button>
+                                </li>
+                                <?php if (isAdmin()): ?>
+                                <li><a href="devices.php?action=edit&id=<?= $d['id'] ?>" class="dropdown-item"><i class="fas fa-edit me-2 text-primary"></i>Edytuj</a></li>
+                                <?php endif; ?>
+                                <?php if (in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false): ?>
+                                <li>
+                                    <button type="button" class="dropdown-item"
+                                            onclick="openInstallModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
+                                        <i class="fas fa-car me-2 text-success"></i>Montaż
+                                    </button>
+                                </li>
+                                <?php endif; ?>
+                                <?php if ($isMountedLike): ?>
+                                <li>
+                                    <button type="button" class="dropdown-item"
+                                            onclick="openMoveDeviceModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, 'list')">
+                                        <i class="fas fa-exchange-alt me-2 text-warning"></i>Przenieś do innej firmy
+                                    </button>
+                                </li>
+                                <?php endif; ?>
+                                <?php if ($canUninstallFromData): ?>
+                                <li>
+                                    <form method="POST" onsubmit="return confirm('Czy na pewno odinstalować urządzenie <?= h($d['serial_number']) ?>?\\n\\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\\nNie = anuluj.')">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="uninstall_device">
+                                        <input type="hidden" name="id" value="<?= $d['id'] ?>">
+                                        <input type="hidden" name="return_to" value="list">
+                                        <button type="submit" class="dropdown-item text-danger"><i class="fas fa-unlink me-2"></i>Odinstaluj</button>
+                                    </form>
+                                </li>
+                                <?php endif; ?>
+                                <?php if ($d['status'] === 'zamontowany'): ?>
+                                <li>
+                                    <button type="button" class="dropdown-item"
+                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['vehicle_registration'] ?? '')) ?>)">
+                                        <i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny
+                                    </button>
+                                </li>
+                                <?php endif; ?>
+                                <li>
+                                    <button type="button" class="dropdown-item"
+                                            onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
+                                        <i class="fas fa-sim-card me-2 text-secondary"></i>Zmień nr SIM
+                                    </button>
+                                </li>
+                                <?php if (stripos($d['model_name'], 'ECAN') === false): ?>
+                                <li>
+                                    <button type="button" class="dropdown-item"
+                                            onclick="openTachoModal(<?= $d['id'] ?>, <?= (int)($d['tacho_connected'] ?? 0) ?>, <?= htmlspecialchars(json_encode($d['tacho_firmware_version'] ?? '')) ?>)">
+                                        <i class="fas fa-plug me-2 <?= $d['tacho_connected'] ? 'text-primary' : 'text-secondary' ?>"></i>Tachograf
+                                    </button>
+                                </li>
+                                <?php endif; ?>
+                                <?php if (isAdmin()): ?>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <form method="POST" onsubmit="return confirm('Czy na pewno chcesz usunąć urządzenie <?= h($d['serial_number']) ?>? Tej operacji nie można cofnąć.')">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="id" value="<?= $d['id'] ?>">
+                                        <button type="submit" class="dropdown-item text-danger"><i class="fas fa-trash me-2"></i>Usuń urządzenie</button>
+                                    </form>
+                                </li>
+                                <?php endif; ?>
+                            </ul>
+                        </div>
                     </td>
                 </tr>
                 <?php endforeach; ?>
