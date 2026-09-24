@@ -73,49 +73,41 @@ function statsColumnExists(PDO $db, string $table, string $column): bool
  */
 function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $hasOtherDevicesColumn, bool $hasOtherDevicesCountColumn = false): array
 {
-    $yearExpr  = $isSqlite ? "strftime('%Y', wo.date) = ?" : 'YEAR(wo.date) = ?';
-    $monthExpr = $isSqlite
+    $yearInstallExpr = $isSqlite ? "strftime('%Y', i.installation_date) = ?" : 'YEAR(i.installation_date) = ?';
+    $monthInstallExpr = $isSqlite
+        ? "CAST(strftime('%m', i.installation_date) AS INTEGER)"
+        : 'MONTH(i.installation_date)';
+    $yearOrderExpr  = $isSqlite ? "strftime('%Y', wo.date) = ?" : 'YEAR(wo.date) = ?';
+    $monthOrderExpr = $isSqlite
         ? "CAST(strftime('%m', wo.date) AS INTEGER)"
         : 'MONTH(wo.date)';
     $modelExpr = $isSqlite
         ? "COALESCE(mf.name || ' ' || m.name, m.name, '—')"
         : "COALESCE(CONCAT(mf.name, ' ', m.name), m.name, '—')";
-    $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
-    $otherDevicesCountExpr = $hasOtherDevicesCountColumn ? "COALESCE(wo.other_devices_count, 0)" : "0";
-    $groupByColumns = 'wo.id, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name';
-    if ($hasOtherDevicesColumn) {
-        $groupByColumns .= ', wo.other_devices';
-    }
-    if ($hasOtherDevicesCountColumn) {
-        $groupByColumns .= ', wo.other_devices_count';
-    }
 
-    $sql = "
+    $sqlInstalls = "
         SELECT
-            {$monthExpr} AS month_no,
+            {$monthInstallExpr} AS month_no,
             wo.date AS order_date,
             COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
             {$modelExpr} AS model_name,
-            {$otherDevicesExpr} AS other_devices,
-            {$otherDevicesCountExpr} AS other_devices_count,
             COUNT(i.id) AS install_count
-        FROM work_orders wo
-        LEFT JOIN clients c ON c.id = wo.client_id
-        LEFT JOIN installations i ON i.work_order_id = wo.id
+        FROM installations i
+        LEFT JOIN work_orders wo ON wo.id = i.work_order_id
+        LEFT JOIN clients c ON c.id = COALESCE(i.client_id, wo.client_id)
         LEFT JOIN devices d ON d.id = i.device_id
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
-        WHERE {$yearExpr}
-        GROUP BY {$groupByColumns}
-        ORDER BY wo.date, wo.id
+        WHERE {$yearInstallExpr}
+        GROUP BY month_no, wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
+        ORDER BY month_no, wo.date
     ";
 
-    $stmt = $db->prepare($sql);
-    $stmt->execute([(string)$year]);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
     $byMonth = array_fill(1, 12, []);
-    foreach ($rows as $row) {
+    $instStmt = $db->prepare($sqlInstalls);
+    $instStmt->execute([(string)$year]);
+    $installRows = $instStmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($installRows as $row) {
         $month = (int)$row['month_no'];
         if ($month >= 1 && $month <= 12) {
             $clientName = trim((string)($row['client_name'] ?? ''));
@@ -145,12 +137,56 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $byMonth[$month][$clientName]['models'][$modelName] += $installCount;
                 $byMonth[$month][$clientName]['total_install_count'] += $installCount;
             }
+        }
+    }
 
-            // Accumulate other_devices_count once per work order date (avoid double-counting when multiple GPS models)
+    if ($hasOtherDevicesCountColumn || $hasOtherDevicesColumn) {
+        $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
+        $otherDevicesCountExpr = $hasOtherDevicesCountColumn ? "COALESCE(wo.other_devices_count, 0)" : "0";
+        $sqlOthers = "
+            SELECT
+                wo.id AS order_id,
+                {$monthOrderExpr} AS month_no,
+                wo.date AS order_date,
+                COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
+                {$otherDevicesExpr} AS other_devices,
+                {$otherDevicesCountExpr} AS other_devices_count
+            FROM work_orders wo
+            LEFT JOIN clients c ON c.id = wo.client_id
+            WHERE {$yearOrderExpr}
+              AND ({$otherDevicesCountExpr} > 0 OR {$otherDevicesExpr} != '')
+            ORDER BY month_no, wo.date, wo.id
+        ";
+
+        $otherStmt = $db->prepare($sqlOthers);
+        $otherStmt->execute([(string)$year]);
+        $otherRows = $otherStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($otherRows as $row) {
+            $month = (int)($row['month_no'] ?? 0);
+            if ($month < 1 || $month > 12) {
+                continue;
+            }
+            $clientName = trim((string)($row['client_name'] ?? ''));
+            if (!isset($byMonth[$month][$clientName])) {
+                $byMonth[$month][$clientName] = [
+                    'client_name' => $clientName,
+                    'total_install_count' => 0,
+                    'total_other_count' => 0,
+                    'order_dates' => [],
+                    'models' => [],
+                    'other_devices' => [],
+                ];
+            }
+
+            $orderDate = trim((string)($row['order_date'] ?? ''));
+            if ($orderDate !== '' && !in_array($orderDate, $byMonth[$month][$clientName]['order_dates'], true)) {
+                $byMonth[$month][$clientName]['order_dates'][] = $orderDate;
+            }
+
             $otherCount = (int)($row['other_devices_count'] ?? 0);
-            if ($otherCount > 0 && $orderDate !== '') {
-                $trackKey = '_odc_' . $orderDate;
-                if (!isset($byMonth[$month][$clientName][$trackKey])) {
+            if ($otherCount > 0) {
+                $trackKey = '_odc_' . (string)($row['order_id'] ?? '');
+                if ($trackKey !== '_odc_' && !isset($byMonth[$month][$clientName][$trackKey])) {
                     $byMonth[$month][$clientName][$trackKey] = true;
                     $byMonth[$month][$clientName]['total_other_count'] += $otherCount;
                 }
@@ -551,8 +587,8 @@ include __DIR__ . '/includes/header.php';
 <!-- ─── Modal: szczegóły miesiąca ─────────────────────────────────── -->
 <div class="modal fade" id="monthDetailModal" tabindex="-1" aria-labelledby="monthDetailModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-white border-bottom">
                 <h5 class="modal-title" id="monthDetailModalLabel"><i class="fas fa-calendar-alt me-2 text-primary"></i>Szczegóły miesiąca</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
@@ -595,14 +631,44 @@ document.addEventListener('DOMContentLoaded', function () {
     function openMonthModal(monthIndex) {
         var rows = monthlyDetails[monthIndex] || [];
         var label = monthLabels[monthIndex] + ' <?= $year ?>';
+        var monthlyInstallCount = Number(installSeries[monthIndex] || 0);
+        var monthlyOtherCount = Number(otherSeries[monthIndex] || 0);
+        var monthlyServiceCount = Number(serviceSeries[monthIndex] || 0);
         document.getElementById('monthDetailModalLabel').innerHTML =
             '<i class="fas fa-calendar-alt me-2 text-primary"></i>' + escHtml(label);
         var container = document.getElementById('monthDetailBody');
         container.innerHTML = '';
+        var summaryCards = '' +
+            '<div class="row g-2 mb-1">' +
+                '<div class="col-md-4">' +
+                    '<div class="card border-0 shadow-sm h-100">' +
+                        '<div class="card-body py-3">' +
+                            '<div class="small text-muted text-uppercase mb-1">Montaże GPS</div>' +
+                            '<div class="h4 mb-0 text-primary fw-bold">' + monthlyInstallCount + '</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="col-md-4">' +
+                    '<div class="card border-0 shadow-sm h-100">' +
+                        '<div class="card-body py-3">' +
+                            '<div class="small text-muted text-uppercase mb-1">Inne urządzenia</div>' +
+                            '<div class="h4 mb-0 text-warning-emphasis fw-bold">' + monthlyOtherCount + '</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="col-md-4">' +
+                    '<div class="card border-0 shadow-sm h-100">' +
+                        '<div class="card-body py-3">' +
+                            '<div class="small text-muted text-uppercase mb-1">Serwisy</div>' +
+                            '<div class="h4 mb-0 text-dark fw-bold">' + monthlyServiceCount + '</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
         if (!rows.length) {
-            container.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-body text-center text-muted py-5">Brak zleceń w tym miesiącu.</div></div>';
+            container.innerHTML = summaryCards + '<div class="card border-0 shadow-sm"><div class="card-body text-center text-muted py-5">Brak zleceń w tym miesiącu.</div></div>';
         } else {
-            container.innerHTML = rows.map(function (row) {
+            container.innerHTML = summaryCards + rows.map(function (row) {
                 var orderDates = renderBadgeList(row.order_dates || [], 'bg-light text-body border');
                 var models = renderListGroup(row.models || []);
                 var otherDevices = row.other_devices && row.other_devices.length
@@ -625,12 +691,12 @@ document.addEventListener('DOMContentLoaded', function () {
                             '<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">' +
                                 '<div>' +
                                     '<h6 class="mb-1 fw-bold">' + escHtml(row.client_name || '—') + '</h6>' +
-                                    '<div class="small text-muted">Pozycje zgrupowane dla tego klienta w wybranym miesiącu.</div>' +
+                                    '<div class="small text-muted">Dane klienta tylko dla wybranego miesiąca.</div>' +
                                 '</div>' +
                                 '<div class="d-flex gap-1 flex-wrap">' + countBadges + '</div>' +
                             '</div>' +
                             '<div class="mb-3">' +
-                                '<div class="small fw-semibold text-muted text-uppercase mb-2">Daty zleceń</div>' +
+                                '<div class="small fw-semibold text-muted text-uppercase mb-2">Daty zleceń / montaży</div>' +
                                 '<div class="d-flex flex-wrap gap-2">' + orderDates + '</div>' +
                             '</div>' +
                             '<div>' +
