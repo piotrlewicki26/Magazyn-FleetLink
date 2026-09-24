@@ -145,17 +145,18 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
     if ($hasOtherDevicesCountColumn || $hasOtherDevicesColumn) {
         $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
         $otherDevicesCountExpr = $hasOtherDevicesCountColumn ? "COALESCE(wo.other_devices_count, 0)" : "0";
+        $resolvedOrderClientExpr = "COALESCE((SELECT i6.client_id FROM installations i6 WHERE i6.work_order_id = wo.id AND i6.client_id IS NOT NULL ORDER BY i6.id DESC LIMIT 1), wo.client_id, 0)";
         $sqlOthers = "
             SELECT
                 wo.id AS order_id,
                 {$monthOrderExpr} AS month_no,
-                COALESCE(wo.client_id, 0) AS client_id,
+                {$resolvedOrderClientExpr} AS client_id,
                 wo.date AS order_date,
                 COALESCE(NULLIF(c.company_name,''), NULLIF(c.contact_name,''), '—') AS client_name,
                 {$otherDevicesExpr} AS other_devices,
                 {$otherDevicesCountExpr} AS other_devices_count
             FROM work_orders wo
-            LEFT JOIN clients c ON c.id = wo.client_id
+            LEFT JOIN clients c ON c.id = {$resolvedOrderClientExpr}
             WHERE {$yearOrderExpr}
               AND ({$otherDevicesCountExpr} > 0 OR {$otherDevicesExpr} != '')
             ORDER BY month_no, wo.date, wo.id
@@ -192,7 +193,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $orderId = (string)($row['order_id'] ?? '');
                 $trackKey = $orderId !== ''
                     ? ('_odc_id_' . $orderId)
-                    : ('_odc_fallback_' . md5($month . '|' . $clientKey . '|' . (string)($row['order_date'] ?? '') . '|' . $otherCount));
+                    : ('_odc_fallback_' . $month . '|' . $clientKey . '|' . (string)($row['order_date'] ?? '') . '|' . $otherCount);
                 if (!isset($byMonth[$month][$clientKey][$trackKey])) {
                     $byMonth[$month][$clientKey][$trackKey] = true;
                     $byMonth[$month][$clientKey]['total_other_count'] += $otherCount;
