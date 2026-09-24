@@ -153,11 +153,11 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         $otherDevicesExpr = $hasOtherDevicesColumn ? "COALESCE(wo.other_devices, '')" : "''";
         $otherDevicesCountExpr = $hasOtherDevicesCountColumn ? "COALESCE(wo.other_devices_count, 0)" : "0";
         if ($hasOtherDevicesCountColumn && $hasOtherDevicesColumn) {
-            $otherDevicesFilterExpr = "(wo.other_devices_count > 0 OR (wo.other_devices IS NOT NULL AND wo.other_devices != ''))";
+            $otherDevicesFilterExpr = "(wo.other_devices_count > 0 OR (wo.other_devices IS NOT NULL AND TRIM(wo.other_devices) != ''))";
         } elseif ($hasOtherDevicesCountColumn) {
             $otherDevicesFilterExpr = "wo.other_devices_count > 0";
         } else {
-            $otherDevicesFilterExpr = "(wo.other_devices IS NOT NULL AND wo.other_devices != '')";
+            $otherDevicesFilterExpr = "(wo.other_devices IS NOT NULL AND TRIM(wo.other_devices) != '')";
         }
         $sqlOthers = "
             SELECT
@@ -201,7 +201,22 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 $byMonth[$month][$clientKey]['order_dates'][] = $orderDate;
             }
 
+            $otherDevices = trim((string)($row['other_devices'] ?? ''));
+            $parsedOtherDevices = [];
+            if ($otherDevices !== '') {
+                foreach (preg_split('/\r\n|\n|\r/', $otherDevices) as $otherDevice) {
+                    $otherDevice = trim((string)$otherDevice);
+                    if ($otherDevice !== '' && !in_array($otherDevice, $parsedOtherDevices, true)) {
+                        $parsedOtherDevices[] = $otherDevice;
+                    }
+                }
+            }
+
             $otherCount = (int)($row['other_devices_count'] ?? 0);
+            if ($otherCount <= 0 && !empty($parsedOtherDevices)) {
+                $otherCount = count($parsedOtherDevices);
+            }
+
             if ($otherCount > 0) {
                 $orderId = (string)($row['order_id'] ?? '');
                 $trackKey = $orderId !== ''
@@ -213,11 +228,9 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
                 }
             }
 
-            $otherDevices = trim((string)($row['other_devices'] ?? ''));
-            if ($otherDevices !== '') {
-                foreach (preg_split('/\r\n|\n|\r/', $otherDevices) as $otherDevice) {
-                    $otherDevice = trim((string)$otherDevice);
-                    if ($otherDevice !== '' && !in_array($otherDevice, $byMonth[$month][$clientKey]['other_devices'], true)) {
+            if (!empty($parsedOtherDevices)) {
+                foreach ($parsedOtherDevices as $otherDevice) {
+                    if (!in_array($otherDevice, $byMonth[$month][$clientKey]['other_devices'], true)) {
                         $byMonth[$month][$clientKey]['other_devices'][] = $otherDevice;
                     }
                 }
