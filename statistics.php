@@ -100,7 +100,7 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
         LEFT JOIN models m ON m.id = d.model_id
         LEFT JOIN manufacturers mf ON mf.id = m.manufacturer_id
         WHERE {$yearInstallExpr}
-        GROUP BY month_no, COALESCE(i.client_id, wo.client_id, 0), wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
+        GROUP BY {$monthInstallExpr}, COALESCE(i.client_id, wo.client_id, 0), wo.date, c.company_name, c.contact_name, m.id, mf.name, m.name
         ORDER BY month_no, wo.date
     ";
 
@@ -189,8 +189,11 @@ function statsGetYearlyMonthlyDetails(PDO $db, int $year, bool $isSqlite, bool $
 
             $otherCount = (int)($row['other_devices_count'] ?? 0);
             if ($otherCount > 0) {
-                $trackKey = '_odc_' . (string)($row['order_id'] ?? '');
-                if ($trackKey !== '_odc_' && !isset($byMonth[$month][$clientKey][$trackKey])) {
+                $orderId = (string)($row['order_id'] ?? '');
+                $trackKey = $orderId !== ''
+                    ? ('_odc_id_' . $orderId)
+                    : ('_odc_fallback_' . md5($month . '|' . $clientKey . '|' . (string)($row['order_date'] ?? '') . '|' . $otherCount));
+                if (!isset($byMonth[$month][$clientKey][$trackKey])) {
                     $byMonth[$month][$clientKey][$trackKey] = true;
                     $byMonth[$month][$clientKey]['total_other_count'] += $otherCount;
                 }
@@ -647,7 +650,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 '<div class="col-md-4">' +
                     '<div class="card border-0 shadow-sm h-100">' +
                         '<div class="card-body py-3">' +
-                            '<div class="small text-muted text-uppercase mb-1">Montaże GPS</div>' +
+                            '<div class="small text-muted text-uppercase mb-1"><i class="fas fa-satellite-dish me-1"></i>Montaże GPS</div>' +
                             '<div class="h4 mb-0 text-primary fw-bold">' + monthlyInstallCount + '</div>' +
                         '</div>' +
                     '</div>' +
@@ -655,7 +658,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 '<div class="col-md-4">' +
                     '<div class="card border-0 shadow-sm h-100">' +
                         '<div class="card-body py-3">' +
-                            '<div class="small text-muted text-uppercase mb-1">Inne urządzenia</div>' +
+                            '<div class="small text-muted text-uppercase mb-1"><i class="fas fa-boxes-stacked me-1"></i>Inne urządzenia</div>' +
                             '<div class="h4 mb-0 text-warning-emphasis fw-bold">' + monthlyOtherCount + '</div>' +
                         '</div>' +
                     '</div>' +
@@ -663,7 +666,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 '<div class="col-md-4">' +
                     '<div class="card border-0 shadow-sm h-100">' +
                         '<div class="card-body py-3">' +
-                            '<div class="small text-muted text-uppercase mb-1">Serwisy</div>' +
+                            '<div class="small text-muted text-uppercase mb-1"><i class="fas fa-screwdriver-wrench me-1"></i>Serwisy</div>' +
                             '<div class="h4 mb-0 text-dark fw-bold">' + monthlyServiceCount + '</div>' +
                         '</div>' +
                     '</div>' +
