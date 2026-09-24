@@ -653,12 +653,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function openMonthModal(monthIndex) {
-        var rawIndex = Number(monthIndex);
-        if (!Number.isFinite(rawIndex)) rawIndex = 0;
-        var normalizedIndex = rawIndex;
-        if (rawIndex >= 1 && rawIndex <= 12 && typeof monthlyDetails[rawIndex] === 'undefined' && typeof monthlyDetails[rawIndex - 1] !== 'undefined') {
-            normalizedIndex = rawIndex - 1;
-        }
+        var normalizedIndex = parseInt(monthIndex, 10);
+        if (!Number.isFinite(normalizedIndex)) normalizedIndex = 0;
         if (normalizedIndex < 0) normalizedIndex = 0;
         if (normalizedIndex > 11) normalizedIndex = 11;
 
