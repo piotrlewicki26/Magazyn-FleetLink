@@ -1393,9 +1393,9 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'status'                  => $d['status'],
                             'manufacturer_name'       => $d['manufacturer_name'],
                             'model_name'              => $d['model_name'],
-                            'vehicle_registration'    => $d['active_vehicle_registration'] ?? ($d['vehicle_registration'] ?? ''),
+                            'vehicle_registration'    => $d['active_vehicle_registration'] ?? '',
                             'client'                  => $d['active_company_name'] ?: ($d['active_contact_name'] ?? ''),
-                            'installation_date'       => $d['active_installation_date'] ?? ($d['installation_date'] ?? ''),
+                            'installation_date'       => $d['active_installation_date'] ?? '',
                             'purchase_date'           => $d['purchase_date'] ?? '',
                             'sale_date'               => $d['sale_date'] ?? '',
                             'notes'                   => $d['notes'] ?? '',
@@ -1470,9 +1470,9 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                                 'status'                 => $d['status'],
                                                 'manufacturer_name'      => $d['manufacturer_name'],
                                                 'model_name'             => $d['model_name'],
-                                                'vehicle_registration'   => $d['active_vehicle_registration'] ?? ($d['vehicle_registration'] ?? ''),
+                                                'vehicle_registration'   => $d['active_vehicle_registration'] ?? '',
                                                 'client'                 => $d['active_company_name'] ?: ($d['active_contact_name'] ?? ''),
-                                                'installation_date'      => $d['active_installation_date'] ?? ($d['installation_date'] ?? ''),
+                                                'installation_date'      => $d['active_installation_date'] ?? '',
                                                 'purchase_date'          => $d['purchase_date'] ?? '',
                                                 'sale_date'              => $d['sale_date'] ?? '',
                                                 'notes'                  => $d['notes'] ?? '',
@@ -1512,7 +1512,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 <?php if ($d['status'] === 'zamontowany'): ?>
                                 <li>
                                     <button type="button" class="dropdown-item"
-                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['active_vehicle_registration'] ?? ($d['vehicle_registration'] ?? ''))) ?>)">
+                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['active_vehicle_registration'] ?? '')) ?>)">
                                         <i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny
                                     </button>
                                 </li>
