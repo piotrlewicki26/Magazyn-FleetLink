@@ -10,6 +10,8 @@ require_once __DIR__ . '/includes/functions.php';
 
 date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
+$action = sanitize($_GET['action'] ?? 'list');
+$id = (int)($_GET['id'] ?? 0);
 function canAccessDevicesData(): bool {
     $user = getCurrentUser();
     if (!$user) return false;
@@ -27,8 +29,6 @@ if (!canAccessDevicesData()) {
 }
 
 $db = getDb();
-$action = sanitize($_GET['action'] ?? 'list');
-$id = (int)($_GET['id'] ?? 0);
 ensureTachoColumns($db);
 function canShowDeviceUninstallAction(array $deviceData, array $installationData): bool {
     return in_array((string)($deviceData['status'] ?? ''), ['zamontowany', 'do_demontazu'], true)
