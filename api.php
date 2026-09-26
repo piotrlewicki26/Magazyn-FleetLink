@@ -97,9 +97,14 @@ function apiRequireIntegrationToken(PDO $db): void {
     if ($authHeader === '') {
         apiJson(401, ['ok' => false, 'error' => 'Wymagany token API w nagłówku żądania.']);
     }
-    $providedToken = stripos($authHeader, 'Bearer ') === 0
-        ? trim((string)substr($authHeader, 7))
-        : trim((string)$authHeader);
+    $authHeaderTrim = trim((string)$authHeader);
+    if (stripos($authHeaderTrim, 'Bearer ') === 0) {
+        $providedToken = trim((string)substr($authHeaderTrim, 7));
+    } elseif (preg_match('/^\S+\s+/', $authHeaderTrim)) {
+        apiJson(401, ['ok' => false, 'error' => 'Nieobsługiwany schemat autoryzacji API.']);
+    } else {
+        $providedToken = $authHeaderTrim;
+    }
     if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
         apiJson(401, ['ok' => false, 'error' => 'Nieprawidłowy token API.']);
     }
@@ -124,14 +129,24 @@ $decoded = json_decode($rawBody ?: '', true);
 $jsonError = json_last_error();
 $hasRawBody = trim((string)$rawBody) !== '';
 $isJsonContentType = strpos($apiContentType, 'application/json') !== false;
-if ($hasRawBody && ($isJsonContentType || empty($_POST))) {
-    if ($jsonError !== JSON_ERROR_NONE) {
-        apiJson(400, ['ok' => false, 'error' => 'Nieprawidłowy JSON w treści żądania.']);
+if ($hasRawBody) {
+    if ($isJsonContentType) {
+        if ($jsonError !== JSON_ERROR_NONE) {
+            apiJson(400, ['ok' => false, 'error' => 'Nieprawidłowy JSON w treści żądania.']);
+        }
+        if (!is_array($decoded)) {
+            apiJson(400, ['ok' => false, 'error' => 'Body JSON musi być obiektem.']);
+        }
+        $input = $decoded;
+    } elseif (strpos($apiContentType, 'application/x-www-form-urlencoded') !== false || strpos($apiContentType, 'multipart/form-data') !== false) {
+        $input = $_POST;
+    } else {
+        if ($jsonError === JSON_ERROR_NONE && is_array($decoded)) {
+            $input = $decoded;
+        } else {
+            apiJson(415, ['ok' => false, 'error' => 'Nieobsługiwany typ treści żądania.']);
+        }
     }
-    if (!is_array($decoded)) {
-        apiJson(400, ['ok' => false, 'error' => 'Body JSON musi być obiektem.']);
-    }
-    $input = $decoded;
 } else {
     $input = $_POST;
 }

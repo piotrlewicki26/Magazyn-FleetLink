@@ -170,9 +170,8 @@ Autoryzacja:
 - API musi być włączone w **Ustawienia → System → API integracyjne**
 - token API przekazywany w nagłówku `Authorization`
 - akceptowane formaty:
-  - sam token w `Authorization`
+  - `Authorization: TWOJ_TOKEN_API`
   - `Authorization` z prefiksem `Bearer` i tokenem
-- przykład nagłówka: `Authorization: ******`
 
 Dostępne akcje (`POST`):
 
@@ -183,9 +182,9 @@ Dostępne akcje (`POST`):
 Przykład (utworzenie firmy):
 
 ```bash
-# użyj nagłówka: Authorization: ******
+# użyj nagłówka: Authorization: TWOJ_TOKEN_API
 curl -X POST "https://twojadomena.pl/api.php" \
-  -H "Authorization: ******" \
+  -H "Authorization: TWOJ_TOKEN_API" \
   -H "Content-Type: application/json" \
   -d '{
     "action":"create_company",
@@ -199,9 +198,9 @@ curl -X POST "https://twojadomena.pl/api.php" \
 Przykład (dodanie pojazdu):
 
 ```bash
-# użyj nagłówka: Authorization: ******
+# użyj nagłówka: Authorization: TWOJ_TOKEN_API
 curl -X POST "https://twojadomena.pl/api.php" \
-  -H "Authorization: ******" \
+  -H "Authorization: TWOJ_TOKEN_API" \
   -H "Content-Type: application/json" \
   -d '{
     "action":"add_vehicle",
@@ -216,9 +215,9 @@ curl -X POST "https://twojadomena.pl/api.php" \
 Przykład (aktywacja pojazdu):
 
 ```bash
-# użyj nagłówka: Authorization: ******
+# użyj nagłówka: Authorization: TWOJ_TOKEN_API
 curl -X POST "https://twojadomena.pl/api.php" \
-  -H "Authorization: ******" \
+  -H "Authorization: TWOJ_TOKEN_API" \
   -H "Content-Type: application/json" \
   -d '{
     "action":"activate_vehicle",
