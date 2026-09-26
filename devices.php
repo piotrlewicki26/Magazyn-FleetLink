@@ -24,8 +24,8 @@ function canShowDeviceUninstallAction(array $deviceData, array $installationData
         );
 }
  
- $requestAction = sanitize($_REQUEST['action'] ?? $action);
- $requestId = (int)($_REQUEST['id'] ?? $id);
+ $requestAction = sanitize($_GET['action'] ?? $action);
+ $requestId = (int)($_GET['id'] ?? $id);
 
 function ensureDeviceConfigFilesTable(PDO $db): void {
     static $checked = false;
@@ -104,10 +104,10 @@ if ($action === 'config_download' && $id > 0) {
 
 if ($requestAction === 'preview_data' && $requestId > 0) {
     header('Content-Type: application/json; charset=utf-8');
-    $previewSearch = sanitize($_REQUEST['search'] ?? '');
-    $previewModel = (int)($_REQUEST['model'] ?? 0);
-    $previewStatus = sanitize($_REQUEST['status'] ?? '');
-    $previewTacho = sanitize($_REQUEST['tacho'] ?? '');
+    $previewSearch = sanitize($_GET['search'] ?? '');
+    $previewModel = (int)($_GET['model'] ?? 0);
+    $previewStatus = sanitize($_GET['status'] ?? '');
+    $previewTacho = sanitize($_GET['tacho'] ?? '');
     try {
         $previewSql = "
             SELECT
@@ -3271,8 +3271,11 @@ window.openListActionsModal = (function () {
         if (!listActionsCfg || !listActionsCfg.id) return;
         if (!confirm('Czy na pewno odinstalować urządzenie ' + (listActionsCfg.serial || '') + '?\n\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\nNie = anuluj.')) return;
         hideListActionsModal();
-        document.getElementById('listUninstallActionDeviceId').value = listActionsCfg.id;
-        document.getElementById('listUninstallActionForm').submit();
+        var uninstallId = document.getElementById('listUninstallActionDeviceId');
+        var uninstallForm = document.getElementById('listUninstallActionForm');
+        if (!uninstallId || !uninstallForm) return;
+        uninstallId.value = listActionsCfg.id;
+        uninstallForm.submit();
     }
     function submitListDeleteAction() {
         if (!listActionsCfg || !listActionsCfg.id) return;
