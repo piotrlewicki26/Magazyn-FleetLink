@@ -51,6 +51,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(getBaseUrl() . 'settings.php');
     }
 
+    if ($postAction === 'save_api') {
+        $apiEnabled = !empty($_POST['api_enabled']) ? '1' : '0';
+        $apiToken = trim((string)($_POST['api_token'] ?? ''));
+        if ($apiEnabled === '1' && $apiToken === '') {
+            flashError('Aby włączyć API integracyjne, podaj token API.');
+            redirect(getBaseUrl() . 'settings.php');
+        }
+        $stmt = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
+        $stmt->execute(['api_enabled', $apiEnabled, $apiEnabled]);
+        if ($apiToken !== '') {
+            $stmt->execute(['api_token', $apiToken, $apiToken]);
+        }
+        flashSuccess('Ustawienia API zostały zapisane.');
+        redirect(getBaseUrl() . 'settings.php');
+    }
+
     $settingsToSave = [
         'company_name'      => sanitize($_POST['company_name'] ?? ''),
         'company_address'   => sanitize($_POST['company_address'] ?? ''),
@@ -456,6 +472,39 @@ $schemaFields = [
                 <a href="https://www.fleetlink.pl" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2">
                     <i class="fas fa-external-link-alt me-1"></i>www.fleetlink.pl
                 </a>
+            </div>
+            <div class="col-12">
+                <div class="card border shadow-none">
+                    <div class="card-header bg-transparent fw-semibold">
+                        <i class="fas fa-plug me-2 text-primary"></i>API integracyjne
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" class="row g-3">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="save_api">
+                            <div class="col-md-4">
+                                <div class="form-check form-switch mt-1">
+                                    <input class="form-check-input" type="checkbox" name="api_enabled" id="api_enabled" <?= ($settings['api_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="api_enabled">Włącz API</label>
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Token API</label>
+                                <input type="text" name="api_token" class="form-control" value="<?= h($settings['api_token'] ?? '') ?>" placeholder="Wprowadź silny token integracyjny">
+                                <small class="text-muted">Przekazuj token w nagłówku Authorization.</small>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Endpoint</label>
+                                <input type="text" class="form-control" value="<?= h(rtrim(getBaseUrl(), '/') . '/api.php') ?>" readonly>
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save me-2"></i>Zapisz ustawienia API
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

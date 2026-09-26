@@ -5,7 +5,6 @@
 define('IN_APP', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/db.php';
-require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/functions.php';
 
 date_default_timezone_set(APP_TIMEZONE);
@@ -29,37 +28,31 @@ function apiAuthHeader(): string {
     return '';
 }
 
-function apiRequireAdmin(PDO $db): array {
+function apiRequireIntegrationToken(PDO $db): void {
+    $cfgStmt = $db->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('api_enabled','api_token')");
+    $cfgStmt->execute();
+    $cfgRows = $cfgStmt->fetchAll();
+    $cfg = [];
+    foreach ($cfgRows as $row) {
+        $cfg[$row['key']] = (string)$row['value'];
+    }
+
+    if (($cfg['api_enabled'] ?? '0') !== '1') {
+        apiJson(403, ['ok' => false, 'error' => 'API jest wyłączone w ustawieniach systemu.']);
+    }
+    $expectedToken = trim((string)($cfg['api_token'] ?? ''));
+    if ($expectedToken === '') {
+        apiJson(503, ['ok' => false, 'error' => 'Brak skonfigurowanego tokenu API w ustawieniach.']);
+    }
+
     $authHeader = apiAuthHeader();
-    if (stripos($authHeader, 'Basic ') !== 0) {
-        header('WWW-Authenticate: Basic realm="FleetLink API"');
-        apiJson(401, ['ok' => false, 'error' => 'Brak poprawnej autoryzacji Basic.']);
+    if (stripos($authHeader, 'Bearer ') !== 0) {
+        apiJson(401, ['ok' => false, 'error' => 'Wymagany token API w nagłówku żądania.']);
     }
-
-    $decoded = base64_decode(substr($authHeader, 6), true);
-    if ($decoded === false || strpos($decoded, ':') === false) {
-        apiJson(401, ['ok' => false, 'error' => 'Nieprawidłowy format nagłówka Authorization.']);
+    $providedToken = trim((string)substr($authHeader, 7));
+    if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
+        apiJson(401, ['ok' => false, 'error' => 'Nieprawidłowy token API.']);
     }
-    [$email, $password] = explode(':', $decoded, 2);
-    $email = trim((string)$email);
-    $password = (string)$password;
-
-    if ($email === '' || $password === '') {
-        apiJson(401, ['ok' => false, 'error' => 'Brak loginu lub hasła API.']);
-    }
-
-    $userStmt = $db->prepare("SELECT id, name, email, role, password, active FROM users WHERE email = ? LIMIT 1");
-    $userStmt->execute([$email]);
-    $user = $userStmt->fetch();
-    if (!$user || (int)($user['active'] ?? 0) !== 1 || !password_verify($password, (string)$user['password'])) {
-        apiJson(401, ['ok' => false, 'error' => 'Nieprawidłowe dane logowania API.']);
-    }
-
-    if ((string)($user['role'] ?? '') !== 'admin') {
-        apiJson(403, ['ok' => false, 'error' => 'Brak uprawnień API. Wymagana rola Administrator.']);
-    }
-
-    return $user;
 }
 
 $db = getDb();
@@ -76,10 +69,15 @@ if ($method !== 'POST') {
     apiJson(405, ['ok' => false, 'error' => 'Dozwolone metody: GET, POST.']);
 }
 
-$apiUser = apiRequireAdmin($db);
+$apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? ''));
 $rawBody = file_get_contents('php://input');
 $decoded = json_decode($rawBody ?: '', true);
+$jsonError = json_last_error();
+if (strpos($apiContentType, 'application/json') !== false && trim((string)$rawBody) !== '' && $jsonError !== JSON_ERROR_NONE) {
+    apiJson(400, ['ok' => false, 'error' => 'Nieprawidłowy JSON w treści żądania.']);
+}
 $input = is_array($decoded) ? $decoded : $_POST;
+apiRequireIntegrationToken($db);
 $action = sanitize($input['action'] ?? '');
 
 if ($action === '') {
@@ -119,7 +117,6 @@ if ($action === 'create_company') {
             'contact_name' => $contactName,
             'active' => $active,
         ],
-        'by_user' => ['id' => (int)$apiUser['id'], 'email' => (string)$apiUser['email']],
     ]);
 }
 
@@ -143,14 +140,20 @@ if ($action === 'add_vehicle') {
         apiJson(404, ['ok' => false, 'error' => 'Klient nie istnieje.']);
     }
 
-    $dupCheck = $db->prepare("SELECT id FROM vehicles WHERE registration = ? AND client_id = ? LIMIT 1");
-    $dupCheck->execute([$registration, $clientId]);
-    if ($dupCheck->fetch()) {
+    $stmt = $db->prepare("
+        INSERT INTO vehicles (client_id, registration, make, model_name, year, vin, notes, active)
+        SELECT ?,?,?,?,?,?,?,?
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM vehicles
+            WHERE registration = ? AND client_id = ?
+            LIMIT 1
+        )
+    ");
+    $stmt->execute([$clientId, $registration, $make, $modelName, $year, $vin, $notes, $active, $registration, $clientId]);
+    if ((int)$stmt->rowCount() < 1) {
         apiJson(409, ['ok' => false, 'error' => 'Pojazd o tym numerze rejestracyjnym już istnieje dla tego klienta.']);
     }
-
-    $stmt = $db->prepare("INSERT INTO vehicles (client_id, registration, make, model_name, year, vin, notes, active) VALUES (?,?,?,?,?,?,?,?)");
-    $stmt->execute([$clientId, $registration, $make, $modelName, $year, $vin, $notes, $active]);
     $newId = (int)$db->lastInsertId();
 
     apiJson(201, [
@@ -162,7 +165,6 @@ if ($action === 'add_vehicle') {
             'registration' => $registration,
             'active' => $active,
         ],
-        'by_user' => ['id' => (int)$apiUser['id'], 'email' => (string)$apiUser['email']],
     ]);
 }
 
@@ -204,9 +206,7 @@ if ($action === 'activate_vehicle') {
             'registration' => (string)$vehicle['registration'],
             'active' => 1,
         ],
-        'by_user' => ['id' => (int)$apiUser['id'], 'email' => (string)$apiUser['email']],
     ]);
 }
 
 apiJson(400, ['ok' => false, 'error' => 'Nieobsługiwana akcja API.']);
-

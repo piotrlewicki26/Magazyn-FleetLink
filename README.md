@@ -167,8 +167,8 @@ Udostępniony endpoint: `api.php`
 - **POST** `api.php` — wywołanie akcji integracyjnej
 
 Autoryzacja:
-- HTTP **Basic Auth**
-- wymagany aktywny użytkownik z rolą **Administrator**
+- API musi być włączone w **Ustawienia → System → API integracyjne**
+- token API przekazywany w nagłówku `Authorization`
 
 Dostępne akcje (`POST`, JSON):
 
@@ -179,8 +179,8 @@ Dostępne akcje (`POST`, JSON):
 Przykład (utworzenie firmy):
 
 ```bash
+# dodaj nagłówek Authorization z tokenem API
 curl -X POST "https://twojadomena.pl/api.php" \
-  -u "admin@example.com:haslo" \
   -H "Content-Type: application/json" \
   -d '{
     "action":"create_company",
@@ -194,8 +194,8 @@ curl -X POST "https://twojadomena.pl/api.php" \
 Przykład (dodanie pojazdu):
 
 ```bash
+# dodaj nagłówek Authorization z tokenem API
 curl -X POST "https://twojadomena.pl/api.php" \
-  -u "admin@example.com:haslo" \
   -H "Content-Type: application/json" \
   -d '{
     "action":"add_vehicle",
@@ -210,8 +210,8 @@ curl -X POST "https://twojadomena.pl/api.php" \
 Przykład (aktywacja pojazdu):
 
 ```bash
+# dodaj nagłówek Authorization z tokenem API
 curl -X POST "https://twojadomena.pl/api.php" \
-  -u "admin@example.com:haslo" \
   -H "Content-Type: application/json" \
   -d '{
     "action":"activate_vehicle",
