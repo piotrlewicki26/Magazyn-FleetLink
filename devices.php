@@ -101,6 +101,11 @@ if ($action === 'config_download' && $id > 0) {
 
 if ($action === 'preview_data' && $id > 0) {
     header('Content-Type: application/json; charset=utf-8');
+    if (!isLoggedIn()) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Brak uprawnień.']);
+        exit;
+    }
     try {
         $previewStmt = $db->prepare("
             SELECT
@@ -3164,8 +3169,19 @@ function _hideListActionsModal() {
     modalInst.hide();
 }
 function _listActionsAfterClose(cb) {
-    _hideListActionsModal();
-    setTimeout(cb, 120);
+    var modalEl = document.getElementById('listActionsModal');
+    if (!modalEl || !cb) return;
+    var modalInst = bootstrap.Modal.getOrCreateInstance(modalEl);
+    if (!modalEl.classList.contains('show')) {
+        cb();
+        return;
+    }
+    var onceHidden = function () {
+        modalEl.removeEventListener('hidden.bs.modal', onceHidden);
+        cb();
+    };
+    modalEl.addEventListener('hidden.bs.modal', onceHidden);
+    modalInst.hide();
 }
 function _appendListActionButton(container, opts) {
     var button = document.createElement('button');
@@ -3187,7 +3203,22 @@ function openListPreviewModal() {
             credentials: 'same-origin',
             headers: { 'Accept': 'application/json' }
         })
-        .then(function (response) { return response.json(); })
+        .then(function (response) {
+            var responseType = (response.headers.get('content-type') || '').toLowerCase();
+            var isJson = responseType.indexOf('application/json') !== -1;
+            if (!response.ok) {
+                if (isJson) {
+                    return response.json().then(function (data) {
+                        throw new Error((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
+                    });
+                }
+                throw new Error('Nie udało się pobrać podglądu urządzenia.');
+            }
+            if (!isJson) {
+                throw new Error('Odpowiedź serwera ma nieprawidłowy format.');
+            }
+            return response.json();
+        })
         .then(function (data) {
             if (data && !data.error) {
                 showDevicePreview(data);
@@ -3195,8 +3226,8 @@ function openListPreviewModal() {
             }
             alert((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
         })
-        .catch(function () {
-            alert('Nie udało się pobrać podglądu urządzenia.');
+        .catch(function (error) {
+            alert((error && error.message) ? error.message : 'Nie udało się pobrać podglądu urządzenia.');
         });
     });
 }
