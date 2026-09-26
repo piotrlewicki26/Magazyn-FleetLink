@@ -14,7 +14,11 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
 function apiJson(int $statusCode, array $payload): void {
     http_response_code($statusCode);
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    try {
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    } catch (Throwable $e) {
+        echo '{"ok":false,"error":"Błąd serializacji odpowiedzi JSON."}';
+    }
     exit;
 }
 
@@ -29,11 +33,6 @@ function apiAuthHeader(): string {
 }
 
 function hasVehiclesApiUniqueIndex(PDO $db): bool {
-    static $checked = false;
-    static $ready = false;
-    if ($checked) return $ready;
-    $checked = true;
-
     try {
         $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
         if ($driver === 'sqlite') {
@@ -46,7 +45,6 @@ function hasVehiclesApiUniqueIndex(PDO $db): bool {
                 $colNames = array_map(static fn(array $c): string => (string)($c['name'] ?? ''), $idxCols);
                 sort($colNames);
                 if ($colNames === ['client_id', 'registration']) {
-                    $ready = true;
                     return true;
                 }
             }
@@ -66,11 +64,7 @@ function hasVehiclesApiUniqueIndex(PDO $db): bool {
             LIMIT 1
         ");
         $existsStmt->execute();
-        if ($existsStmt->fetchColumn()) {
-            $ready = true;
-            return true;
-        }
-        return false;
+        return (bool)$existsStmt->fetchColumn();
     } catch (Throwable $e) {
         return false;
     }
@@ -141,13 +135,12 @@ if ($hasRawBody) {
     } elseif (strpos($apiContentType, 'application/x-www-form-urlencoded') !== false || strpos($apiContentType, 'multipart/form-data') !== false) {
         $input = $_POST;
     } else {
-        if ($jsonError === JSON_ERROR_NONE && is_array($decoded)) {
-            $input = $decoded;
-        } else {
-            apiJson(415, ['ok' => false, 'error' => 'Nieobsługiwany typ treści żądania.']);
-        }
+        apiJson(415, ['ok' => false, 'error' => 'Nieobsługiwany typ treści żądania.']);
     }
 } else {
+    if ($isJsonContentType) {
+        apiJson(400, ['ok' => false, 'error' => 'Puste body JSON.']);
+    }
     $input = $_POST;
 }
 apiRequireIntegrationToken($db);
@@ -263,6 +256,9 @@ if ($action === 'activate_vehicle') {
     $vehicle = $vehStmt->fetch();
     if (!$vehicle) {
         apiJson(404, ['ok' => false, 'error' => 'Pojazd nie istnieje.']);
+    }
+    if ((int)$vehicle['client_id'] <= 0) {
+        apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — brak przypisanej firmy.']);
     }
     if ((int)$vehicle['client_id'] > 0 && empty($vehicle['client_exists'])) {
         apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — przypisany klient nie istnieje.']);
