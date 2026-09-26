@@ -1540,6 +1540,8 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                     <td>
                         <?php
                         $isMountedLike = in_array($d['status'], ['zamontowany', 'do_demontazu'], true);
+                        $statusValue = (string)($d['status'] ?? '');
+                        $modelNameValue = (string)($d['model_name'] ?? '');
                         $canUninstallFromData = canShowDeviceUninstallAction($d, [
                             'registration' => $d['active_vehicle_registration'] ?? null,
                             'installation_date' => $d['active_installation_date'] ?? null,
@@ -1553,11 +1555,10 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'tacho_firmware_version' => (string)($d['tacho_firmware_version'] ?? ''),
                             'can_edit' => isAdmin(),
                             'can_delete' => isAdmin(),
-                            'can_install' => in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false,
+                            'can_install' => in_array($statusValue, ['nowy', 'sprawny'], true) && stripos($modelNameValue, 'ECAN') === false,
                             'can_move' => $isMountedLike,
                             'can_uninstall' => $canUninstallFromData,
-                            'can_change_reg' => $d['status'] === 'zamontowany',
-                            'can_tacho' => stripos($d['model_name'], 'ECAN') === false,
+                            'can_change_reg' => $statusValue === 'zamontowany',
                         ];
                         ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -3339,18 +3340,16 @@ window.openListActionsModal = (function () {
             }
         });
         actionCount++;
-        if (listActionsCfg.can_tacho) {
-            appendListActionButton(body, {
-                label: 'Tachograf',
-                iconClass: 'fas fa-plug ' + (listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary'),
-                onClick: function () {
-                    listActionsAfterClose(function () {
-                        openTachoModal(listActionsCfg.id, listActionsCfg.tacho_connected ? 1 : 0, listActionsCfg.tacho_firmware_version || '');
-                    });
-                }
-            });
-            actionCount++;
-        }
+        appendListActionButton(body, {
+            label: 'Tachograf',
+            iconClass: 'fas fa-plug ' + (listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary'),
+            onClick: function () {
+                listActionsAfterClose(function () {
+                    openTachoModal(listActionsCfg.id, listActionsCfg.tacho_connected ? 1 : 0, listActionsCfg.tacho_firmware_version || '');
+                });
+            }
+        });
+        actionCount++;
         if (listActionsCfg.can_delete) {
             if (actionCount > 0) {
                 var dividerWrap = document.createElement('div');
