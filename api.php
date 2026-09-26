@@ -122,12 +122,11 @@ $apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP
 $rawBody = file_get_contents('php://input');
 $decoded = json_decode($rawBody ?: '', true);
 $jsonError = json_last_error();
-if (strpos($apiContentType, 'application/json') !== false && trim((string)$rawBody) !== '' && $jsonError !== JSON_ERROR_NONE) {
-    apiJson(400, ['ok' => false, 'error' => 'Nieprawidłowy JSON w treści żądania.']);
-}
-if (strpos($apiContentType, 'application/json') !== false) {
-    if (trim((string)$rawBody) === '') {
-        apiJson(400, ['ok' => false, 'error' => 'Puste body JSON.']);
+$hasRawBody = trim((string)$rawBody) !== '';
+$isJsonContentType = strpos($apiContentType, 'application/json') !== false;
+if ($hasRawBody && ($isJsonContentType || empty($_POST))) {
+    if ($jsonError !== JSON_ERROR_NONE) {
+        apiJson(400, ['ok' => false, 'error' => 'Nieprawidłowy JSON w treści żądania.']);
     }
     if (!is_array($decoded)) {
         apiJson(400, ['ok' => false, 'error' => 'Body JSON musi być obiektem.']);
@@ -196,10 +195,14 @@ if ($action === 'add_vehicle') {
         apiJson(500, ['ok' => false, 'error' => 'Brak wymaganego unikalnego indeksu dla pojazdów (client_id + registration).']);
     }
 
-    $clientCheck = $db->prepare("SELECT id FROM clients WHERE id = ? LIMIT 1");
+    $clientCheck = $db->prepare("SELECT id, active FROM clients WHERE id = ? LIMIT 1");
     $clientCheck->execute([$clientId]);
-    if (!$clientCheck->fetch()) {
+    $client = $clientCheck->fetch();
+    if (!$client) {
         apiJson(404, ['ok' => false, 'error' => 'Klient nie istnieje.']);
+    }
+    if ((int)($client['active'] ?? 0) !== 1) {
+        apiJson(409, ['ok' => false, 'error' => 'Nie można dodać pojazdu — przypisana firma jest nieaktywna.']);
     }
 
     try {

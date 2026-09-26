@@ -502,7 +502,7 @@ $schemaFields = [
                             <div class="col-md-8">
                                 <label class="form-label">Token API</label>
                                 <input type="password" name="api_token" class="form-control" value="" placeholder="Wprowadź nowy token (pozostaw puste, aby nie zmieniać)">
-                                <small class="text-muted">Nagłówek Authorization może zawierać sam token albo prefiks „Bear er” (bez spacji) + token.</small>
+                                <small class="text-muted">Nagłówek Authorization może zawierać sam token albo prefiks ****** token.</small>
                             </div>
                             <div class="col-md-4">
                                 <div class="form-check mt-4 pt-2">
