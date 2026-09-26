@@ -1233,14 +1233,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($action === 'list'): ?>
-<style>
-.devices-table-responsive {
-    overflow-y: visible;
-}
-.devices-table-responsive .dropdown-menu {
-    z-index: 1085;
-}
-</style>
 <!-- Filters -->
 <div class="card mb-3">
     <div class="card-body py-2">
