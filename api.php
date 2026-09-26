@@ -120,6 +120,9 @@ if ($method !== 'POST') {
 apiRequireIntegrationToken($db);
 
 $apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
+if ($apiContentType === '') {
+    apiJson(415, ['ok' => false, 'error' => 'Brak nagłówka Content-Type. Użyj application/json lub application/x-www-form-urlencoded.']);
+}
 $isFormContentType = strpos($apiContentType, 'application/x-www-form-urlencoded') !== false || strpos($apiContentType, 'multipart/form-data') !== false;
 $rawBody = file_get_contents('php://input');
 $hasRawBody = trim((string)$rawBody) !== '';
