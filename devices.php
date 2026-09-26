@@ -1063,6 +1063,8 @@ if ($action === 'list') {
                m.name as model_name, mf.name as manufacturer_name,
                ai.registration as active_vehicle_registration,
                ai.installation_date as active_installation_date,
+               ai.contact_name as active_contact_name,
+               ai.company_name as active_company_name,
                v.registration as vehicle_registration,
                c.contact_name, c.company_name,
                i.installation_date, i.status as inst_status
@@ -1070,9 +1072,10 @@ if ($action === 'list') {
         JOIN models m ON m.id = d.model_id
         JOIN manufacturers mf ON mf.id = m.manufacturer_id
         LEFT JOIN (
-            SELECT i4.device_id, i4.installation_date, v4.registration
+            SELECT i4.device_id, i4.installation_date, v4.registration, c4.contact_name, c4.company_name
             FROM installations i4
             LEFT JOIN vehicles v4 ON v4.id = i4.vehicle_id
+            LEFT JOIN clients c4 ON c4.id = i4.client_id
             WHERE i4.status = 'aktywna'
               AND i4.id = (
                   SELECT MAX(i5.id)
@@ -1230,6 +1233,14 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($action === 'list'): ?>
+<style>
+.devices-table-responsive {
+    overflow-y: visible;
+}
+.devices-table-responsive .dropdown-menu {
+    z-index: 1085;
+}
+</style>
 <!-- Filters -->
 <div class="card mb-3">
     <div class="card-body py-2">
@@ -1347,7 +1358,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
             <?php endforeach; ?>
         </div>
     </div>
-    <div class="table-responsive">
+    <div class="table-responsive devices-table-responsive">
         <?php
         // 10 fixed columns + Akcje = 11 base; admin gets +1 for checkbox + 1 for Cena zakupu = 13
         $devListColspan = isAdmin() ? 13 : 11;
@@ -1383,7 +1394,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'manufacturer_name'       => $d['manufacturer_name'],
                             'model_name'              => $d['model_name'],
                             'vehicle_registration'    => $d['active_vehicle_registration'] ?? ($d['vehicle_registration'] ?? ''),
-                            'client'                  => $d['company_name'] ?: ($d['contact_name'] ?? ''),
+                            'client'                  => $d['active_company_name'] ?: ($d['active_contact_name'] ?? ''),
                             'installation_date'       => $d['active_installation_date'] ?? ($d['installation_date'] ?? ''),
                             'purchase_date'           => $d['purchase_date'] ?? '',
                             'sale_date'               => $d['sale_date'] ?? '',
@@ -1405,11 +1416,11 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                         <span class="text-muted">—</span>
                         <?php endif; ?>
                     </td>
-                    <td><?= $d['vehicle_registration'] ? h($d['vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
+                    <td><?= $d['active_vehicle_registration'] ? h($d['active_vehicle_registration']) : '<span class="text-muted">—</span>' ?></td>
                     <td><?= $d['sim_number'] ? h($d['sim_number']) : '<span class="text-muted">—</span>' ?></td>
-                    <td><?php $clientLabel = $d['company_name'] ?: ($d['contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
+                    <td><?php $clientLabel = $d['active_company_name'] ?: ($d['active_contact_name'] ?: null); echo $clientLabel ? h($clientLabel) : '<span class="text-muted">—</span>'; ?></td>
                     <td>
-                        <?= $d['installation_date'] ? formatDate($d['installation_date']) : '<span class="text-muted">—</span>' ?>
+                        <?= $d['active_installation_date'] ? formatDate($d['active_installation_date']) : '<span class="text-muted">—</span>' ?>
                     </td>
                     <td>
                         <?= $d['purchase_date'] ? formatDate($d['purchase_date']) : '<span class="text-muted">—</span>' ?>
@@ -1441,7 +1452,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                         </form>
                         <?php endif; ?>
                         <div class="dropdown">
-                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-display="static" data-bs-boundary="viewport" aria-expanded="false">
                                 Akcje
                             </button>
                             <ul class="dropdown-menu dropdown-menu-end">
@@ -1460,7 +1471,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                                 'manufacturer_name'      => $d['manufacturer_name'],
                                                 'model_name'             => $d['model_name'],
                                                 'vehicle_registration'   => $d['active_vehicle_registration'] ?? ($d['vehicle_registration'] ?? ''),
-                                                'client'                 => $d['company_name'] ?: ($d['contact_name'] ?? ''),
+                                                'client'                 => $d['active_company_name'] ?: ($d['active_contact_name'] ?? ''),
                                                 'installation_date'      => $d['active_installation_date'] ?? ($d['installation_date'] ?? ''),
                                                 'purchase_date'          => $d['purchase_date'] ?? '',
                                                 'sale_date'              => $d['sale_date'] ?? '',
