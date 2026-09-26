@@ -1350,7 +1350,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
             <?php endforeach; ?>
         </div>
     </div>
-    <div class="table-responsive-md">
+    <div class="table-responsive">
         <?php
         // 10 fixed columns + Akcje = 11 base; admin gets +1 for checkbox + 1 for Cena zakupu = 13
         $devListColspan = isAdmin() ? 13 : 11;
@@ -1444,7 +1444,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                         </form>
                         <?php endif; ?>
                         <div class="dropdown">
-                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" data-bs-reference="toggle" aria-expanded="false">
                                 Akcje
                             </button>
                             <ul class="dropdown-menu dropdown-menu-end">
