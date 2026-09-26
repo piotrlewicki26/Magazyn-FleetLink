@@ -1551,7 +1551,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'registration' => (string)($d['active_vehicle_registration'] ?? ''),
                             'tacho_connected' => (int)($d['tacho_connected'] ?? 0),
                             'tacho_firmware_version' => (string)($d['tacho_firmware_version'] ?? ''),
-                            'can_edit' => isAdmin(),
+                            'can_edit' => true,
                             'can_delete' => isAdmin(),
                             'can_install' => in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false,
                             'can_move' => $isMountedLike,
@@ -3260,8 +3260,10 @@ window.openListActionsModal = (function () {
     }
     return function (cfg) {
         listActionsCfg = cfg || {};
-        document.getElementById('listActionsDeviceLabel').textContent = (listActionsCfg.serial || ('ID ' + (listActionsCfg.id || '')));
+        var labelEl = document.getElementById('listActionsDeviceLabel');
         var body = document.getElementById('listActionsBody');
+        if (!labelEl || !body) return;
+        labelEl.textContent = (listActionsCfg.serial || ('ID ' + (listActionsCfg.id || '')));
         var actionCount = 0;
         body.innerHTML = '';
         appendListActionButton(body, {
