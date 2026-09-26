@@ -121,12 +121,12 @@ if ($method !== 'POST') {
 apiRequireIntegrationToken($db);
 
 $apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
-if ($apiContentType === '') {
-    apiJson(415, ['ok' => false, 'error' => 'Brak nagłówka Content-Type. Użyj application/json lub application/x-www-form-urlencoded.']);
-}
 $isFormContentType = strpos($apiContentType, 'application/x-www-form-urlencoded') !== false || strpos($apiContentType, 'multipart/form-data') !== false;
 $rawBody = file_get_contents('php://input');
 $hasRawBody = trim((string)$rawBody) !== '';
+if ($hasRawBody && $apiContentType === '') {
+    apiJson(415, ['ok' => false, 'error' => 'Brak nagłówka Content-Type dla żądania z body.']);
+}
 $isJsonContentType = strpos($apiContentType, 'application/json') !== false;
 if ($isFormContentType) {
     $input = $_POST;
@@ -148,7 +148,7 @@ if ($isFormContentType) {
     if ($isJsonContentType) {
         apiJson(400, ['ok' => false, 'error' => 'Puste body JSON.']);
     }
-    $input = $_POST;
+    $input = !empty($_POST) ? $_POST : $_GET;
 }
 $action = sanitize($input['action'] ?? '');
 
@@ -176,8 +176,12 @@ if ($action === 'create_company') {
         apiJson(422, ['ok' => false, 'error' => 'Nieprawidłowy adres e-mail.']);
     }
 
-    $stmt = $db->prepare("INSERT INTO clients (company_name, contact_name, email, phone, address, city, postal_code, nip, notes, active) VALUES (?,?,?,?,?,?,?,?,?,?)");
-    $stmt->execute([$companyName, $contactName, $email, $phone, $address, $city, $postalCode, $nip, $notes, $active]);
+    try {
+        $stmt = $db->prepare("INSERT INTO clients (company_name, contact_name, email, phone, address, city, postal_code, nip, notes, active) VALUES (?,?,?,?,?,?,?,?,?,?)");
+        $stmt->execute([$companyName, $contactName, $email, $phone, $address, $city, $postalCode, $nip, $notes, $active]);
+    } catch (PDOException $e) {
+        apiJson(500, ['ok' => false, 'error' => 'Nie udało się utworzyć firmy.']);
+    }
     $newId = (int)$db->lastInsertId();
 
     apiJson(201, [

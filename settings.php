@@ -500,8 +500,8 @@ $schemaFields = [
                                 </div>
                             </div>
                             <div class="col-md-8">
-                                <label class="form-label">Token API</label>
-                                <input type="password" name="api_token" class="form-control" value="" placeholder="Wprowadź nowy token (pozostaw puste, aby nie zmieniać)">
+                                <label class="form-label" for="api_token">Token API</label>
+                                <input type="password" name="api_token" id="api_token" class="form-control" value="" placeholder="Wprowadź nowy token (pozostaw puste, aby nie zmieniać)">
                                 <small class="text-muted">Przykład nagłówka: Authorization: TWOJ_TOKEN_API (opcjonalnie także z prefiksem Bearer).</small>
                             </div>
                             <div class="col-md-4">
@@ -511,8 +511,8 @@ $schemaFields = [
                                 </div>
                             </div>
                             <div class="col-12">
-                                <label class="form-label">Endpoint</label>
-                                <input type="text" class="form-control" value="<?= h(rtrim(getBaseUrl(), '/') . '/api.php') ?>" readonly>
+                                <label class="form-label" for="api_endpoint">Endpoint</label>
+                                <input type="text" id="api_endpoint" class="form-control" value="<?= h(rtrim(getBaseUrl(), '/') . '/api.php') ?>" readonly>
                             </div>
                             <div class="col-12">
                                 <button type="submit" class="btn btn-primary">
