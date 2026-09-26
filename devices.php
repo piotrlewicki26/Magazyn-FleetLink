@@ -1339,6 +1339,33 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
 </form>
 <?php endif; ?>
 
+<form id="listUninstallActionForm" method="POST" class="d-none">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="uninstall_device">
+    <input type="hidden" name="id" id="listUninstallActionDeviceId" value="">
+    <input type="hidden" name="return_to" value="list">
+</form>
+<?php if (isAdmin()): ?>
+<form id="listDeleteActionForm" method="POST" class="d-none">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="delete">
+    <input type="hidden" name="id" id="listDeleteActionDeviceId" value="">
+</form>
+<?php endif; ?>
+<div class="modal fade" id="listActionsModal" tabindex="-1" aria-labelledby="listActionsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="listActionsModalLabel"><i class="fas fa-list-check me-2 text-primary"></i>Akcje: <span id="listActionsDeviceLabel">Urządzenie</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-2">
+                <div class="list-group list-group-flush" id="listActionsBody"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span>Urządzenia (<?= $totalDevices ?>)</span>
@@ -1427,113 +1454,49 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'registration' => $d['active_vehicle_registration'] ?? null,
                             'installation_date' => $d['active_installation_date'] ?? null,
                         ]);
+                        $listActionsPayload = [
+                            'id' => (int)$d['id'],
+                            'serial' => (string)$d['serial_number'],
+                            'sim' => (string)($d['sim_number'] ?? ''),
+                            'status' => (string)$d['status'],
+                            'model_name' => (string)$d['model_name'],
+                            'registration' => (string)($d['active_vehicle_registration'] ?? ''),
+                            'tacho_connected' => (int)($d['tacho_connected'] ?? 0),
+                            'tacho_firmware_version' => (string)($d['tacho_firmware_version'] ?? ''),
+                            'can_edit' => isAdmin(),
+                            'can_delete' => isAdmin(),
+                            'can_install' => in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false,
+                            'can_move' => $isMountedLike,
+                            'can_uninstall' => $canUninstallFromData,
+                            'can_change_reg' => $d['status'] === 'zamontowany',
+                            'can_tacho' => stripos($d['model_name'], 'ECAN') === false,
+                            'preview' => [
+                                'id'                     => $d['id'],
+                                'serial_number'          => $d['serial_number'],
+                                'imei'                   => $d['imei'] ?? '',
+                                'sim_number'             => $d['sim_number'] ?? '',
+                                'ble_id'                 => $d['ble_id'] ?? '',
+                                'major'                  => $d['major'] ?? null,
+                                'minor'                  => $d['minor'] ?? null,
+                                'mac_address'            => $d['mac_address'] ?? '',
+                                'status'                 => $d['status'],
+                                'manufacturer_name'      => $d['manufacturer_name'],
+                                'model_name'             => $d['model_name'],
+                                'vehicle_registration'   => $d['active_vehicle_registration'] ?? '',
+                                'client'                 => $d['active_company_name'] ?: ($d['active_contact_name'] ?? ''),
+                                'installation_date'      => $d['active_installation_date'] ?? '',
+                                'purchase_date'          => $d['purchase_date'] ?? '',
+                                'sale_date'              => $d['sale_date'] ?? '',
+                                'notes'                  => $d['notes'] ?? '',
+                                'tacho_connected'        => (int)($d['tacho_connected'] ?? 0),
+                                'tacho_firmware_version' => $d['tacho_firmware_version'] ?? '',
+                            ],
+                        ];
                         ?>
-                        <?php if ($canUninstallFromData): ?>
-                        <form id="uninstallDeviceForm<?= $d['id'] ?>" method="POST" class="d-none">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="uninstall_device">
-                            <input type="hidden" name="id" value="<?= $d['id'] ?>">
-                            <input type="hidden" name="return_to" value="list">
-                        </form>
-                        <?php endif; ?>
-                        <?php if (isAdmin()): ?>
-                        <form id="deleteDeviceForm<?= $d['id'] ?>" method="POST" class="d-none">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="id" value="<?= $d['id'] ?>">
-                        </form>
-                        <?php endif; ?>
-                        <div class="dropdown">
-                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" data-bs-reference="toggle" aria-expanded="false">
-                                Akcje
-                            </button>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li>
-                                    <button type="button" class="dropdown-item"
-                                            onclick="showDevicePreview(<?= htmlspecialchars(json_encode([
-                                                'id'                     => $d['id'],
-                                                'serial_number'          => $d['serial_number'],
-                                                'imei'                   => $d['imei'] ?? '',
-                                                'sim_number'             => $d['sim_number'] ?? '',
-                                                'ble_id'                 => $d['ble_id'] ?? '',
-                                                'major'                  => $d['major'] ?? null,
-                                                'minor'                  => $d['minor'] ?? null,
-                                                'mac_address'            => $d['mac_address'] ?? '',
-                                                'status'                 => $d['status'],
-                                                'manufacturer_name'      => $d['manufacturer_name'],
-                                                'model_name'             => $d['model_name'],
-                                                'vehicle_registration'   => $d['active_vehicle_registration'] ?? '',
-                                                'client'                 => $d['active_company_name'] ?: ($d['active_contact_name'] ?? ''),
-                                                'installation_date'      => $d['active_installation_date'] ?? '',
-                                                'purchase_date'          => $d['purchase_date'] ?? '',
-                                                'sale_date'              => $d['sale_date'] ?? '',
-                                                'notes'                  => $d['notes'] ?? '',
-                                                'tacho_connected'        => (int)($d['tacho_connected'] ?? 0),
-                                                'tacho_firmware_version' => $d['tacho_firmware_version'] ?? '',
-                                            ]), ENT_QUOTES) ?>)">
-                                        <i class="fas fa-eye me-2 text-info"></i>Podgląd
-                                    </button>
-                                </li>
-                                <?php if (isAdmin()): ?>
-                                <li><a href="devices.php?action=edit&id=<?= $d['id'] ?>" class="dropdown-item"><i class="fas fa-edit me-2 text-primary"></i>Edytuj</a></li>
-                                <?php endif; ?>
-                                <?php if (in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false): ?>
-                                <li>
-                                    <button type="button" class="dropdown-item"
-                                            onclick="openInstallModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
-                                        <i class="fas fa-car me-2 text-success"></i>Montaż
-                                    </button>
-                                </li>
-                                <?php endif; ?>
-                                <?php if ($isMountedLike): ?>
-                                <li>
-                                    <button type="button" class="dropdown-item"
-                                            onclick="openMoveDeviceModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['serial_number'])) ?>, 'list')">
-                                        <i class="fas fa-exchange-alt me-2 text-warning"></i>Przenieś do innej firmy
-                                    </button>
-                                </li>
-                                <?php endif; ?>
-                                <?php if ($canUninstallFromData): ?>
-                                <li>
-                                    <button type="button" class="dropdown-item text-danger"
-                                            onclick="if(confirm('Czy na pewno odinstalować urządzenie <?= h($d['serial_number']) ?>?\\n\\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\\nNie = anuluj.')){document.getElementById('uninstallDeviceForm<?= $d['id'] ?>').submit();}">
-                                        <i class="fas fa-unlink me-2"></i>Odinstaluj
-                                    </button>
-                                </li>
-                                <?php endif; ?>
-                                <?php if ($d['status'] === 'zamontowany'): ?>
-                                <li>
-                                    <button type="button" class="dropdown-item"
-                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= json_encode($d['active_vehicle_registration'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>)">
-                                        <i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny
-                                    </button>
-                                </li>
-                                <?php endif; ?>
-                                <li>
-                                    <button type="button" class="dropdown-item"
-                                            onclick="openSimEdit(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['sim_number'] ?? '')) ?>)">
-                                        <i class="fas fa-sim-card me-2 text-secondary"></i>Zmień nr SIM
-                                    </button>
-                                </li>
-                                <?php if (stripos($d['model_name'], 'ECAN') === false): ?>
-                                <li>
-                                    <button type="button" class="dropdown-item"
-                                            onclick="openTachoModal(<?= $d['id'] ?>, <?= (int)($d['tacho_connected'] ?? 0) ?>, <?= htmlspecialchars(json_encode($d['tacho_firmware_version'] ?? '')) ?>)">
-                                        <i class="fas fa-plug me-2 <?= $d['tacho_connected'] ? 'text-primary' : 'text-secondary' ?>"></i>Tachograf
-                                    </button>
-                                </li>
-                                <?php endif; ?>
-                                <?php if (isAdmin()): ?>
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <button type="button" class="dropdown-item text-danger"
-                                            onclick="if(confirm('Czy na pewno chcesz usunąć urządzenie <?= h($d['serial_number']) ?>? Tej operacji nie można cofnąć.')){document.getElementById('deleteDeviceForm<?= $d['id'] ?>').submit();}">
-                                        <i class="fas fa-trash me-2"></i>Usuń urządzenie
-                                    </button>
-                                </li>
-                                <?php endif; ?>
-                            </ul>
-                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                onclick="openListActionsModal(<?= htmlspecialchars(json_encode($listActionsPayload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES) ?>)">
+                            Akcje
+                        </button>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -3139,6 +3102,74 @@ function openListChangeRegModal(deviceId, currentReg) {
     document.getElementById('listChangeRegDeviceId').value = deviceId;
     document.getElementById('listChangeRegInput').value = currentReg;
     new bootstrap.Modal(document.getElementById('listChangeRegModal')).show();
+}
+
+var _listActionsCfg = null;
+function _hideListActionsModal() {
+    var modalEl = document.getElementById('listActionsModal');
+    if (!modalEl) return;
+    var modalInst = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modalInst.hide();
+}
+function _listActionsAfterClose(cb) {
+    _hideListActionsModal();
+    setTimeout(cb, 120);
+}
+function _listActionsEsc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function _listActionButton(label, iconClass, extraClass, onClickJs) {
+    return '<button type="button" class="list-group-item list-group-item-action ' + (extraClass || '') + '" onclick="' + onClickJs + '">' +
+        '<i class="' + iconClass + ' me-2"></i>' + label + '</button>';
+}
+function openListActionsModal(cfg) {
+    _listActionsCfg = cfg || {};
+    document.getElementById('listActionsDeviceLabel').textContent = (_listActionsCfg.serial || ('ID ' + (_listActionsCfg.id || '')));
+    var body = document.getElementById('listActionsBody');
+    var html = '';
+    html += _listActionButton('Podgląd', 'fas fa-eye text-info', '', "_listActionsAfterClose(function(){ showDevicePreview(_listActionsCfg.preview || {}); })");
+    if (_listActionsCfg.can_edit) {
+        html += _listActionButton('Edytuj', 'fas fa-edit text-primary', '', "_listActionsAfterClose(function(){ window.location.href='devices.php?action=edit&id=' + encodeURIComponent(_listActionsCfg.id); })");
+    }
+    if (_listActionsCfg.can_install) {
+        html += _listActionButton('Montaż', 'fas fa-car text-success', '', "_listActionsAfterClose(function(){ openInstallModal(_listActionsCfg.id, _listActionsCfg.serial || '', _listActionsCfg.sim || ''); })");
+    }
+    if (_listActionsCfg.can_move) {
+        html += _listActionButton('Przenieś do innej firmy', 'fas fa-exchange-alt text-warning', '', "_listActionsAfterClose(function(){ openMoveDeviceModal(_listActionsCfg.id, _listActionsCfg.serial || '', 'list'); })");
+    }
+    if (_listActionsCfg.can_uninstall) {
+        html += _listActionButton('Odinstaluj', 'fas fa-unlink text-danger', 'text-danger', "submitListUninstallAction()");
+    }
+    if (_listActionsCfg.can_change_reg) {
+        html += _listActionButton('Zmień nr rejestracyjny', 'fas fa-hashtag text-info', '', "_listActionsAfterClose(function(){ openListChangeRegModal(_listActionsCfg.id, _listActionsCfg.registration || ''); })");
+    }
+    html += _listActionButton('Zmień nr SIM', 'fas fa-sim-card text-secondary', '', "_listActionsAfterClose(function(){ openSimEdit(_listActionsCfg.id, _listActionsCfg.sim || ''); })");
+    if (_listActionsCfg.can_tacho) {
+        html += _listActionButton('Tachograf', 'fas fa-plug ' + ((_listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary')), '', "_listActionsAfterClose(function(){ openTachoModal(_listActionsCfg.id, _listActionsCfg.tacho_connected ? 1 : 0, _listActionsCfg.tacho_firmware_version || ''); })");
+    }
+    if (_listActionsCfg.can_delete) {
+        html += '<div class="list-group-item p-0 border-0"><hr class="my-2"></div>';
+        html += _listActionButton('Usuń urządzenie', 'fas fa-trash text-danger', 'text-danger', "submitListDeleteAction()");
+    }
+    body.innerHTML = html || '<div class="text-muted small px-2 py-3">Brak dostępnych akcji.</div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('listActionsModal')).show();
+}
+function submitListUninstallAction() {
+    if (!_listActionsCfg || !_listActionsCfg.id) return;
+    if (!confirm('Czy na pewno odinstalować urządzenie ' + (_listActionsCfg.serial || '') + '?\n\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\nNie = anuluj.')) return;
+    _hideListActionsModal();
+    document.getElementById('listUninstallActionDeviceId').value = _listActionsCfg.id;
+    document.getElementById('listUninstallActionForm').submit();
+}
+function submitListDeleteAction() {
+    if (!_listActionsCfg || !_listActionsCfg.id) return;
+    if (!confirm('Czy na pewno chcesz usunąć urządzenie ' + (_listActionsCfg.serial || '') + '? Tej operacji nie można cofnąć.')) return;
+    _hideListActionsModal();
+    var deleteId = document.getElementById('listDeleteActionDeviceId');
+    var deleteForm = document.getElementById('listDeleteActionForm');
+    if (!deleteId || !deleteForm) return;
+    deleteId.value = _listActionsCfg.id;
+    deleteForm.submit();
 }
 </script>
 
