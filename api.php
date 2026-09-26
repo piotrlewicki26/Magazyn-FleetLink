@@ -119,12 +119,12 @@ if ($method !== 'POST') {
 
 $apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
 $rawBody = file_get_contents('php://input');
-$decoded = json_decode($rawBody ?: '', true);
-$jsonError = json_last_error();
 $hasRawBody = trim((string)$rawBody) !== '';
 $isJsonContentType = strpos($apiContentType, 'application/json') !== false;
 if ($hasRawBody) {
     if ($isJsonContentType) {
+        $decoded = json_decode($rawBody, true);
+        $jsonError = json_last_error();
         if ($jsonError !== JSON_ERROR_NONE) {
             apiJson(400, ['ok' => false, 'error' => 'Nieprawidłowy JSON w treści żądania.']);
         }
@@ -260,7 +260,7 @@ if ($action === 'activate_vehicle') {
     if ((int)$vehicle['client_id'] <= 0) {
         apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — brak przypisanej firmy.']);
     }
-    if ((int)$vehicle['client_id'] > 0 && empty($vehicle['client_exists'])) {
+    if ((int)$vehicle['client_id'] > 0 && $vehicle['client_exists'] === null) {
         apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — przypisany klient nie istnieje.']);
     }
     if ((int)$vehicle['client_id'] > 0 && (int)$vehicle['client_active'] !== 1) {
