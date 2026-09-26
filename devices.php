@@ -23,47 +23,9 @@ function canShowDeviceUninstallAction(array $deviceData, array $installationData
             || !empty($installationData['installation_date'])
         );
 }
-function canAccessDeviceById(PDO $db, int $deviceId): bool {
-    if ($deviceId <= 0 || !isLoggedIn()) return false;
-    $search = sanitize($_GET['search'] ?? '');
-    $filterModel = (int)($_GET['model'] ?? 0);
-    $filterStatus = sanitize($_GET['status'] ?? '');
-    $filterTacho = sanitize($_GET['tacho'] ?? '');
-
-    // Keep preview endpoint visibility aligned with the current list query scope.
-    $sql = "
-        SELECT d.id
-        FROM devices d
-        JOIN models m ON m.id = d.model_id
-        JOIN manufacturers mf ON mf.id = m.manufacturer_id
-        WHERE d.id = ?
-    ";
-    $params = [$deviceId];
-    if ($search !== '') {
-        $sql .= " AND (d.serial_number LIKE ? OR d.imei LIKE ? OR m.name LIKE ? OR mf.name LIKE ?)";
-        $params[] = "%$search%";
-        $params[] = "%$search%";
-        $params[] = "%$search%";
-        $params[] = "%$search%";
-    }
-    if ($filterModel > 0) {
-        $sql .= " AND d.model_id = ?";
-        $params[] = $filterModel;
-    }
-    if ($filterStatus !== '') {
-        $sql .= " AND d.status = ?";
-        $params[] = $filterStatus;
-    }
-    if ($filterTacho === '1') {
-        $sql .= " AND COALESCE(d.tacho_connected,0)=1";
-    } elseif ($filterTacho === '0') {
-        $sql .= " AND COALESCE(d.tacho_connected,0)=0";
-    }
-    $sql .= " LIMIT 1";
-    $checkStmt = $db->prepare($sql);
-    $checkStmt->execute($params);
-    return (bool)$checkStmt->fetchColumn();
-}
+ 
+ $requestAction = sanitize($_REQUEST['action'] ?? $action);
+ $requestId = (int)($_REQUEST['id'] ?? $id);
 
 function ensureDeviceConfigFilesTable(PDO $db): void {
     static $checked = false;
@@ -140,15 +102,14 @@ if ($action === 'config_download' && $id > 0) {
     exit;
 }
 
-if ($action === 'preview_data' && $id > 0) {
+if ($requestAction === 'preview_data' && $requestId > 0) {
     header('Content-Type: application/json; charset=utf-8');
-    if (!canAccessDeviceById($db, $id)) {
-        http_response_code(403);
-        echo json_encode(['error' => 'Brak uprawnień.']);
-        exit;
-    }
+    $previewSearch = sanitize($_REQUEST['search'] ?? '');
+    $previewModel = (int)($_REQUEST['model'] ?? 0);
+    $previewStatus = sanitize($_REQUEST['status'] ?? '');
+    $previewTacho = sanitize($_REQUEST['tacho'] ?? '');
     try {
-        $previewStmt = $db->prepare("
+        $previewSql = "
             SELECT
                 d.id,
                 d.serial_number,
@@ -182,9 +143,31 @@ if ($action === 'preview_data' && $id > 0) {
             )
             LEFT JOIN clients c ON ai.client_id = c.id
             WHERE d.id = ?
-            LIMIT 1
-        ");
-        $previewStmt->execute([$id]);
+        ";
+        $previewParams = [$requestId];
+        if ($previewSearch !== '') {
+            $previewSql .= " AND (d.serial_number LIKE ? OR d.imei LIKE ? OR m.name LIKE ? OR mf.name LIKE ?)";
+            $previewParams[] = "%$previewSearch%";
+            $previewParams[] = "%$previewSearch%";
+            $previewParams[] = "%$previewSearch%";
+            $previewParams[] = "%$previewSearch%";
+        }
+        if ($previewModel > 0) {
+            $previewSql .= " AND d.model_id = ?";
+            $previewParams[] = $previewModel;
+        }
+        if ($previewStatus !== '') {
+            $previewSql .= " AND d.status = ?";
+            $previewParams[] = $previewStatus;
+        }
+        if ($previewTacho === '1') {
+            $previewSql .= " AND COALESCE(d.tacho_connected,0)=1";
+        } elseif ($previewTacho === '0') {
+            $previewSql .= " AND COALESCE(d.tacho_connected,0)=0";
+        }
+        $previewSql .= " LIMIT 1";
+        $previewStmt = $db->prepare($previewSql);
+        $previewStmt->execute($previewParams);
         $row = $previewStmt->fetch();
         if (!$row) {
             http_response_code(404);
@@ -3230,8 +3213,6 @@ window.openListActionsModal = (function () {
         var button = document.createElement('button');
         button.type = 'button';
         button.className = 'list-group-item list-group-item-action ' + (opts.extraClass || '');
-        button.setAttribute('role', 'menuitem');
-        button.setAttribute('aria-label', opts.label || 'Akcja');
         var icon = document.createElement('i');
         icon.className = (opts.iconClass || '') + ' me-2';
         button.appendChild(icon);
@@ -3309,8 +3290,6 @@ window.openListActionsModal = (function () {
         var labelEl = document.getElementById('listActionsDeviceLabel');
         var body = document.getElementById('listActionsBody');
         if (!labelEl || !body) return;
-        body.setAttribute('role', 'menu');
-        body.setAttribute('aria-label', 'Lista akcji dla urządzenia');
         labelEl.textContent = (selectedCfg.serial || ('ID ' + (selectedCfg.id || '')));
         var actionCount = 0;
         body.innerHTML = '';
