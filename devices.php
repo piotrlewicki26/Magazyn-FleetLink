@@ -116,11 +116,6 @@ if ($action === 'config_download' && $id > 0) {
 
 if ($action === 'preview_data' && $id > 0) {
     header('Content-Type: application/json; charset=utf-8');
-    if (!canAccessDevicesData()) {
-        http_response_code(403);
-        echo json_encode(['error' => 'Brak uprawnień.']);
-        exit;
-    }
     try {
         $previewStmt = $db->prepare("
             SELECT
@@ -3176,197 +3171,210 @@ function openListChangeRegModal(deviceId, currentReg) {
     new bootstrap.Modal(document.getElementById('listChangeRegModal')).show();
 }
 
-var _listActionsCfg = null;
-function _hideListActionsModal() {
-    var modalEl = document.getElementById('listActionsModal');
-    if (!modalEl) return;
-    var modalInst = bootstrap.Modal.getOrCreateInstance(modalEl);
-    modalInst.hide();
-}
-function _listActionsAfterClose(cb) {
-    var modalEl = document.getElementById('listActionsModal');
-    if (!modalEl || !cb) return;
-    var modalInst = bootstrap.Modal.getOrCreateInstance(modalEl);
-    if (!modalEl.classList.contains('show')) {
-        cb();
-        return;
+window.openListActionsModal = (function () {
+    var listActionsCfg = null;
+    function hideListActionsModal() {
+        var modalEl = document.getElementById('listActionsModal');
+        if (!modalEl) return;
+        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
     }
-    var onceHidden = function () {
-        modalEl.removeEventListener('hidden.bs.modal', onceHidden);
-        cb();
-    };
-    modalEl.addEventListener('hidden.bs.modal', onceHidden);
-    modalInst.hide();
-}
-function _appendListActionButton(container, opts) {
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'list-group-item list-group-item-action ' + (opts.extraClass || '');
-    var icon = document.createElement('i');
-    icon.className = (opts.iconClass || '') + ' me-2';
-    button.appendChild(icon);
-    button.appendChild(document.createTextNode(opts.label || 'Akcja'));
-    if (typeof opts.onClick === 'function') {
-        button.addEventListener('click', opts.onClick);
+    function listActionsAfterClose(cb) {
+        var modalEl = document.getElementById('listActionsModal');
+        if (!modalEl || !cb) return;
+        var modalInst = bootstrap.Modal.getOrCreateInstance(modalEl);
+        if (!modalEl.classList.contains('show')) {
+            cb();
+            return;
+        }
+        var onceHidden = function () {
+            modalEl.removeEventListener('hidden.bs.modal', onceHidden);
+            cb();
+        };
+        modalEl.addEventListener('hidden.bs.modal', onceHidden);
+        modalInst.hide();
     }
-    container.appendChild(button);
-}
-function openListPreviewModal() {
-    if (!_listActionsCfg || !_listActionsCfg.id) return;
-    _listActionsAfterClose(function () {
-        fetch('devices.php?action=preview_data&id=' + encodeURIComponent(_listActionsCfg.id), {
-            credentials: 'same-origin',
-            headers: { 'Accept': 'application/json' }
-        })
-        .then(function (response) {
-            var responseType = (response.headers.get('content-type') || '').toLowerCase();
-            var isJson = responseType.indexOf('application/json') !== -1;
-            if (!response.ok) {
-                if (isJson) {
-                    return response.json().then(function (data) {
-                        throw new Error((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
+    function appendListActionButton(container, opts) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'list-group-item list-group-item-action ' + (opts.extraClass || '');
+        var icon = document.createElement('i');
+        icon.className = (opts.iconClass || '') + ' me-2';
+        button.appendChild(icon);
+        button.appendChild(document.createTextNode(opts.label || 'Akcja'));
+        if (typeof opts.onClick === 'function') {
+            button.addEventListener('click', opts.onClick);
+        }
+        container.appendChild(button);
+    }
+    function openListPreviewModal() {
+        if (!listActionsCfg || !listActionsCfg.id) return;
+        listActionsAfterClose(function () {
+            fetch('devices.php?action=preview_data&id=' + encodeURIComponent(listActionsCfg.id), {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' }
+            })
+            .then(function (response) {
+                var responseType = (response.headers.get('content-type') || '').toLowerCase();
+                var isJson = responseType.indexOf('application/json') !== -1;
+                if (!response.ok) {
+                    if (isJson) {
+                        return response.json().then(function (data) {
+                            throw new Error((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
+                        });
+                    }
+                    throw new Error('Nie udało się pobrać podglądu urządzenia.');
+                }
+                if (!isJson) {
+                    throw new Error('Odpowiedź serwera ma nieprawidłowy format.');
+                }
+                return response.json();
+            })
+            .then(function (data) {
+                if (data && !data.error) {
+                    showDevicePreview(data);
+                    return;
+                }
+                alert((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
+            })
+            .catch(function (error) {
+                alert((error && error.message) ? error.message : 'Nie udało się pobrać podglądu urządzenia.');
+            });
+        });
+    }
+    function submitListUninstallAction() {
+        if (!listActionsCfg || !listActionsCfg.id) return;
+        if (!confirm('Czy na pewno odinstalować urządzenie ' + (listActionsCfg.serial || '') + '?\n\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\nNie = anuluj.')) return;
+        hideListActionsModal();
+        document.getElementById('listUninstallActionDeviceId').value = listActionsCfg.id;
+        document.getElementById('listUninstallActionForm').submit();
+    }
+    function submitListDeleteAction() {
+        if (!listActionsCfg || !listActionsCfg.id) return;
+        if (!confirm('Czy na pewno chcesz usunąć urządzenie ' + (listActionsCfg.serial || '') + '? Tej operacji nie można cofnąć.')) return;
+        hideListActionsModal();
+        var deleteId = document.getElementById('listDeleteActionDeviceId');
+        var deleteForm = document.getElementById('listDeleteActionForm');
+        if (!deleteId || !deleteForm) return;
+        deleteId.value = listActionsCfg.id;
+        deleteForm.submit();
+    }
+    return function (cfg) {
+        listActionsCfg = cfg || {};
+        document.getElementById('listActionsDeviceLabel').textContent = (listActionsCfg.serial || ('ID ' + (listActionsCfg.id || '')));
+        var body = document.getElementById('listActionsBody');
+        var actionCount = 0;
+        body.innerHTML = '';
+        appendListActionButton(body, {
+            label: 'Podgląd',
+            iconClass: 'fas fa-eye text-info',
+            onClick: openListPreviewModal
+        });
+        actionCount++;
+        if (listActionsCfg.can_edit) {
+            appendListActionButton(body, {
+                label: 'Edytuj',
+                iconClass: 'fas fa-edit text-primary',
+                onClick: function () {
+                    listActionsAfterClose(function () {
+                        window.location.href = 'devices.php?action=edit&id=' + encodeURIComponent(listActionsCfg.id);
                     });
                 }
-                throw new Error('Nie udało się pobrać podglądu urządzenia.');
-            }
-            if (!isJson) {
-                throw new Error('Odpowiedź serwera ma nieprawidłowy format.');
-            }
-            return response.json();
-        })
-        .then(function (data) {
-            if (data && !data.error) {
-                showDevicePreview(data);
-                return;
-            }
-            alert((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
-        })
-        .catch(function (error) {
-            alert((error && error.message) ? error.message : 'Nie udało się pobrać podglądu urządzenia.');
-        });
-    });
-}
-function openListActionsModal(cfg) {
-    _listActionsCfg = cfg || {};
-    document.getElementById('listActionsDeviceLabel').textContent = (_listActionsCfg.serial || ('ID ' + (_listActionsCfg.id || '')));
-    var body = document.getElementById('listActionsBody');
-    body.innerHTML = '';
-    _appendListActionButton(body, {
-        label: 'Podgląd',
-        iconClass: 'fas fa-eye text-info',
-        onClick: openListPreviewModal
-    });
-    if (_listActionsCfg.can_edit) {
-        _appendListActionButton(body, {
-            label: 'Edytuj',
-            iconClass: 'fas fa-edit text-primary',
-            onClick: function () {
-                _listActionsAfterClose(function () {
-                    window.location.href = 'devices.php?action=edit&id=' + encodeURIComponent(_listActionsCfg.id);
-                });
-            }
-        });
-    }
-    if (_listActionsCfg.can_install) {
-        _appendListActionButton(body, {
-            label: 'Montaż',
-            iconClass: 'fas fa-car text-success',
-            onClick: function () {
-                _listActionsAfterClose(function () {
-                    openInstallModal(_listActionsCfg.id, _listActionsCfg.serial || '', _listActionsCfg.sim || '');
-                });
-            }
-        });
-    }
-    if (_listActionsCfg.can_move) {
-        _appendListActionButton(body, {
-            label: 'Przenieś do innej firmy',
-            iconClass: 'fas fa-exchange-alt text-warning',
-            onClick: function () {
-                _listActionsAfterClose(function () {
-                    openMoveDeviceModal(_listActionsCfg.id, _listActionsCfg.serial || '', 'list');
-                });
-            }
-        });
-    }
-    if (_listActionsCfg.can_uninstall) {
-        _appendListActionButton(body, {
-            label: 'Odinstaluj',
-            iconClass: 'fas fa-unlink text-danger',
-            extraClass: 'text-danger',
-            onClick: submitListUninstallAction
-        });
-    }
-    if (_listActionsCfg.can_change_reg) {
-        _appendListActionButton(body, {
-            label: 'Zmień nr rejestracyjny',
-            iconClass: 'fas fa-hashtag text-info',
-            onClick: function () {
-                _listActionsAfterClose(function () {
-                    openListChangeRegModal(_listActionsCfg.id, _listActionsCfg.registration || '');
-                });
-            }
-        });
-    }
-    _appendListActionButton(body, {
-        label: 'Zmień nr SIM',
-        iconClass: 'fas fa-sim-card text-secondary',
-        onClick: function () {
-            _listActionsAfterClose(function () {
-                openSimEdit(_listActionsCfg.id, _listActionsCfg.sim || '');
             });
+            actionCount++;
         }
-    });
-    if (_listActionsCfg.can_tacho) {
-        _appendListActionButton(body, {
-            label: 'Tachograf',
-            iconClass: 'fas fa-plug ' + (_listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary'),
+        if (listActionsCfg.can_install) {
+            appendListActionButton(body, {
+                label: 'Montaż',
+                iconClass: 'fas fa-car text-success',
+                onClick: function () {
+                    listActionsAfterClose(function () {
+                        openInstallModal(listActionsCfg.id, listActionsCfg.serial || '', listActionsCfg.sim || '');
+                    });
+                }
+            });
+            actionCount++;
+        }
+        if (listActionsCfg.can_move) {
+            appendListActionButton(body, {
+                label: 'Przenieś do innej firmy',
+                iconClass: 'fas fa-exchange-alt text-warning',
+                onClick: function () {
+                    listActionsAfterClose(function () {
+                        openMoveDeviceModal(listActionsCfg.id, listActionsCfg.serial || '', 'list');
+                    });
+                }
+            });
+            actionCount++;
+        }
+        if (listActionsCfg.can_uninstall) {
+            appendListActionButton(body, {
+                label: 'Odinstaluj',
+                iconClass: 'fas fa-unlink text-danger',
+                extraClass: 'text-danger',
+                onClick: submitListUninstallAction
+            });
+            actionCount++;
+        }
+        if (listActionsCfg.can_change_reg) {
+            appendListActionButton(body, {
+                label: 'Zmień nr rejestracyjny',
+                iconClass: 'fas fa-hashtag text-info',
+                onClick: function () {
+                    listActionsAfterClose(function () {
+                        openListChangeRegModal(listActionsCfg.id, listActionsCfg.registration || '');
+                    });
+                }
+            });
+            actionCount++;
+        }
+        appendListActionButton(body, {
+            label: 'Zmień nr SIM',
+            iconClass: 'fas fa-sim-card text-secondary',
             onClick: function () {
-                _listActionsAfterClose(function () {
-                    openTachoModal(_listActionsCfg.id, _listActionsCfg.tacho_connected ? 1 : 0, _listActionsCfg.tacho_firmware_version || '');
+                listActionsAfterClose(function () {
+                    openSimEdit(listActionsCfg.id, listActionsCfg.sim || '');
                 });
             }
         });
-    }
-    if (_listActionsCfg.can_delete) {
-        var dividerWrap = document.createElement('div');
-        dividerWrap.className = 'list-group-item p-0 border-0';
-        var divider = document.createElement('hr');
-        divider.className = 'my-2';
-        dividerWrap.appendChild(divider);
-        body.appendChild(dividerWrap);
-        _appendListActionButton(body, {
-            label: 'Usuń urządzenie',
-            iconClass: 'fas fa-trash text-danger',
-            extraClass: 'text-danger',
-            onClick: submitListDeleteAction
-        });
-    }
-    if (!body.children.length) {
-        var noActions = document.createElement('div');
-        noActions.className = 'text-muted small px-2 py-3';
-        noActions.textContent = 'Brak dostępnych akcji.';
-        body.appendChild(noActions);
-    }
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('listActionsModal')).show();
-}
-function submitListUninstallAction() {
-    if (!_listActionsCfg || !_listActionsCfg.id) return;
-    if (!confirm('Czy na pewno odinstalować urządzenie ' + (_listActionsCfg.serial || '') + '?\n\nTak = status zostanie ustawiony na Sprawny i zapisany w historii ruchów.\nNie = anuluj.')) return;
-    _hideListActionsModal();
-    document.getElementById('listUninstallActionDeviceId').value = _listActionsCfg.id;
-    document.getElementById('listUninstallActionForm').submit();
-}
-function submitListDeleteAction() {
-    if (!_listActionsCfg || !_listActionsCfg.id) return;
-    if (!confirm('Czy na pewno chcesz usunąć urządzenie ' + (_listActionsCfg.serial || '') + '? Tej operacji nie można cofnąć.')) return;
-    _hideListActionsModal();
-    var deleteId = document.getElementById('listDeleteActionDeviceId');
-    var deleteForm = document.getElementById('listDeleteActionForm');
-    if (!deleteId || !deleteForm) return;
-    deleteId.value = _listActionsCfg.id;
-    deleteForm.submit();
-}
+        actionCount++;
+        if (listActionsCfg.can_tacho) {
+            appendListActionButton(body, {
+                label: 'Tachograf',
+                iconClass: 'fas fa-plug ' + (listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary'),
+                onClick: function () {
+                    listActionsAfterClose(function () {
+                        openTachoModal(listActionsCfg.id, listActionsCfg.tacho_connected ? 1 : 0, listActionsCfg.tacho_firmware_version || '');
+                    });
+                }
+            });
+            actionCount++;
+        }
+        if (listActionsCfg.can_delete) {
+            if (actionCount > 0) {
+                var dividerWrap = document.createElement('div');
+                dividerWrap.className = 'list-group-item p-0 border-0';
+                var divider = document.createElement('hr');
+                divider.className = 'my-2';
+                dividerWrap.appendChild(divider);
+                body.appendChild(dividerWrap);
+            }
+            appendListActionButton(body, {
+                label: 'Usuń urządzenie',
+                iconClass: 'fas fa-trash text-danger',
+                extraClass: 'text-danger',
+                onClick: submitListDeleteAction
+            });
+            actionCount++;
+        }
+        if (!actionCount) {
+            var noActions = document.createElement('div');
+            noActions.className = 'text-muted small px-2 py-3';
+            noActions.textContent = 'Brak dostępnych akcji.';
+            body.appendChild(noActions);
+        }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('listActionsModal')).show();
+    };
+})();
 </script>
 
 <!-- Change Registration Modal (list/view) -->
