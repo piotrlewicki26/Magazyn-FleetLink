@@ -41,7 +41,8 @@ function hasVehiclesApiUniqueIndex(PDO $db): bool {
                 if ((int)($idx['unique'] ?? 0) !== 1) continue;
                 $idxName = (string)($idx['name'] ?? '');
                 if ($idxName === '') continue;
-                $idxCols = $db->query("PRAGMA index_info(" . $db->quote($idxName) . ")")->fetchAll();
+                if (!preg_match('/^[A-Za-z0-9_]+$/', $idxName)) continue;
+                $idxCols = $db->query('PRAGMA index_info("' . $idxName . '")')->fetchAll();
                 $colNames = array_map(static fn(array $c): string => (string)($c['name'] ?? ''), $idxCols);
                 sort($colNames);
                 if ($colNames === ['client_id', 'registration']) {
@@ -119,10 +120,13 @@ if ($method !== 'POST') {
 apiRequireIntegrationToken($db);
 
 $apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
+$isFormContentType = strpos($apiContentType, 'application/x-www-form-urlencoded') !== false || strpos($apiContentType, 'multipart/form-data') !== false;
 $rawBody = file_get_contents('php://input');
 $hasRawBody = trim((string)$rawBody) !== '';
 $isJsonContentType = strpos($apiContentType, 'application/json') !== false;
-if ($hasRawBody) {
+if ($isFormContentType) {
+    $input = $_POST;
+} elseif ($hasRawBody) {
     if ($isJsonContentType) {
         $decoded = json_decode($rawBody, true);
         $jsonError = json_last_error();
@@ -133,8 +137,6 @@ if ($hasRawBody) {
             apiJson(400, ['ok' => false, 'error' => 'Body JSON musi być obiektem.']);
         }
         $input = $decoded;
-    } elseif (strpos($apiContentType, 'application/x-www-form-urlencoded') !== false || strpos($apiContentType, 'multipart/form-data') !== false) {
-        $input = $_POST;
     } else {
         apiJson(415, ['ok' => false, 'error' => 'Nieobsługiwany typ treści żądania.']);
     }
