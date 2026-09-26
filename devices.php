@@ -16,6 +16,12 @@ function canAccessDevicesData(): bool {
     return in_array((string)($user['role'] ?? ''), ['admin', 'technician', 'user'], true);
 }
 if (!canAccessDevicesData()) {
+    if ($action === 'preview_data') {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(403);
+        echo json_encode(['error' => 'Brak uprawnień.']);
+        exit;
+    }
     flashError('Brak uprawnień do modułu urządzeń.');
     redirect(getBaseUrl() . 'dashboard.php');
 }
