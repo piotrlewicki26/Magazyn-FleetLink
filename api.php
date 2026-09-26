@@ -116,6 +116,7 @@ if ($method === 'GET') {
 if ($method !== 'POST') {
     apiJson(405, ['ok' => false, 'error' => 'Dozwolone metody: GET, POST.']);
 }
+apiRequireIntegrationToken($db);
 
 $apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
 $rawBody = file_get_contents('php://input');
@@ -143,7 +144,6 @@ if ($hasRawBody) {
     }
     $input = $_POST;
 }
-apiRequireIntegrationToken($db);
 $action = sanitize($input['action'] ?? '');
 
 if ($action === '') {
@@ -200,7 +200,7 @@ if ($action === 'add_vehicle') {
         apiJson(422, ['ok' => false, 'error' => 'Pola client_id i registration są wymagane.']);
     }
     if (!hasVehiclesApiUniqueIndex($db)) {
-        apiJson(500, ['ok' => false, 'error' => 'Brak wymaganego unikalnego indeksu dla pojazdów (client_id + registration).']);
+        error_log('API add_vehicle: missing unique index on vehicles(client_id, registration)');
     }
 
     $clientCheck = $db->prepare("SELECT id, active FROM clients WHERE id = ? LIMIT 1");
@@ -246,7 +246,9 @@ if ($action === 'activate_vehicle') {
     }
 
     $vehStmt = $db->prepare("
-        SELECT v.id, v.client_id, v.registration, v.active, c.id AS client_exists, COALESCE(c.active, 0) AS client_active
+        SELECT v.id, v.client_id, v.registration, v.active,
+               CASE WHEN c.id IS NULL THEN 0 ELSE 1 END AS client_exists,
+               COALESCE(c.active, 0) AS client_active
         FROM vehicles v
         LEFT JOIN clients c ON c.id = v.client_id
         WHERE v.id = ?
@@ -260,7 +262,7 @@ if ($action === 'activate_vehicle') {
     if ((int)$vehicle['client_id'] <= 0) {
         apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — brak przypisanej firmy.']);
     }
-    if ((int)$vehicle['client_id'] > 0 && $vehicle['client_exists'] === null) {
+    if ((int)$vehicle['client_id'] > 0 && (int)$vehicle['client_exists'] !== 1) {
         apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — przypisany klient nie istnieje.']);
     }
     if ((int)$vehicle['client_id'] > 0 && (int)$vehicle['client_active'] !== 1) {
