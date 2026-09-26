@@ -159,4 +159,66 @@ Kompleksowa aplikacja webowa PHP/MySQL do zarządzania urządzeniami GPS — od 
 
 ---
 
+## Integracja API (firmy i pojazdy)
+
+Udostępniony endpoint: `api.php`
+
+- **GET** `api.php` — status API i lista akcji
+- **POST** `api.php` — wywołanie akcji integracyjnej
+
+Autoryzacja:
+- HTTP **Basic Auth**
+- wymagany aktywny użytkownik z rolą **Administrator**
+
+Dostępne akcje (`POST`, JSON):
+
+1. `create_company` — utworzenie nowej firmy/klienta
+2. `add_vehicle` — dodanie pojazdu do firmy
+3. `activate_vehicle` — aktywacja pojazdu (`active=1`)
+
+Przykład (utworzenie firmy):
+
+```bash
+curl -X POST "https://twojadomena.pl/api.php" \
+  -u "admin@example.com:haslo" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action":"create_company",
+    "company_name":"ACME Sp. z o.o.",
+    "contact_name":"Jan Kowalski",
+    "email":"biuro@acme.pl",
+    "phone":"+48 600 000 000"
+  }'
+```
+
+Przykład (dodanie pojazdu):
+
+```bash
+curl -X POST "https://twojadomena.pl/api.php" \
+  -u "admin@example.com:haslo" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action":"add_vehicle",
+    "client_id":123,
+    "registration":"WA12345",
+    "make":"Toyota",
+    "model_name":"Corolla",
+    "year":2022
+  }'
+```
+
+Przykład (aktywacja pojazdu):
+
+```bash
+curl -X POST "https://twojadomena.pl/api.php" \
+  -u "admin@example.com:haslo" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action":"activate_vehicle",
+    "vehicle_id":456
+  }'
+```
+
+---
+
 *FleetLink Magazyn v1.0.0*
