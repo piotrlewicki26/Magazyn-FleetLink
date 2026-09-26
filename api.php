@@ -39,7 +39,13 @@ function hasVehiclesApiUniqueIndex(PDO $db): bool {
         if ($driver === 'sqlite') {
             $idxRows = $db->query("PRAGMA index_list('vehicles')")->fetchAll();
             foreach ($idxRows as $idx) {
-                if ((string)($idx['name'] ?? '') === 'idx_vehicles_client_registration_unique' && (int)($idx['unique'] ?? 0) === 1) {
+                if ((int)($idx['unique'] ?? 0) !== 1) continue;
+                $idxName = (string)($idx['name'] ?? '');
+                if ($idxName === '') continue;
+                $idxCols = $db->query("PRAGMA index_info(" . $db->quote($idxName) . ")")->fetchAll();
+                $colNames = array_map(static fn(array $c): string => (string)($c['name'] ?? ''), $idxCols);
+                sort($colNames);
+                if ($colNames === ['client_id', 'registration']) {
                     $ready = true;
                     return true;
                 }
@@ -48,15 +54,18 @@ function hasVehiclesApiUniqueIndex(PDO $db): bool {
         }
 
         $existsStmt = $db->prepare("
-            SELECT COUNT(*)
+            SELECT index_name
             FROM information_schema.statistics
             WHERE table_schema = DATABASE()
               AND table_name = 'vehicles'
-              AND index_name = 'uniq_vehicles_client_registration'
               AND non_unique = 0
+            GROUP BY index_name
+            HAVING SUM(CASE WHEN column_name='client_id' THEN 1 ELSE 0 END) > 0
+               AND SUM(CASE WHEN column_name='registration' THEN 1 ELSE 0 END) > 0
+            LIMIT 1
         ");
         $existsStmt->execute();
-        if ((int)$existsStmt->fetchColumn() > 0) {
+        if ($existsStmt->fetchColumn()) {
             $ready = true;
             return true;
         }
@@ -98,6 +107,7 @@ function apiRequireIntegrationToken(PDO $db): void {
 $db = getDb();
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 if ($method === 'GET') {
+    apiRequireIntegrationToken($db);
     apiJson(200, [
         'ok' => true,
         'service' => 'fleetlink-api',

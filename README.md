@@ -172,6 +172,7 @@ Autoryzacja:
 - akceptowane formaty:
   - sam token w `Authorization`
   - `Authorization` z prefiksem `Bearer` i tokenem
+- przykład nagłówka: `Authorization: ******`
 
 Dostępne akcje (`POST`):
 
