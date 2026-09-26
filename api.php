@@ -25,53 +25,53 @@ function apiAuthHeader(): string {
         $headers = apache_request_headers();
         if (isset($headers['Authorization'])) return (string)$headers['Authorization'];
     }
+    return '';
+}
 
-    function ensureVehiclesApiUniqueIndex(PDO $db): bool {
-        static $checked = false;
-        static $ready = false;
-        if ($checked) return $ready;
-        $checked = true;
+function ensureVehiclesApiUniqueIndex(PDO $db): bool {
+    static $checked = false;
+    static $ready = false;
+    if ($checked) return $ready;
+    $checked = true;
 
-        try {
-            $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-            if ($driver === 'sqlite') {
-                $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_client_registration_unique ON vehicles(client_id, registration)");
-                $idxRows = $db->query("PRAGMA index_list('vehicles')")->fetchAll();
-                foreach ($idxRows as $idx) {
-                    if ((string)($idx['name'] ?? '') === 'idx_vehicles_client_registration_unique' && (int)($idx['unique'] ?? 0) === 1) {
-                        $ready = true;
-                        return true;
-                    }
+    try {
+        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'sqlite') {
+            $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_client_registration_unique ON vehicles(client_id, registration)");
+            $idxRows = $db->query("PRAGMA index_list('vehicles')")->fetchAll();
+            foreach ($idxRows as $idx) {
+                if ((string)($idx['name'] ?? '') === 'idx_vehicles_client_registration_unique' && (int)($idx['unique'] ?? 0) === 1) {
+                    $ready = true;
+                    return true;
                 }
-                return false;
             }
-
-            $existsStmt = $db->prepare("
-                SELECT COUNT(*)
-                FROM information_schema.statistics
-                WHERE table_schema = DATABASE()
-                  AND table_name = 'vehicles'
-                  AND index_name = 'uniq_vehicles_client_registration'
-                  AND non_unique = 0
-            ");
-            $existsStmt->execute();
-            if ((int)$existsStmt->fetchColumn() > 0) {
-                $ready = true;
-                return true;
-            }
-
-            try {
-                $db->exec("ALTER TABLE vehicles ADD UNIQUE KEY uniq_vehicles_client_registration (client_id, registration)");
-            } catch (Throwable $e) {}
-
-            $existsStmt->execute();
-            $ready = (int)$existsStmt->fetchColumn() > 0;
-            return $ready;
-        } catch (Throwable $e) {
             return false;
         }
+
+        $existsStmt = $db->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'vehicles'
+              AND index_name = 'uniq_vehicles_client_registration'
+              AND non_unique = 0
+        ");
+        $existsStmt->execute();
+        if ((int)$existsStmt->fetchColumn() > 0) {
+            $ready = true;
+            return true;
+        }
+
+        try {
+            $db->exec("ALTER TABLE vehicles ADD UNIQUE KEY uniq_vehicles_client_registration (client_id, registration)");
+        } catch (Throwable $e) {}
+
+        $existsStmt->execute();
+        $ready = (int)$existsStmt->fetchColumn() > 0;
+        return $ready;
+    } catch (Throwable $e) {
+        return false;
     }
-    return '';
 }
 
 function apiRequireIntegrationToken(PDO $db): void {
@@ -92,10 +92,12 @@ function apiRequireIntegrationToken(PDO $db): void {
     }
 
     $authHeader = apiAuthHeader();
-    if (stripos($authHeader, 'Bearer ') !== 0) {
+    if ($authHeader === '') {
         apiJson(401, ['ok' => false, 'error' => 'Wymagany token API w nagłówku żądania.']);
     }
-    $providedToken = trim((string)substr($authHeader, 7));
+    $providedToken = stripos($authHeader, 'Bearer ') === 0
+        ? trim((string)substr($authHeader, 7))
+        : trim((string)$authHeader);
     if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
         apiJson(401, ['ok' => false, 'error' => 'Nieprawidłowy token API.']);
     }
@@ -108,6 +110,7 @@ if ($method === 'GET') {
         'ok' => true,
         'service' => 'fleetlink-api',
         'version' => defined('APP_VERSION') ? APP_VERSION : '1.0.0',
+        'actions' => ['create_company', 'add_vehicle', 'activate_vehicle'],
     ]);
 }
 if ($method !== 'POST') {

@@ -169,7 +169,7 @@ Udostępniony endpoint: `api.php`
 Autoryzacja:
 - API musi być włączone w **Ustawienia → System → API integracyjne**
 - token API przekazywany w nagłówku `Authorization`
-- format nagłówka: `Authorization` + prefiks `Bearer` + token API
+- format nagłówka: `Authorization: ******`
 
 Dostępne akcje (`POST`, JSON):
 
@@ -180,7 +180,7 @@ Dostępne akcje (`POST`, JSON):
 Przykład (utworzenie firmy):
 
 ```bash
-# dodaj nagłówek Authorization z prefiksem ****** tokenem API
+# użyj nagłówka: Authorization: ******
 curl -X POST "https://twojadomena.pl/api.php" \
   -H "Authorization: ******" \
   -H "Content-Type: application/json" \
@@ -196,7 +196,7 @@ curl -X POST "https://twojadomena.pl/api.php" \
 Przykład (dodanie pojazdu):
 
 ```bash
-# dodaj nagłówek Authorization z prefiksem ****** tokenem API
+# użyj nagłówka: Authorization: ******
 curl -X POST "https://twojadomena.pl/api.php" \
   -H "Authorization: ******" \
   -H "Content-Type: application/json" \
@@ -213,7 +213,7 @@ curl -X POST "https://twojadomena.pl/api.php" \
 Przykład (aktywacja pojazdu):
 
 ```bash
-# dodaj nagłówek Authorization z prefiksem ****** tokenem API
+# użyj nagłówka: Authorization: ******
 curl -X POST "https://twojadomena.pl/api.php" \
   -H "Authorization: ******" \
   -H "Content-Type: application/json" \
