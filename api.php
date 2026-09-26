@@ -118,7 +118,7 @@ if ($method !== 'POST') {
     apiJson(405, ['ok' => false, 'error' => 'Dozwolone metody: GET, POST.']);
 }
 
-$apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? ''));
+$apiContentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
 $rawBody = file_get_contents('php://input');
 $decoded = json_decode($rawBody ?: '', true);
 $jsonError = json_last_error();
@@ -235,7 +235,7 @@ if ($action === 'activate_vehicle') {
     }
 
     $vehStmt = $db->prepare("
-        SELECT v.id, v.client_id, v.registration, v.active, COALESCE(c.active, 0) AS client_active
+        SELECT v.id, v.client_id, v.registration, v.active, c.id AS client_exists, COALESCE(c.active, 0) AS client_active
         FROM vehicles v
         LEFT JOIN clients c ON c.id = v.client_id
         WHERE v.id = ?
@@ -245,6 +245,9 @@ if ($action === 'activate_vehicle') {
     $vehicle = $vehStmt->fetch();
     if (!$vehicle) {
         apiJson(404, ['ok' => false, 'error' => 'Pojazd nie istnieje.']);
+    }
+    if ((int)$vehicle['client_id'] > 0 && empty($vehicle['client_exists'])) {
+        apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — przypisany klient nie istnieje.']);
     }
     if ((int)$vehicle['client_id'] > 0 && (int)$vehicle['client_active'] !== 1) {
         apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — przypisana firma jest nieaktywna.']);
