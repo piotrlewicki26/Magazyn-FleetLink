@@ -17,6 +17,7 @@ function apiJson(int $statusCode, array $payload): void {
     try {
         echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     } catch (Throwable $e) {
+        http_response_code(500);
         echo '{"ok":false,"error":"Błąd serializacji odpowiedzi JSON."}';
     }
     exit;
@@ -288,7 +289,11 @@ if ($action === 'activate_vehicle') {
         ]);
     }
 
-    $db->prepare("UPDATE vehicles SET active = 1 WHERE id = ?")->execute([$vehicleId]);
+    $updStmt = $db->prepare("UPDATE vehicles SET active = 1 WHERE id = ?");
+    $updStmt->execute([$vehicleId]);
+    if ((int)$updStmt->rowCount() < 1) {
+        apiJson(409, ['ok' => false, 'error' => 'Nie udało się aktywować pojazdu — rekord nie został zaktualizowany.']);
+    }
 
     apiJson(200, [
         'ok' => true,
