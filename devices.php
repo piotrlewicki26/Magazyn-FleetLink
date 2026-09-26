@@ -1458,8 +1458,6 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'id' => (int)$d['id'],
                             'serial' => (string)$d['serial_number'],
                             'sim' => (string)($d['sim_number'] ?? ''),
-                            'status' => (string)$d['status'],
-                            'model_name' => (string)$d['model_name'],
                             'registration' => (string)($d['active_vehicle_registration'] ?? ''),
                             'tacho_connected' => (int)($d['tacho_connected'] ?? 0),
                             'tacho_firmware_version' => (string)($d['tacho_firmware_version'] ?? ''),
@@ -1470,27 +1468,6 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'can_uninstall' => $canUninstallFromData,
                             'can_change_reg' => $d['status'] === 'zamontowany',
                             'can_tacho' => stripos($d['model_name'], 'ECAN') === false,
-                            'preview' => [
-                                'id'                     => $d['id'],
-                                'serial_number'          => $d['serial_number'],
-                                'imei'                   => $d['imei'] ?? '',
-                                'sim_number'             => $d['sim_number'] ?? '',
-                                'ble_id'                 => $d['ble_id'] ?? '',
-                                'major'                  => $d['major'] ?? null,
-                                'minor'                  => $d['minor'] ?? null,
-                                'mac_address'            => $d['mac_address'] ?? '',
-                                'status'                 => $d['status'],
-                                'manufacturer_name'      => $d['manufacturer_name'],
-                                'model_name'             => $d['model_name'],
-                                'vehicle_registration'   => $d['active_vehicle_registration'] ?? '',
-                                'client'                 => $d['active_company_name'] ?: ($d['active_contact_name'] ?? ''),
-                                'installation_date'      => $d['active_installation_date'] ?? '',
-                                'purchase_date'          => $d['purchase_date'] ?? '',
-                                'sale_date'              => $d['sale_date'] ?? '',
-                                'notes'                  => $d['notes'] ?? '',
-                                'tacho_connected'        => (int)($d['tacho_connected'] ?? 0),
-                                'tacho_firmware_version' => $d['tacho_firmware_version'] ?? '',
-                            ],
                         ];
                         ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -3115,43 +3092,125 @@ function _listActionsAfterClose(cb) {
     _hideListActionsModal();
     setTimeout(cb, 120);
 }
-function _listActionsEsc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-function _listActionButton(label, iconClass, extraClass, onClickJs) {
-    return '<button type="button" class="list-group-item list-group-item-action ' + (extraClass || '') + '" onclick="' + onClickJs + '">' +
-        '<i class="' + iconClass + ' me-2"></i>' + label + '</button>';
+function _appendListActionButton(container, opts) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'list-group-item list-group-item-action ' + (opts.extraClass || '');
+    var icon = document.createElement('i');
+    icon.className = (opts.iconClass || '') + ' me-2';
+    button.appendChild(icon);
+    button.appendChild(document.createTextNode(opts.label || 'Akcja'));
+    if (typeof opts.onClick === 'function') {
+        button.addEventListener('click', opts.onClick);
+    }
+    container.appendChild(button);
 }
 function openListActionsModal(cfg) {
     _listActionsCfg = cfg || {};
     document.getElementById('listActionsDeviceLabel').textContent = (_listActionsCfg.serial || ('ID ' + (_listActionsCfg.id || '')));
     var body = document.getElementById('listActionsBody');
-    var html = '';
-    html += _listActionButton('Podgląd', 'fas fa-eye text-info', '', "_listActionsAfterClose(function(){ showDevicePreview(_listActionsCfg.preview || {}); })");
+    body.innerHTML = '';
+    _appendListActionButton(body, {
+        label: 'Podgląd',
+        iconClass: 'fas fa-eye text-info',
+        onClick: function () {
+            _listActionsAfterClose(function () {
+                window.location.href = 'devices.php?action=view&id=' + encodeURIComponent(_listActionsCfg.id);
+            });
+        }
+    });
     if (_listActionsCfg.can_edit) {
-        html += _listActionButton('Edytuj', 'fas fa-edit text-primary', '', "_listActionsAfterClose(function(){ window.location.href='devices.php?action=edit&id=' + encodeURIComponent(_listActionsCfg.id); })");
+        _appendListActionButton(body, {
+            label: 'Edytuj',
+            iconClass: 'fas fa-edit text-primary',
+            onClick: function () {
+                _listActionsAfterClose(function () {
+                    window.location.href = 'devices.php?action=edit&id=' + encodeURIComponent(_listActionsCfg.id);
+                });
+            }
+        });
     }
     if (_listActionsCfg.can_install) {
-        html += _listActionButton('Montaż', 'fas fa-car text-success', '', "_listActionsAfterClose(function(){ openInstallModal(_listActionsCfg.id, _listActionsCfg.serial || '', _listActionsCfg.sim || ''); })");
+        _appendListActionButton(body, {
+            label: 'Montaż',
+            iconClass: 'fas fa-car text-success',
+            onClick: function () {
+                _listActionsAfterClose(function () {
+                    openInstallModal(_listActionsCfg.id, _listActionsCfg.serial || '', _listActionsCfg.sim || '');
+                });
+            }
+        });
     }
     if (_listActionsCfg.can_move) {
-        html += _listActionButton('Przenieś do innej firmy', 'fas fa-exchange-alt text-warning', '', "_listActionsAfterClose(function(){ openMoveDeviceModal(_listActionsCfg.id, _listActionsCfg.serial || '', 'list'); })");
+        _appendListActionButton(body, {
+            label: 'Przenieś do innej firmy',
+            iconClass: 'fas fa-exchange-alt text-warning',
+            onClick: function () {
+                _listActionsAfterClose(function () {
+                    openMoveDeviceModal(_listActionsCfg.id, _listActionsCfg.serial || '', 'list');
+                });
+            }
+        });
     }
     if (_listActionsCfg.can_uninstall) {
-        html += _listActionButton('Odinstaluj', 'fas fa-unlink text-danger', 'text-danger', "submitListUninstallAction()");
+        _appendListActionButton(body, {
+            label: 'Odinstaluj',
+            iconClass: 'fas fa-unlink text-danger',
+            extraClass: 'text-danger',
+            onClick: submitListUninstallAction
+        });
     }
     if (_listActionsCfg.can_change_reg) {
-        html += _listActionButton('Zmień nr rejestracyjny', 'fas fa-hashtag text-info', '', "_listActionsAfterClose(function(){ openListChangeRegModal(_listActionsCfg.id, _listActionsCfg.registration || ''); })");
+        _appendListActionButton(body, {
+            label: 'Zmień nr rejestracyjny',
+            iconClass: 'fas fa-hashtag text-info',
+            onClick: function () {
+                _listActionsAfterClose(function () {
+                    openListChangeRegModal(_listActionsCfg.id, _listActionsCfg.registration || '');
+                });
+            }
+        });
     }
-    html += _listActionButton('Zmień nr SIM', 'fas fa-sim-card text-secondary', '', "_listActionsAfterClose(function(){ openSimEdit(_listActionsCfg.id, _listActionsCfg.sim || ''); })");
+    _appendListActionButton(body, {
+        label: 'Zmień nr SIM',
+        iconClass: 'fas fa-sim-card text-secondary',
+        onClick: function () {
+            _listActionsAfterClose(function () {
+                openSimEdit(_listActionsCfg.id, _listActionsCfg.sim || '');
+            });
+        }
+    });
     if (_listActionsCfg.can_tacho) {
-        html += _listActionButton('Tachograf', 'fas fa-plug ' + ((_listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary')), '', "_listActionsAfterClose(function(){ openTachoModal(_listActionsCfg.id, _listActionsCfg.tacho_connected ? 1 : 0, _listActionsCfg.tacho_firmware_version || ''); })");
+        _appendListActionButton(body, {
+            label: 'Tachograf',
+            iconClass: 'fas fa-plug ' + (_listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary'),
+            onClick: function () {
+                _listActionsAfterClose(function () {
+                    openTachoModal(_listActionsCfg.id, _listActionsCfg.tacho_connected ? 1 : 0, _listActionsCfg.tacho_firmware_version || '');
+                });
+            }
+        });
     }
     if (_listActionsCfg.can_delete) {
-        html += '<div class="list-group-item p-0 border-0"><hr class="my-2"></div>';
-        html += _listActionButton('Usuń urządzenie', 'fas fa-trash text-danger', 'text-danger', "submitListDeleteAction()");
+        var dividerWrap = document.createElement('div');
+        dividerWrap.className = 'list-group-item p-0 border-0';
+        var divider = document.createElement('hr');
+        divider.className = 'my-2';
+        dividerWrap.appendChild(divider);
+        body.appendChild(dividerWrap);
+        _appendListActionButton(body, {
+            label: 'Usuń urządzenie',
+            iconClass: 'fas fa-trash text-danger',
+            extraClass: 'text-danger',
+            onClick: submitListDeleteAction
+        });
     }
-    body.innerHTML = html || '<div class="text-muted small px-2 py-3">Brak dostępnych akcji.</div>';
+    if (!body.children.length) {
+        var noActions = document.createElement('div');
+        noActions.className = 'text-muted small px-2 py-3';
+        noActions.textContent = 'Brak dostępnych akcji.';
+        body.appendChild(noActions);
+    }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('listActionsModal')).show();
 }
 function submitListUninstallAction() {
