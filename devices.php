@@ -1574,6 +1574,27 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'can_uninstall' => $canUninstallFromData,
                             'can_change_reg' => $statusValue === 'zamontowany',
                             'can_tacho' => stripos($modelNameValue, 'ECAN') === false,
+                            'preview' => [
+                                'id'                     => (int)$d['id'],
+                                'serial_number'          => (string)$d['serial_number'],
+                                'imei'                   => (string)($d['imei'] ?? ''),
+                                'sim_number'             => (string)($d['sim_number'] ?? ''),
+                                'ble_id'                 => (string)($d['ble_id'] ?? ''),
+                                'major'                  => isset($d['major']) ? (int)$d['major'] : null,
+                                'minor'                  => isset($d['minor']) ? (int)$d['minor'] : null,
+                                'mac_address'            => (string)($d['mac_address'] ?? ''),
+                                'status'                 => $statusValue,
+                                'manufacturer_name'      => (string)($d['manufacturer_name'] ?? ''),
+                                'model_name'             => (string)($d['model_name'] ?? ''),
+                                'vehicle_registration'   => (string)($d['active_vehicle_registration'] ?? ''),
+                                'client'                 => (string)($d['active_company_name'] ?: ($d['active_contact_name'] ?? '')),
+                                'installation_date'      => (string)($d['active_installation_date'] ?? ''),
+                                'purchase_date'          => (string)($d['purchase_date'] ?? ''),
+                                'sale_date'              => (string)($d['sale_date'] ?? ''),
+                                'notes'                  => (string)($d['notes'] ?? ''),
+                                'tacho_connected'        => (int)($d['tacho_connected'] ?? 0),
+                                'tacho_firmware_version' => (string)($d['tacho_firmware_version'] ?? ''),
+                            ],
                         ];
                         ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -3223,48 +3244,10 @@ window.openListActionsModal = (function () {
         container.appendChild(button);
     }
     function openListPreviewModal(cfgSnapshot) {
-        if (!cfgSnapshot || !cfgSnapshot.id) return;
-        var previewDeviceId = cfgSnapshot.id;
-        var currentFilters = new URLSearchParams(window.location.search || '');
-        var previewUrl = new URL('devices.php', window.location.href);
-        previewUrl.searchParams.set('action', 'preview_data');
-        previewUrl.searchParams.set('id', String(previewDeviceId));
-        ['search', 'model', 'status', 'tacho'].forEach(function (key) {
-            if (currentFilters.has(key)) {
-                previewUrl.searchParams.set(key, currentFilters.get(key));
-            }
-        });
+        if (!cfgSnapshot || !cfgSnapshot.preview) return;
+        var previewData = cfgSnapshot.preview;
         listActionsAfterClose(function () {
-            fetch(previewUrl.toString(), {
-                credentials: 'same-origin',
-                headers: { 'Accept': 'application/json' }
-            })
-            .then(function (response) {
-                var responseType = (response.headers.get('content-type') || '').toLowerCase();
-                var isJson = responseType.indexOf('application/json') !== -1;
-                if (!response.ok) {
-                    if (isJson) {
-                        return response.json().then(function (data) {
-                            throw new Error((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
-                        });
-                    }
-                    throw new Error('Nie udało się pobrać podglądu urządzenia.');
-                }
-                if (!isJson) {
-                    throw new Error('Odpowiedź serwera ma nieprawidłowy format.');
-                }
-                return response.json();
-            })
-            .then(function (data) {
-                if (data && !data.error) {
-                    showDevicePreview(data);
-                    return;
-                }
-                alert((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
-            })
-            .catch(function (error) {
-                alert((error && error.message) ? error.message : 'Nie udało się pobrać podglądu urządzenia.');
-            });
+            showDevicePreview(previewData);
         });
     }
     function submitListUninstallAction() {
