@@ -1350,7 +1350,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
             <?php endforeach; ?>
         </div>
     </div>
-    <div class="table-responsive devices-table-responsive">
+    <div class="table-responsive-md">
         <?php
         // 10 fixed columns + Akcje = 11 base; admin gets +1 for checkbox + 1 for Cena zakupu = 13
         $devListColspan = isAdmin() ? 13 : 11;

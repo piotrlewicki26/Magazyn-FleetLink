@@ -877,14 +877,6 @@ body {
 /* ── Inventory ──────────────────────────────────────────── */
 .low-stock { color: #ef4444; font-weight: 600; }
 
-/* ── Devices list ───────────────────────────────────────── */
-.devices-table-responsive {
-    overflow-y: visible;
-}
-.devices-table-responsive .dropdown-menu {
-    z-index: 1085;
-}
-
 /* ── Misc ───────────────────────────────────────────────── */
 .text-muted { color: var(--fl-text-muted) !important; }
 
