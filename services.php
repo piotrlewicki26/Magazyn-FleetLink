@@ -1,0 +1,1592 @@
+<?php
+/**
+ * FleetLink System GPS - Service Management
+ */
+define('IN_APP', true);
+require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/functions.php';
+
+date_default_timezone_set(APP_TIMEZONE);
+requireLogin();
+
+$db = getDb();
+
+function sendServiceEmailToAllUsers(PDO $db, string $subject, string $body): void {
+    try {
+        $allUsersStmt = $db->prepare("SELECT name, email FROM users WHERE email IS NOT NULL AND email <> ''");
+        $allUsersStmt->execute();
+        foreach ($allUsersStmt->fetchAll() as $u) {
+            try {
+                sendAppEmail($u['email'], $u['name'] ?? '', $subject, $body);
+            } catch (Exception $e) {
+                error_log('service email send failed to ' . ($u['email'] ?? '') . ': ' . $e->getMessage());
+            }
+        }
+    } catch (Exception $e) {
+        error_log('service email recipients load failed: ' . $e->getMessage());
+    }
+}
+$action = sanitize($_GET['action'] ?? 'list');
+$id = (int)($_GET['id'] ?? 0);
+$activeTab = ($action === 'list') ? sanitize($_GET['tab'] ?? 'serwisy') : 'serwisy';
+if (!in_array($activeTab, ['serwisy', 'protokoly'])) $activeTab = 'serwisy';
+
+// Ensure 'archiwum' is allowed for service status in MySQL deployments
+try {
+    if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+        $colType = $db->query("
+            SELECT COLUMN_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'services'
+              AND COLUMN_NAME = 'status'
+            LIMIT 1
+        ")->fetchColumn();
+        if ($colType && strpos($colType, "'archiwum'") === false) {
+            $db->exec("ALTER TABLE `services` MODIFY COLUMN `status` ENUM('zaplanowany','w_trakcie','zakończony','anulowany','archiwum') NOT NULL DEFAULT 'zaplanowany'");
+        }
+    }
+} catch (Exception $e) {
+    // ignore when not needed / not supported
+}
+
+$servicesTableExists = false;
+try {
+    $db->query("SELECT 1 FROM services LIMIT 1");
+    $servicesTableExists = true;
+} catch (PDOException $e) {
+    $servicesTableExists = false;
+}
+
+// Ensure service order number column exists and backfill missing values
+if ($servicesTableExists) {
+try {
+    $db->query("SELECT order_number FROM services LIMIT 1");
+} catch (PDOException $e) {
+    try {
+        $db->exec("ALTER TABLE `services` ADD COLUMN `order_number` VARCHAR(30) DEFAULT NULL AFTER `id`");
+    } catch (PDOException $alterEx) { /* ignore */ }
+}
+try {
+    $idxExists = $db->query("
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'services'
+          AND INDEX_NAME = 'uq_services_order_number'
+    ")->fetchColumn();
+    if (!(int)$idxExists) {
+        $db->exec("CREATE UNIQUE INDEX `uq_services_order_number` ON `services` (`order_number`)");
+    }
+} catch (Exception $e) { /* ignore */ }
+try {
+    $missingOrderNumbers = $db->query("
+        SELECT id, planned_date
+        FROM services
+        WHERE order_number IS NULL OR order_number = ''
+        ORDER BY COALESCE(planned_date, CURDATE()) ASC, id ASC
+    ")->fetchAll();
+    $monthCounters = [];
+    $monthMaxStmt = $db->prepare("SELECT COALESCE(MAX(CAST(RIGHT(order_number, 4) AS UNSIGNED)), 0) FROM services WHERE order_number LIKE ?");
+    $fillStmt = $db->prepare("UPDATE services SET order_number=? WHERE id=?");
+    foreach ($missingOrderNumbers as $svcRow) {
+        $svcTimestamp = strtotime((string)($svcRow['planned_date'] ?? '')) ?: time();
+        $svcYear = date('Y', $svcTimestamp);
+        $svcMonth = date('m', $svcTimestamp);
+        $svcPrefix = sprintf('%s/%s/%s/', SERVICE_ORDER_PREFIX, $svcYear, $svcMonth);
+        $svcMonthKey = $svcYear . '-' . $svcMonth;
+        if (!isset($monthCounters[$svcMonthKey])) {
+            $monthMaxStmt->execute([$svcPrefix . '%']);
+            $monthCounters[$svcMonthKey] = (int)$monthMaxStmt->fetchColumn();
+        }
+        $monthCounters[$svcMonthKey]++;
+        $svcNumber = sprintf('%s%04d', $svcPrefix, $monthCounters[$svcMonthKey]);
+        $fillStmt->execute([$svcNumber, (int)$svcRow['id']]);
+    }
+} catch (Exception $e) { /* ignore */ }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) { flashError('Błąd bezpieczeństwa.'); redirect(getBaseUrl() . 'services.php'); }
+    $postAction      = sanitize($_POST['action'] ?? '');
+    $deviceId        = (int)($_POST['device_id'] ?? 0);
+    $installationId  = (int)($_POST['installation_id'] ?? 0) ?: null;
+    $technicianId    = (int)($_POST['technician_id'] ?? 0) ?: null;
+    $type            = sanitize($_POST['type'] ?? 'przeglad');
+    $replacementDeviceId = (int)($_POST['replacement_device_id'] ?? 0) ?: null;
+    $plannedDate     = sanitize($_POST['planned_date'] ?? '') ?: null;
+    $completedDate   = sanitize($_POST['completed_date'] ?? '') ?: null;
+    $status          = sanitize($_POST['status'] ?? 'zaplanowany');
+    $description     = sanitize($_POST['description'] ?? '');
+    $resolution      = sanitize($_POST['resolution'] ?? '');
+    $cost            = str_replace(',', '.', $_POST['cost'] ?? '0');
+    $currentUser     = getCurrentUser();
+
+    $validTypes     = ['przeglad','naprawa','wymiana','aktualizacja','inne'];
+    $validStatuses  = ['zaplanowany','w_trakcie','zakończony','anulowany','archiwum'];
+    if (!in_array($type, $validTypes)) $type = 'przeglad';
+    if (!in_array($status, $validStatuses)) $status = 'zaplanowany';
+    if (!$technicianId) $technicianId = $currentUser['id'];
+    if ($type !== 'wymiana') $replacementDeviceId = null;
+
+    if ($postAction === 'add') {
+        if (!$deviceId || empty($plannedDate)) {
+            flashError('Urządzenie i data zaplanowanego serwisu są wymagane.');
+            redirect(getBaseUrl() . 'services.php?action=add');
+        }
+        $insertStmt = $db->prepare("INSERT INTO services (order_number, device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+        $inserted = false;
+        $lockName = null;
+        $lockAcquired = false;
+        try {
+            if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $lockName = 'services_order_number_' . date('Y_m');
+                $lockStmt = $db->prepare("SELECT GET_LOCK(?, 5)");
+                $lockStmt->execute([$lockName]);
+                $lockAcquired = (int)$lockStmt->fetchColumn() === 1;
+            } else {
+                // Non-MySQL drivers rely on unique-index retry handling below.
+            }
+            for ($attempt = 0; $attempt < 5 && !$inserted; $attempt++) {
+                $serviceOrderNumber = generateServiceOrderNumber();
+                try {
+                    $insertStmt->execute([$serviceOrderNumber, $deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost]);
+                    $inserted = true;
+                } catch (PDOException $e) {
+                    $sqlState = $e->getCode();
+                    $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
+                    // 1062 = MySQL duplicate key, 1555/2067 = SQLite duplicate/unique constraint variants.
+                    $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
+                    if (!$isDuplicate) {
+                        throw $e;
+                    }
+                    if ($attempt === 4) throw $e;
+                }
+            }
+        } finally {
+            if ($lockAcquired && $lockName) {
+                try {
+                    $unlockStmt = $db->prepare("SELECT RELEASE_LOCK(?)");
+                    $unlockStmt->execute([$lockName]);
+                } catch (Exception $e) { /* ignore */ }
+            }
+        }
+        $newServiceId = (int)$db->lastInsertId();
+        // Record device history for "wymiana"
+        if ($type === 'wymiana' && $deviceId && $replacementDeviceId) {
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$deviceId, 'wymieniono_na', $replacementDeviceId, $newServiceId]);
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$replacementDeviceId, 'wymieniono_z', $deviceId, $newServiceId]);
+        }
+        // Update device status if in service
+        if ($status === 'w_trakcie') {
+            updateDeviceFieldsWithHistory($db, (int)$deviceId, ['status' => 'w_serwisie'], (int)$currentUser['id'], 'service_add', $newServiceId);
+        }
+        // Process accessory pickups submitted with the service form
+        $svcAccIds   = array_map('intval', (array)($_POST['svc_acc'] ?? []));
+        $svcAccQtys  = array_map('intval', (array)($_POST['svc_acc_qty'] ?? []));
+        $svcAccNotes = (array)($_POST['svc_acc_note'] ?? []);
+        if (!empty($svcAccIds)) {
+            foreach ($svcAccIds as $si => $sacid) {
+                $sqty = max(0, (int)($svcAccQtys[$si] ?? 0));
+                if (!$sacid || !$sqty) continue;
+                $snote = sanitize($svcAccNotes[$si] ?? '');
+                try {
+                    $db->prepare("INSERT INTO accessory_issues (accessory_id, installation_id, user_id, quantity, notes) VALUES (?,?,?,?,?)")
+                       ->execute([$sacid, $installationId ?: null, $currentUser['id'], $sqty, $snote ?: null]);
+                } catch (Exception $e) { /* non-fatal */ }
+            }
+        }
+        flashSuccess('Serwis zarejestrowany pomyślnie.');
+        // Send notification email to all users with e-mail
+        if ($newServiceId > 0) {
+            try {
+                $svcTypeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+                $svcStatusLabels = ['zaplanowany'=>'Zaplanowany','w_trakcie'=>'W trakcie','zakończony'=>'Zakończony','anulowany'=>'Anulowany'];
+                $orderLabel = '';
+                try {
+                    $oStmt = $db->prepare("SELECT order_number FROM services WHERE id=?");
+                    $oStmt->execute([$newServiceId]);
+                    $orderLabel = (string)($oStmt->fetchColumn() ?? '');
+                } catch (Exception $e) {}
+                $devLabel = '';
+                if ($deviceId) {
+                    $dRow = $db->prepare("SELECT d.serial_number, m.name as model_name, mf.name as manufacturer FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.id=?");
+                    $dRow->execute([$deviceId]);
+                    $dInfo = $dRow->fetch();
+                    if ($dInfo) $devLabel = $dInfo['manufacturer'] . ' ' . $dInfo['model_name'] . ' — ' . $dInfo['serial_number'];
+                }
+                $techName = $currentUser['name'];
+                if ($technicianId && $technicianId !== $currentUser['id']) {
+                    $tRow = $db->prepare("SELECT name FROM users WHERE id=?");
+                    $tRow->execute([$technicianId]);
+                    $tInfo = $tRow->fetch();
+                    if ($tInfo) $techName = $tInfo['name'];
+                }
+                $body = getEmailTemplate('service_created', [
+                    'ORDER_NUMBER' => $orderLabel ?: '—',
+                    'SERVICE_TYPE' => $svcTypeLabels[$type] ?? $type,
+                    'DEVICE'       => $devLabel ?: '—',
+                    'DATE'         => $plannedDate ? date('d.m.Y', strtotime($plannedDate)) : '—',
+                    'TECHNICIAN'   => $techName,
+                    'STATUS'       => $svcStatusLabels[$status] ?? $status,
+                    'DESCRIPTION'  => $description ?: '—',
+                    'SENDER_NAME'  => $currentUser['name'],
+                ]);
+                sendServiceEmailToAllUsers($db, 'Nowy serwis' . ($orderLabel ? ' ' . $orderLabel : '') . ' — FleetLink System GPS', $body);
+            } catch (Exception $emailEx) { /* non-fatal */ }
+        }
+        redirect(getBaseUrl() . 'services.php?action=view&id=' . $newServiceId);
+
+    } elseif ($postAction === 'edit') {
+        $editId = (int)($_POST['id'] ?? 0);
+        // Fetch old values to compare wymiana state
+        $oldSvcStmt = $db->prepare("SELECT order_number, device_id, installation_id, technician_id, type, replacement_device_id, planned_date, completed_date, status, description, resolution, cost FROM services WHERE id=?");
+        $oldSvcStmt->execute([$editId]);
+        $oldSvc = $oldSvcStmt->fetch() ?: [];
+        if (($oldSvc['status'] ?? '') === 'archiwum') {
+            flashError('Nie można edytować zarchiwizowanego serwisu.');
+            redirect(getBaseUrl() . 'services.php?action=archive');
+        }
+        $db->prepare("UPDATE services SET device_id=?, installation_id=?, technician_id=?, type=?, replacement_device_id=?, planned_date=?, completed_date=?, status=?, description=?, resolution=?, cost=? WHERE id=?")
+           ->execute([$deviceId, $installationId, $technicianId, $type, $replacementDeviceId, $plannedDate, $completedDate, $status, $description, $resolution, $cost, $editId]);
+        // Handle device_history for wymiana changes
+        $wasWymiana = ($oldSvc['type'] ?? '') === 'wymiana' && ($oldSvc['device_id'] ?? 0) && ($oldSvc['replacement_device_id'] ?? 0);
+        $isWymiana  = $type === 'wymiana' && $deviceId && $replacementDeviceId;
+        $deviceChanged = ($oldSvc['device_id'] ?? 0) !== $deviceId || ($oldSvc['replacement_device_id'] ?? 0) !== $replacementDeviceId;
+        if ($isWymiana && (!$wasWymiana || $deviceChanged)) {
+            if ($wasWymiana) {
+                $db->prepare("DELETE FROM device_history WHERE service_id=?")->execute([$editId]);
+            }
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$deviceId, 'wymieniono_na', $replacementDeviceId, $editId]);
+            $db->prepare("INSERT INTO device_history (device_id, event_type, related_device_id, service_id) VALUES (?,?,?,?)")
+               ->execute([$replacementDeviceId, 'wymieniono_z', $deviceId, $editId]);
+        } elseif ($wasWymiana && !$isWymiana) {
+            $db->prepare("DELETE FROM device_history WHERE service_id=?")->execute([$editId]);
+        }
+        // Update device status
+        if ($status === 'w_trakcie') {
+            updateDeviceFieldsWithHistory($db, (int)$deviceId, ['status' => 'w_serwisie'], (int)$currentUser['id'], 'service_edit', $editId);
+        } elseif ($status === 'zakończony') {
+            updateDeviceFieldsWithHistory($db, (int)$deviceId, ['status' => 'sprawny'], (int)$currentUser['id'], 'service_edit', $editId);
+        }
+        // Mail notification: edited service with changed fields
+        try {
+            $svcTypeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+            $svcStatusLabels = ['zaplanowany'=>'Zaplanowany','w_trakcie'=>'W trakcie','zakończony'=>'Zakończony','anulowany'=>'Anulowany','archiwum'=>'Archiwum'];
+            $changeMap = [
+                'device_id' => 'Urządzenie',
+                'installation_id' => 'Montaż',
+                'technician_id' => 'Technik',
+                'type' => 'Typ',
+                'replacement_device_id' => 'Urządzenie zastępcze',
+                'planned_date' => 'Data planowana',
+                'completed_date' => 'Data realizacji',
+                'status' => 'Status',
+                'description' => 'Opis',
+                'resolution' => 'Rozwiązanie',
+                'cost' => 'Koszt',
+            ];
+            $newValues = [
+                'device_id' => $deviceId,
+                'installation_id' => $installationId,
+                'technician_id' => $technicianId,
+                'type' => $type,
+                'replacement_device_id' => $replacementDeviceId,
+                'planned_date' => $plannedDate,
+                'completed_date' => $completedDate,
+                'status' => $status,
+                'description' => $description,
+                'resolution' => $resolution,
+                'cost' => $cost,
+            ];
+            $changes = [];
+            foreach ($changeMap as $field => $label) {
+                $oldVal = (string)($oldSvc[$field] ?? '');
+                $newVal = (string)($newValues[$field] ?? '');
+                if ($field === 'type') {
+                    $oldVal = $svcTypeLabels[$oldVal] ?? $oldVal;
+                    $newVal = $svcTypeLabels[$newVal] ?? $newVal;
+                } elseif ($field === 'status') {
+                    $oldVal = $svcStatusLabels[$oldVal] ?? $oldVal;
+                    $newVal = $svcStatusLabels[$newVal] ?? $newVal;
+                } elseif (in_array($field, ['planned_date', 'completed_date'], true)) {
+                    $oldVal = $oldVal ? date('d.m.Y', strtotime($oldVal)) : '—';
+                    $newVal = $newVal ? date('d.m.Y', strtotime($newVal)) : '—';
+                } elseif ($field === 'cost') {
+                    $oldVal = $oldVal !== '' ? formatMoney((float)$oldVal) : '0,00 zł';
+                    $newVal = $newVal !== '' ? formatMoney((float)$newVal) : '0,00 zł';
+                }
+                if ($oldVal !== $newVal) {
+                    $changes[] = $label . ': ' . $oldVal . ' → ' . $newVal;
+                }
+            }
+            if (!empty($changes)) {
+                $devLabel = '';
+                $dRow = $db->prepare("SELECT d.serial_number, m.name as model_name, mf.name as manufacturer FROM devices d JOIN models m ON m.id=d.model_id JOIN manufacturers mf ON mf.id=m.manufacturer_id WHERE d.id=?");
+                $dRow->execute([$deviceId]);
+                $dInfo = $dRow->fetch();
+                if ($dInfo) $devLabel = $dInfo['manufacturer'] . ' ' . $dInfo['model_name'] . ' — ' . $dInfo['serial_number'];
+                $techName = $currentUser['name'];
+                if ($technicianId) {
+                    $tRow = $db->prepare("SELECT name FROM users WHERE id=?");
+                    $tRow->execute([$technicianId]);
+                    $tInfo = $tRow->fetch();
+                    if ($tInfo) $techName = $tInfo['name'];
+                }
+                $body = getEmailTemplate('service_updated', [
+                    'ORDER_NUMBER' => $oldSvc['order_number'] ?? '—',
+                    'DEVICE'       => $devLabel ?: '—',
+                    'TECHNICIAN'   => $techName,
+                    'CHANGES'      => implode(' • ', $changes),
+                    'SENDER_NAME'  => $currentUser['name'],
+                ]);
+                sendServiceEmailToAllUsers($db, 'Zmienione zlecenie serwisowe ' . ($oldSvc['order_number'] ?? '') . ' — FleetLink System GPS', $body);
+            }
+        } catch (Exception $emailEx) { /* non-fatal */ }
+        flashSuccess('Serwis zaktualizowany.');
+        redirect(getBaseUrl() . 'services.php?action=view&id=' . $editId);
+
+    } elseif ($postAction === 'delete') {
+        $delId = (int)($_POST['id'] ?? 0);
+        $delChk = $db->prepare("SELECT status FROM services WHERE id=?");
+        $delChk->execute([$delId]);
+        $delRow = $delChk->fetch();
+        if (($delRow['status'] ?? '') === 'archiwum') {
+            flashError('Nie można usuwać zarchiwizowanego serwisu.');
+            redirect(getBaseUrl() . 'services.php?action=archive');
+        }
+        $db->prepare("DELETE FROM device_history WHERE service_id=?")->execute([$delId]);
+        $db->prepare("DELETE FROM services WHERE id=?")->execute([$delId]);
+        flashSuccess('Serwis usunięty.');
+        redirect(getBaseUrl() . 'services.php');
+    } elseif ($postAction === 'change_status') {
+        $svcId = (int)($_POST['id'] ?? 0);
+        $newStatus = sanitize($_POST['new_status'] ?? '');
+        $allowedStatuses = ['zaplanowany','w_trakcie','zakończony','anulowany','archiwum'];
+        if (!$svcId || !in_array($newStatus, $allowedStatuses, true)) {
+            flashError('Nieprawidłowe dane zmiany statusu serwisu.');
+            redirect(getBaseUrl() . 'services.php');
+        }
+        $rowStmt = $db->prepare("SELECT id, order_number, device_id, status, completed_date FROM services WHERE id=?");
+        $rowStmt->execute([$svcId]);
+        $svcRow = $rowStmt->fetch();
+        if (!$svcRow) {
+            flashError('Serwis nie istnieje.');
+            redirect(getBaseUrl() . 'services.php');
+        }
+
+        $completedDate = $svcRow['completed_date'];
+        if ($newStatus === 'zakończony' && empty($completedDate)) {
+            $completedDate = date('Y-m-d');
+        }
+        $db->prepare("UPDATE services SET status=?, completed_date=? WHERE id=?")->execute([$newStatus, $completedDate, $svcId]);
+
+        if ($newStatus === 'w_trakcie') {
+            updateDeviceFieldsWithHistory($db, (int)$svcRow['device_id'], ['status' => 'w_serwisie'], (int)$currentUser['id'], 'service_status_change', $svcId);
+        } elseif (in_array($newStatus, ['zakończony','anulowany','archiwum'], true)) {
+            updateDeviceFieldsWithHistory($db, (int)$svcRow['device_id'], ['status' => 'sprawny'], (int)$currentUser['id'], 'service_status_change', $svcId);
+        }
+
+        try {
+            if (($svcRow['status'] ?? '') !== $newStatus) {
+                $svcStatusLabels = ['zaplanowany'=>'Zaplanowany','w_trakcie'=>'W trakcie','zakończony'=>'Zakończony','anulowany'=>'Anulowany','archiwum'=>'Archiwum'];
+                $body = getEmailTemplate('service_updated', [
+                    'ORDER_NUMBER' => $svcRow['order_number'] ?? '—',
+                    'DEVICE'       => '—',
+                    'TECHNICIAN'   => $currentUser['name'],
+                    'CHANGES'      => 'Status: ' . ($svcStatusLabels[$svcRow['status']] ?? $svcRow['status']) . ' → ' . ($svcStatusLabels[$newStatus] ?? $newStatus),
+                    'SENDER_NAME'  => $currentUser['name'],
+                ]);
+                sendServiceEmailToAllUsers($db, 'Zmienione zlecenie serwisowe ' . ($svcRow['order_number'] ?? '') . ' — FleetLink System GPS', $body);
+            }
+        } catch (Exception $emailEx) { /* non-fatal */ }
+
+        $redirectTo = $newStatus === 'archiwum' ? 'archive' : 'list';
+        flashSuccess('Status serwisu został zaktualizowany.');
+        redirect(getBaseUrl() . 'services.php?action=' . $redirectTo);
+    }
+}
+
+if (in_array($action, ['view','edit','print']) && $id) {
+    $stmt = $db->prepare("
+        SELECT s.*, d.serial_number, d.imei, m.name as model_name, mf.name as manufacturer_name,
+               u.name as technician_name,
+               v.registration, v.make,
+               c.contact_name, c.company_name, c.phone as client_phone,
+               c.address as client_address, c.city as client_city, c.postal_code as client_postal_code
+        FROM services s
+        JOIN devices d ON d.id=s.device_id
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        LEFT JOIN users u ON u.id=s.technician_id
+        LEFT JOIN installations inst ON inst.id=s.installation_id
+        LEFT JOIN vehicles v ON v.id=inst.vehicle_id
+        LEFT JOIN clients c ON c.id=inst.client_id
+        WHERE s.id=?
+    ");
+    $stmt->execute([$id]);
+    $service = $stmt->fetch();
+    if (!$service) { flashError('Serwis nie istnieje.'); redirect(getBaseUrl() . 'services.php'); }
+}
+
+$allDevices = $db->query("
+    SELECT d.id, d.serial_number, m.name as model_name, mf.name as manufacturer_name,
+           COALESCE(
+               (SELECT COALESCE(i2.client_id, vv.client_id) FROM installations i2 LEFT JOIN vehicles vv ON vv.id=i2.vehicle_id WHERE i2.device_id=d.id AND i2.status='aktywna' ORDER BY i2.id DESC LIMIT 1),
+               (SELECT COALESCE(i3.client_id, vv2.client_id) FROM installations i3 LEFT JOIN vehicles vv2 ON vv2.id=i3.vehicle_id WHERE i3.device_id=d.id ORDER BY i3.id DESC LIMIT 1),
+               0) as client_id,
+           COALESCE(
+               (SELECT v.registration FROM installations i3 JOIN vehicles v ON v.id=i3.vehicle_id WHERE i3.device_id=d.id AND i3.status='aktywna' ORDER BY i3.id DESC LIMIT 1),
+               (SELECT v.registration FROM installations i4 JOIN vehicles v ON v.id=i4.vehicle_id WHERE i4.device_id=d.id ORDER BY i4.id DESC LIMIT 1)
+           ) as active_registration
+    FROM devices d
+    JOIN models m ON m.id=d.model_id
+    JOIN manufacturers mf ON mf.id=m.manufacturer_id
+    WHERE d.status != 'wycofany'
+    ORDER BY mf.name, m.name, d.serial_number
+")->fetchAll();
+
+$svcClients = $db->query("SELECT id, contact_name, company_name FROM clients WHERE active=1 ORDER BY company_name, contact_name")->fetchAll();
+
+$users = $db->query("SELECT id, name FROM users WHERE active=1 ORDER BY name")->fetchAll();
+$activeInstallations = $db->query("
+    SELECT i.id, v.registration, d.serial_number, d.id as device_id
+    FROM installations i
+    JOIN vehicles v ON v.id=i.vehicle_id
+    JOIN devices d ON d.id=i.device_id
+    WHERE i.status='aktywna'
+    ORDER BY v.registration
+")->fetchAll();
+
+// Available accessories for add/edit forms
+$svcAvailableAccessories = [];
+try {
+    $aaS = $db->query("
+        SELECT a.id, a.name,
+               (a.quantity_initial - COALESCE((SELECT SUM(ai2.quantity) FROM accessory_issues ai2 WHERE ai2.accessory_id = a.id),0)) AS remaining
+        FROM accessories a WHERE a.active = 1 ORDER BY a.name
+    ");
+    $svcAvailableAccessories = $aaS->fetchAll();
+} catch (Exception $e) { $svcAvailableAccessories = []; }
+
+$services = [];
+$archiveServices = [];
+$totalServices = 0;
+$defaultServicePerPage = 10;
+$servicePerPage = $defaultServicePerPage;
+$servicePage = 1;
+$serviceSort = 'planned_desc';
+if (in_array($action, ['list', 'archive'], true)) {
+    $filterStatus = sanitize($_GET['status'] ?? '');
+    $filterType   = sanitize($_GET['type'] ?? '');
+    $search       = sanitize($_GET['search'] ?? '');
+    $dateFrom     = sanitize($_GET['date_from'] ?? '');
+    $dateTo       = sanitize($_GET['date_to'] ?? '');
+    if ($action === 'list') {
+        $servicePerPageCandidate = (int)($_GET['per_page'] ?? $defaultServicePerPage);
+        $servicePerPage = in_array($servicePerPageCandidate, [$defaultServicePerPage, 50, 100], true) ? $servicePerPageCandidate : $defaultServicePerPage;
+        $servicePage = max(1, (int)($_GET['page'] ?? 1));
+        $serviceSort = sanitize($_GET['sort'] ?? 'planned_desc');
+        if (!in_array($serviceSort, ['planned_desc', 'planned_asc'], true)) $serviceSort = 'planned_desc';
+    }
+
+    $baseSql = "
+        FROM services s
+        JOIN devices d ON d.id=s.device_id
+        JOIN models m ON m.id=d.model_id
+        JOIN manufacturers mf ON mf.id=m.manufacturer_id
+        LEFT JOIN users u ON u.id=s.technician_id
+        LEFT JOIN installations inst ON inst.id=s.installation_id
+        LEFT JOIN vehicles v ON v.id=inst.vehicle_id
+        LEFT JOIN clients c ON c.id=inst.client_id
+        WHERE 1=1
+    ";
+    $selectSql = "
+        SELECT s.id, s.order_number, s.type, s.planned_date, s.completed_date, s.status, s.cost, s.description,
+               d.serial_number, m.name as model_name, mf.name as manufacturer_name,
+               u.name as technician_name,
+               v.registration, v.make,
+               c.contact_name, c.company_name
+    ";
+    $params = [];
+    if ($action === 'archive') {
+        $baseSql .= " AND s.status='archiwum'";
+    } else {
+        $baseSql .= " AND s.status != 'archiwum'";
+    }
+    if ($filterStatus && $action !== 'archive') { $baseSql .= " AND s.status=?"; $params[] = $filterStatus; }
+    if ($filterType)   { $baseSql .= " AND s.type=?";   $params[] = $filterType; }
+    if ($search) {
+        $baseSql .= " AND (s.order_number LIKE ? OR d.serial_number LIKE ? OR m.name LIKE ? OR v.registration LIKE ?)";
+        $params = array_merge($params, ["%$search%","%$search%","%$search%","%$search%"]);
+    }
+    if ($dateFrom) { $baseSql .= " AND s.planned_date >= ?"; $params[] = $dateFrom; }
+    if ($dateTo)   { $baseSql .= " AND s.planned_date <= ?"; $params[] = $dateTo; }
+    if ($action === 'archive') {
+        $sql = $selectSql . $baseSql . " ORDER BY COALESCE(s.completed_date, s.planned_date) DESC, s.order_number DESC, s.id DESC";
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+        $archiveServices = $stmt->fetchAll();
+    } else {
+        $countStmt = $db->prepare("SELECT COUNT(*) " . $baseSql);
+        $countStmt->execute($params);
+        $totalServices = (int)$countStmt->fetchColumn();
+        $serviceOffset = ($servicePage - 1) * $servicePerPage;
+        $sortSql = $serviceSort === 'planned_asc'
+            ? " ORDER BY s.planned_date ASC, s.order_number ASC, s.id ASC"
+            : " ORDER BY s.planned_date DESC, s.order_number DESC, s.id DESC";
+        $sql = $selectSql . $baseSql . $sortSql . " LIMIT ? OFFSET ?";
+        $stmt = $db->prepare($sql);
+        $stmt->execute(array_merge($params, [$servicePerPage, $serviceOffset]));
+        $services = $stmt->fetchAll();
+    }
+}
+
+// Fetch service protocols for the Protocols tab
+$serviceProtocols = [];
+if ($action === 'list') {
+    try {
+        $serviceProtocols = $db->query("
+            SELECT p.id, p.type, p.protocol_number, p.date,
+                   u.name as technician_name, d.serial_number, m.name as model_name
+            FROM protocols p
+            LEFT JOIN users u ON u.id=p.technician_id
+            LEFT JOIN services s ON s.id=p.service_id
+            LEFT JOIN devices d ON d.id=s.device_id
+            LEFT JOIN models m ON m.id=d.model_id
+            WHERE p.type='PS'
+            ORDER BY p.date DESC, p.id DESC
+        ")->fetchAll();
+    } catch (Exception $e) { $serviceProtocols = []; }
+}
+
+if ($action === 'view' && $id && !empty($_GET['ajax'])) {
+    header('Content-Type: text/html; charset=utf-8');
+    if (!isset($service)) {
+        echo '<p class="text-danger p-3">Serwis nie istnieje.</p>';
+        exit;
+    }
+    ?>
+    <div class="row g-3">
+        <div class="col-md-5">
+            <div class="card">
+                <div class="card-header">Szczegóły serwisu</div>
+                <div class="card-body">
+                    <table class="table table-sm table-borderless">
+                        <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number'] ?? '—') ?></td></tr>
+                        <tr><th class="text-muted">Status</th><td><?= getStatusBadge($service['status'], 'service') ?></td></tr>
+                        <tr><th class="text-muted">Typ</th><td><?= h(ucfirst($service['type'])) ?></td></tr>
+                        <tr><th class="text-muted">Urządzenie</th><td><a href="devices.php?action=view&id=<?= $service['device_id'] ?>"><?= h($service['serial_number']) ?></a><br><small><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></small></td></tr>
+                        <?php if ($service['registration']): ?><tr><th class="text-muted">Pojazd</th><td><?= h($service['registration'] . ' ' . $service['make']) ?></td></tr><?php endif; ?>
+                        <tr><th class="text-muted">Zaplanowany</th><td><?= formatDate($service['planned_date']) ?></td></tr>
+                        <tr><th class="text-muted">Zrealizowany</th><td><?= formatDate($service['completed_date'] ?? '') ?></td></tr>
+                        <tr><th class="text-muted">Technik</th><td><?= h($service['technician_name'] ?? '—') ?></td></tr>
+                        <tr><th class="text-muted">Koszt</th><td class="fw-bold"><?= $service['cost'] > 0 ? formatMoney($service['cost']) : '—' ?></td></tr>
+                    </table>
+                    <?php if ($service['description']): ?>
+                    <hr><strong class="small">Opis:</strong><p class="small text-muted mt-1"><?= h($service['description']) ?></p>
+                    <?php endif; ?>
+                    <?php if ($service['resolution']): ?>
+                    <strong class="small">Rozwiązanie:</strong><p class="small text-muted mt-1"><?= h($service['resolution']) ?></p>
+                    <?php endif; ?>
+                    <?php if ($service['contact_name'] || $service['company_name']): ?>
+                    <hr>
+                    <p class="fw-semibold mb-1"><i class="fas fa-user me-1 text-muted"></i>Klient</p>
+                    <p class="mb-0"><?= h($service['company_name'] ?: $service['contact_name']) ?></p>
+                    <?php if ($service['client_phone']): ?><small class="text-muted"><?= h($service['client_phone']) ?></small><?php endif; ?>
+                    <?php endif; ?>
+                </div>
+                <div class="card-footer d-flex gap-2">
+                    <a href="services.php?action=edit&id=<?= $service['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                    <a href="services.php?action=print&id=<?= $service['id'] ?>" class="btn btn-sm btn-outline-dark" target="_blank"><i class="fas fa-print me-1"></i>Drukuj</a>
+                    <a href="protocols.php?action=add&service=<?= $service['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php
+    exit;
+}
+
+$activePage = 'services';
+$pageTitle = $action === 'print' ? 'Zlecenie serwisowe' : 'Serwisy';
+include __DIR__ . '/includes/header.php';
+?>
+
+<div class="page-header">
+    <h1><i class="fas fa-wrench me-2 text-primary"></i>Serwisy</h1>
+    <?php if (in_array($action, ['list','archive'], true)): ?>
+    <?php if ($action === 'list'): ?>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#svcListAddModal"><i class="fas fa-plus me-2"></i>Nowy serwis</button>
+    <?php endif; ?>
+    <?php elseif ($action !== 'print'): ?>
+    <a href="services.php" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-2"></i>Powrót</a>
+    <?php endif; ?>
+</div>
+
+<?php if (in_array($action, ['list','archive'], true)): ?>
+<ul class="nav nav-tabs mb-3" id="serviceTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <?php if ($action === 'list'): ?>
+        <button class="nav-link <?= $activeTab === 'serwisy' ? 'active' : '' ?>" id="tab-serwisy" data-bs-toggle="tab" data-bs-target="#pane-serwisy" type="button" role="tab">
+            <i class="fas fa-wrench me-1"></i>Serwis
+        </button>
+        <?php else: ?>
+        <a class="nav-link" href="services.php"><i class="fas fa-wrench me-1"></i>Serwis</a>
+        <?php endif; ?>
+    </li>
+    <li class="nav-item" role="presentation">
+        <a class="nav-link <?= $action === 'archive' ? 'active' : '' ?>" href="services.php?action=archive">
+            <i class="fas fa-archive me-1"></i>Archiwum
+        </a>
+    </li>
+    <li class="nav-item" role="presentation">
+        <?php if ($action === 'list'): ?>
+        <button class="nav-link <?= $activeTab === 'protokoly' ? 'active' : '' ?>" id="tab-protokoly-s" data-bs-toggle="tab" data-bs-target="#pane-protokoly-s" type="button" role="tab">
+            <i class="fas fa-clipboard-check me-1"></i>Protokoły serwisu
+        </button>
+        <?php else: ?>
+        <a class="nav-link" href="services.php?tab=protokoly"><i class="fas fa-clipboard-check me-1"></i>Protokoły serwisu</a>
+        <?php endif; ?>
+    </li>
+</ul>
+<?php endif; ?>
+
+<?php if ($action === 'list'): ?>
+<div class="tab-content">
+<div class="tab-pane fade <?= $activeTab === 'serwisy' ? 'show active' : '' ?>" id="pane-serwisy" role="tabpanel">
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2">
+            <div class="col-md-3">
+                <input type="search" name="search" class="form-control form-control-sm" placeholder="Szukaj (nr zlecenia, nr seryjny, rejestracja, model...)" value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-md-2">
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">Wszystkie statusy</option>
+                    <?php foreach (['zaplanowany','w_trakcie','zakończony','anulowany'] as $s): ?>
+                    <option value="<?= $s ?>" <?= ($_GET['status'] ?? '') === $s ? 'selected' : '' ?>><?= ucfirst($s) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select name="type" class="form-select form-select-sm">
+                    <option value="">Wszystkie typy</option>
+                    <?php foreach (['przeglad','naprawa','wymiana','aktualizacja','inne'] as $t): ?>
+                    <option value="<?= $t ?>" <?= ($_GET['type'] ?? '') === $t ? 'selected' : '' ?>><?= ucfirst($t) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_from" class="form-control form-control-sm" value="<?= h($_GET['date_from'] ?? '') ?>" title="Data od">
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_to" class="form-control form-control-sm" value="<?= h($_GET['date_to'] ?? '') ?>" title="Data do">
+            </div>
+            <div class="col-md-2">
+                <select name="sort" class="form-select form-select-sm">
+                    <option value="planned_desc" <?= $serviceSort === 'planned_desc' ? 'selected' : '' ?>>Data: najnowsze</option>
+                    <option value="planned_asc" <?= $serviceSort === 'planned_asc' ? 'selected' : '' ?>>Data: najstarsze</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="per_page" class="form-select form-select-sm" style="width:auto">
+                    <option value="10" <?= $servicePerPage === 10 ? 'selected' : '' ?>>10 / stronę</option>
+                    <option value="50" <?= $servicePerPage === 50 ? 'selected' : '' ?>>50 / stronę</option>
+                    <option value="100" <?= $servicePerPage === 100 ? 'selected' : '' ?>>100 / stronę</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="services.php" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header">Serwisy (<?= $totalServices ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Nr zlecenia</th><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
+            </thead>
+            <tbody>
+                <?php
+                $minItemsForDayGrouping = 2;
+                $servicesByDay = [];
+                foreach ($services as $svc) {
+                    $dayKey = $svc['planned_date'] ?: 'brak_daty';
+                    $servicesByDay[$dayKey][] = $svc;
+                }
+                foreach ($servicesByDay as $dayKey => $dayServices):
+                    $isGroupedByDay = count($dayServices) >= $minItemsForDayGrouping;
+                    if ($isGroupedByDay):
+                ?>
+                <tr class="table-light">
+                    <td colspan="10" class="fw-semibold small">
+                        <i class="fas fa-calendar-day me-1 text-warning"></i>
+                        <?= $dayKey === 'brak_daty' ? 'Brak daty' : formatDate($dayKey) ?>
+                        <span class="badge bg-secondary ms-2"><?= count($dayServices) ?> zleceń</span>
+                    </td>
+                </tr>
+                <?php endif; ?>
+                <?php foreach ($dayServices as $svc):
+                    $today = date('Y-m-d');
+                    $tomorrow = date('Y-m-d', strtotime('+1 day'));
+                    $isDelayed = !empty($svc['planned_date']) && $svc['planned_date'] < $today && $svc['status'] !== 'w_trakcie';
+                    $isNear = !empty($svc['planned_date']) && in_array($svc['planned_date'], [$today, $tomorrow], true);
+                    $rowClass = $isDelayed ? 'table-danger' : ($isNear ? 'table-warning' : '');
+                ?>
+                <tr class="<?= $rowClass ?>">
+                    <td class="fw-semibold">
+                        <button type="button"
+                                class="btn btn-link p-0 align-baseline"
+                                aria-label="Otwórz podgląd serwisu dla zlecenia <?= h($svc['order_number']) ?>"
+                                onclick="openServiceModal(<?= (int)$svc['id'] ?>)"><?= h($svc['order_number']) ?></button>
+                    </td>
+                    <td><?= formatDate($svc['planned_date']) ?></td>
+                    <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
+                    <td>
+                        <a href="#" onclick="openServiceModal(<?= $svc['id'] ?>); return false;"><?= h($svc['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($svc['manufacturer_name'] . ' ' . $svc['model_name']) ?></small>
+                    </td>
+                    <td><?= $svc['registration'] ? h($svc['registration'] . ' ' . $svc['make']) : '—' ?></td>
+                    <td class="small">
+                        <?php if ($svc['company_name']): ?>
+                        <div class="fw-semibold"><?= h($svc['company_name']) ?></div>
+                        <?php elseif ($svc['contact_name']): ?>
+                        <?= h($svc['contact_name']) ?>
+                        <?php else: ?>
+                        <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= getStatusBadge($svc['status'], 'service') ?></td>
+                    <td><?= $svc['cost'] > 0 ? formatMoney($svc['cost']) : '—' ?></td>
+                    <td><?= h($svc['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="openServiceModal(<?= $svc['id'] ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
+                        <?php if (!in_array($svc['status'], ['zakończony','anulowany','archiwum'], true)): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Oznaczyć serwis #<?= $svc['id'] ?> jako zakończony?')">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="change_status">
+                            <input type="hidden" name="id" value="<?= $svc['id'] ?>">
+                            <input type="hidden" name="new_status" value="zakończony">
+                            <button type="submit" class="btn btn-sm btn-outline-success btn-action" title="Zakończ serwis"><i class="fas fa-check"></i></button>
+                        </form>
+                        <?php endif; ?>
+                        <?php if ($svc['status'] !== 'archiwum'): ?>
+                        <form method="POST" class="d-inline" onsubmit="return confirm('Przenieść serwis #<?= $svc['id'] ?> do archiwum?')">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="change_status">
+                            <input type="hidden" name="id" value="<?= $svc['id'] ?>">
+                            <input type="hidden" name="new_status" value="archiwum">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary btn-action" title="Archiwizuj serwis"><i class="fas fa-archive"></i></button>
+                        </form>
+                        <?php endif; ?>
+                        <a href="services.php?action=edit&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-primary btn-action"><i class="fas fa-edit"></i></a>
+                        <a href="services.php?action=print&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie serwisowe"><i class="fas fa-print"></i></a>
+                        <form method="POST" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $svc['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń serwis #<?= $svc['id'] ?>?"><i class="fas fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                <?php endforeach; endforeach; ?>
+                <?php if (empty($services)): ?><tr><td colspan="10" class="text-center text-muted p-3">Brak serwisów.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php
+$serviceListQuery = http_build_query(array_filter([
+    'search' => $_GET['search'] ?? '',
+    'status' => $_GET['status'] ?? '',
+    'type' => $_GET['type'] ?? '',
+    'date_from' => $_GET['date_from'] ?? '',
+    'date_to' => $_GET['date_to'] ?? '',
+    'sort' => $serviceSort !== 'planned_desc' ? $serviceSort : '',
+    'per_page' => $servicePerPage !== $defaultServicePerPage ? $servicePerPage : '',
+], static fn($value) => $value !== ''));
+$serviceListUrl = 'services.php' . ($serviceListQuery !== '' ? '?' . $serviceListQuery : '');
+echo paginate($totalServices, $servicePerPage, $servicePage, $serviceListUrl);
+?>
+
+</div><!-- /pane-serwisy -->
+<div class="tab-pane fade <?= $activeTab === 'protokoly' ? 'show active' : '' ?>" id="pane-protokoly-s" role="tabpanel">
+<div class="card">
+    <div class="card-header">Protokoły serwisowe (<?= count($serviceProtocols) ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead><tr><th>Nr protokołu</th><th>Data</th><th>Urządzenie</th><th>Technik</th><th>Akcje</th></tr></thead>
+            <tbody>
+                <?php foreach ($serviceProtocols as $sp): ?>
+                <tr>
+                    <td class="fw-bold"><a href="protocols.php?action=view&id=<?= $sp['id'] ?>"><?= h($sp['protocol_number']) ?></a></td>
+                    <td><?= formatDate($sp['date']) ?></td>
+                    <td><?= h($sp['serial_number'] ?? '—') ?><br><small class="text-muted"><?= h($sp['model_name'] ?? '') ?></small></td>
+                    <td><?= h($sp['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <a href="protocols.php?action=view&id=<?= $sp['id'] ?>" class="btn btn-sm btn-outline-info btn-action"><i class="fas fa-eye"></i></a>
+                        <a href="protocols.php?action=print&id=<?= $sp['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary btn-action"><i class="fas fa-print"></i></a>
+                        <?php if (isAdmin()): ?>
+                        <form method="POST" action="protocols.php" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= $sp['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger btn-action"
+                                    data-confirm="Usuń protokół <?= h($sp['protocol_number']) ?>?"><i class="fas fa-trash"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($serviceProtocols)): ?>
+                <tr><td colspan="5" class="text-center text-muted p-3">Brak protokołów serwisowych.<br>
+                    <a href="protocols.php?action=add&type=PS" class="btn btn-sm btn-outline-primary mt-2"><i class="fas fa-plus me-1"></i>Dodaj protokół serwisowy</a>
+                </td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+</div><!-- /pane-protokoly-s -->
+</div><!-- /tab-content -->
+
+<?php elseif ($action === 'archive'): ?>
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2">
+            <input type="hidden" name="action" value="archive">
+            <div class="col-md-3">
+                <input type="search" name="search" class="form-control form-control-sm" placeholder="Szukaj (nr seryjny, rejestracja, model...)" value="<?= h($_GET['search'] ?? '') ?>">
+            </div>
+            <div class="col-md-2">
+                <select name="type" class="form-select form-select-sm">
+                    <option value="">Wszystkie typy</option>
+                    <?php foreach (['przeglad','naprawa','wymiana','aktualizacja','inne'] as $t): ?>
+                    <option value="<?= $t ?>" <?= ($_GET['type'] ?? '') === $t ? 'selected' : '' ?>><?= ucfirst($t) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_from" class="form-control form-control-sm" value="<?= h($_GET['date_from'] ?? '') ?>" title="Data od">
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_to" class="form-control form-control-sm" value="<?= h($_GET['date_to'] ?? '') ?>" title="Data do">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Filtruj</button>
+                <a href="services.php?action=archive" class="btn btn-sm btn-outline-secondary ms-1">Wyczyść</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header"><i class="fas fa-archive me-2"></i>Archiwum zleceń serwisowych (<?= count($archiveServices) ?>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Nr zlecenia</th><th>Zaplanowany</th><th>Typ</th><th>Urządzenie</th><th>Pojazd</th><th>Klient</th><th>Status</th><th>Koszt</th><th>Technik</th><th>Akcje</th></tr>
+            </thead>
+            <tbody>
+                <?php foreach ($archiveServices as $svc): ?>
+                <tr>
+                    <td class="fw-semibold">
+                        <button type="button"
+                                class="btn btn-link p-0 align-baseline"
+                                aria-label="Otwórz podgląd serwisu dla zlecenia <?= h($svc['order_number']) ?>"
+                                onclick="openServiceModal(<?= (int)$svc['id'] ?>)"><?= h($svc['order_number']) ?></button>
+                    </td>
+                    <td><?= formatDate($svc['planned_date']) ?></td>
+                    <td><span class="badge bg-secondary"><?= h(ucfirst($svc['type'])) ?></span></td>
+                    <td>
+                        <a href="#" onclick="openServiceModal(<?= $svc['id'] ?>); return false;"><?= h($svc['serial_number']) ?></a>
+                        <br><small class="text-muted"><?= h($svc['manufacturer_name'] . ' ' . $svc['model_name']) ?></small>
+                    </td>
+                    <td><?= $svc['registration'] ? h($svc['registration'] . ' ' . $svc['make']) : '—' ?></td>
+                    <td class="small">
+                        <?php if ($svc['company_name']): ?>
+                        <div class="fw-semibold"><?= h($svc['company_name']) ?></div>
+                        <?php elseif ($svc['contact_name']): ?>
+                        <?= h($svc['contact_name']) ?>
+                        <?php else: ?>
+                        <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= getStatusBadge($svc['status'], 'service') ?></td>
+                    <td><?= $svc['cost'] > 0 ? formatMoney($svc['cost']) : '—' ?></td>
+                    <td><?= h($svc['technician_name'] ?? '—') ?></td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-info btn-action"
+                                onclick="openServiceModal(<?= $svc['id'] ?>)"
+                                title="Podgląd"><i class="fas fa-eye"></i></button>
+                        <a href="services.php?action=print&id=<?= $svc['id'] ?>" class="btn btn-sm btn-outline-dark btn-action" title="Drukuj zlecenie serwisowe"><i class="fas fa-print"></i></a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($archiveServices)): ?><tr><td colspan="10" class="text-center text-muted p-3">Brak zarchiwizowanych serwisów.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+
+<?php elseif ($action === 'view' && isset($service)): ?>
+<div class="row g-3">
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">Szczegóły serwisu</div>
+            <div class="card-body">
+                <table class="table table-sm table-borderless">
+                    <tr><th class="text-muted">Nr zlecenia</th><td class="fw-bold"><?= h($service['order_number'] ?? '—') ?></td></tr>
+                    <tr><th class="text-muted">Status</th><td><?= getStatusBadge($service['status'], 'service') ?></td></tr>
+                    <tr><th class="text-muted">Typ</th><td><?= h(ucfirst($service['type'])) ?></td></tr>
+                    <tr><th class="text-muted">Urządzenie</th><td><a href="devices.php?action=view&id=<?= $service['device_id'] ?>"><?= h($service['serial_number']) ?></a><br><small><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></small></td></tr>
+                    <?php if ($service['registration']): ?><tr><th class="text-muted">Pojazd</th><td><?= h($service['registration'] . ' ' . $service['make']) ?></td></tr><?php endif; ?>
+                    <tr><th class="text-muted">Zaplanowany</th><td><?= formatDate($service['planned_date']) ?></td></tr>
+                    <tr><th class="text-muted">Zrealizowany</th><td><?= formatDate($service['completed_date']) ?></td></tr>
+                    <tr><th class="text-muted">Technik</th><td><?= h($service['technician_name'] ?? '—') ?></td></tr>
+                    <tr><th class="text-muted">Koszt</th><td class="fw-bold"><?= $service['cost'] > 0 ? formatMoney($service['cost']) : '—' ?></td></tr>
+                </table>
+                <?php if ($service['description']): ?>
+                <hr><strong class="small">Opis:</strong><p class="small text-muted mt-1"><?= h($service['description']) ?></p>
+                <?php endif; ?>
+                <?php if ($service['resolution']): ?>
+                <strong class="small">Rozwiązanie:</strong><p class="small text-muted mt-1"><?= h($service['resolution']) ?></p>
+                <?php endif; ?>
+            </div>
+            <div class="card-footer d-flex gap-2">
+                <?php if ($service['status'] !== 'archiwum'): ?>
+                <a href="services.php?action=edit&id=<?= $service['id'] ?>" class="btn btn-sm btn-primary"><i class="fas fa-edit me-1"></i>Edytuj</a>
+                <?php endif; ?>
+                <a href="services.php?action=print&id=<?= $service['id'] ?>" class="btn btn-sm btn-outline-dark"><i class="fas fa-print me-1"></i>Drukuj zlecenie</a>
+                <a href="protocols.php?action=add&service=<?= $service['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-clipboard me-1"></i>Protokół</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php elseif ($action === 'add' || $action === 'edit'): ?>
+<div class="card" style="max-width:<?= ($action === 'add' && !empty($svcAvailableAccessories)) ? '1400px' : '700px' ?>">
+    <div class="card-header"><i class="fas fa-wrench me-2"></i><?= $action === 'add' ? 'Nowy serwis' : 'Edytuj serwis' ?></div>
+    <div class="card-body">
+        <form method="POST">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="<?= $action ?>">
+            <?php if ($action === 'edit'): ?><input type="hidden" name="id" value="<?= $service['id'] ?>"><?php endif; ?>
+            <div class="row g-3">
+                <?php if ($action === 'add' && !empty($svcAvailableAccessories)): ?><div class="col-lg-8"><div class="row g-3"><?php endif; ?>
+                <div class="col-md-6">
+                    <label class="form-label required-star">Urządzenie GPS</label>
+                    <input type="text" id="deviceSearch" class="form-control mb-1"
+                           placeholder="Wyszukaj urządzenie (nr seryjny, model, producent)…"
+                           autocomplete="off">
+                    <select name="device_id" id="deviceSelect" class="form-select" required size="4" style="height:auto">
+                        <option value="">— wybierz urządzenie —</option>
+                    <?php
+                        $currentGroup = '';
+                        foreach ($allDevices as $d):
+                            $groupKey = $d['manufacturer_name'] . ' ' . $d['model_name'];
+                            if ($groupKey !== $currentGroup) {
+                                if ($currentGroup) echo '</optgroup>';
+                                echo '<optgroup label="' . h($groupKey) . '">';
+                                $currentGroup = $groupKey;
+                            }
+                        ?>
+                        <option value="<?= $d['id'] ?>"
+                                data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'] . ' ' . ($d['active_registration'] ?? ''))) ?>"
+                                <?= ($service['device_id'] ?? (int)($_GET['device'] ?? 0)) == $d['id'] ? 'selected' : '' ?>>
+                            <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?><?= $d['active_registration'] ? ' [' . h($d['active_registration']) . ']' : '' ?>
+                        </option>
+                        <?php endforeach; if ($currentGroup) echo '</optgroup>'; ?>
+                    </select>
+                    <div class="form-text">Wpisz fragment numeru seryjnego, modelu lub producenta aby przefiltrować listę.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Powiązany montaż</label>
+                    <select name="installation_id" id="editInstallSelect" class="form-select">
+                        <option value="">— brak —</option>
+                        <?php foreach ($activeInstallations as $inst): ?>
+                        <option value="<?= $inst['id'] ?>"
+                                data-device-id="<?= $inst['device_id'] ?>"
+                                <?= ($service['installation_id'] ?? (int)($_GET['installation'] ?? 0)) == $inst['id'] ? 'selected' : '' ?>>
+                            <?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label required-star">Typ serwisu</label>
+                    <select name="type" id="svcTypeSelect" class="form-select">
+                        <option value="przeglad" <?= ($service['type'] ?? 'przeglad') === 'przeglad' ? 'selected' : '' ?>>Przegląd</option>
+                        <option value="naprawa" <?= ($service['type'] ?? '') === 'naprawa' ? 'selected' : '' ?>>Naprawa</option>
+                        <option value="wymiana" <?= ($service['type'] ?? '') === 'wymiana' ? 'selected' : '' ?>>Wymiana</option>
+                        <option value="aktualizacja" <?= ($service['type'] ?? '') === 'aktualizacja' ? 'selected' : '' ?>>Aktualizacja firmware</option>
+                        <option value="inne" <?= ($service['type'] ?? '') === 'inne' ? 'selected' : '' ?>>Inne</option>
+                    </select>
+                </div>
+                <!-- Replacement device (wymiana only) -->
+                <div id="svcReplacementWrapper" class="col-12" <?= ($service['type'] ?? '') !== 'wymiana' ? 'style="display:none"' : '' ?>>
+                    <label class="form-label fw-semibold text-danger"><i class="fas fa-exchange-alt me-1"></i>Urządzenie zastępcze (wymiana na)</label>
+                    <select name="replacement_device_id" class="form-select">
+                        <option value="">— wybierz urządzenie zastępcze —</option>
+                        <?php foreach ($allDevices as $repDev): ?>
+                        <option value="<?= $repDev['id'] ?>" <?= ($service['replacement_device_id'] ?? 0) == $repDev['id'] ? 'selected' : '' ?>>
+                            <?= h($repDev['serial_number']) ?> — <?= h($repDev['manufacturer_name'] . ' ' . $repDev['model_name']) ?><?= $repDev['active_registration'] ? ' [' . h($repDev['active_registration']) . ']' : '' ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text text-danger"><i class="fas fa-info-circle me-1"></i>Historia "wymieniono na/z" zostanie zapisana w obu urządzeniach.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="zaplanowany" <?= ($service['status'] ?? 'zaplanowany') === 'zaplanowany' ? 'selected' : '' ?>>Zaplanowany</option>
+                        <option value="w_trakcie" <?= ($service['status'] ?? '') === 'w_trakcie' ? 'selected' : '' ?>>W trakcie</option>
+                        <option value="zakończony" <?= ($service['status'] ?? '') === 'zakończony' ? 'selected' : '' ?>>Zakończony</option>
+                        <option value="anulowany" <?= ($service['status'] ?? '') === 'anulowany' ? 'selected' : '' ?>>Anulowany</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label required-star">Data zaplanowana</label>
+                    <input type="date" name="planned_date" class="form-control" required value="<?= h($service['planned_date'] ?? date('Y-m-d')) ?>">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Data realizacji</label>
+                    <input type="date" name="completed_date" class="form-control" value="<?= h($service['completed_date'] ?? '') ?>">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Technik</label>
+                    <select name="technician_id" class="form-select">
+                        <option value="">— aktualny użytkownik —</option>
+                        <?php foreach ($users as $u): ?>
+                        <option value="<?= $u['id'] ?>" <?= ($service['technician_id'] ?? 0) == $u['id'] ? 'selected' : '' ?>><?= h($u['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Koszt</label>
+                    <div class="input-group">
+                        <input type="number" name="cost" class="form-control" value="<?= h($service['cost'] ?? '0') ?>" min="0" step="0.01">
+                        <span class="input-group-text">zł</span>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Opis / Problem</label>
+                    <textarea name="description" class="form-control" rows="3"><?= h($service['description'] ?? '') ?></textarea>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Rozwiązanie / Wynik</label>
+                    <textarea name="resolution" class="form-control" rows="3"><?= h($service['resolution'] ?? '') ?></textarea>
+                </div>
+                <?php if ($action === 'add' && !empty($svcAvailableAccessories)): ?>
+                </div></div><!-- /inner row g-3 + /col-lg-8 -->
+                <div class="col-lg-4">
+                    <div class="card bg-light border-0 h-100">
+                        <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
+                            <span><i class="fas fa-toolbox me-2 text-warning"></i>Akcesoria do pobrania z magazynu (opcjonalnie)</span>
+                            <button type="button" class="btn btn-outline-warning btn-sm" id="svcAddAccRow">
+                                <i class="fas fa-plus me-1"></i>Dodaj pozycję
+                            </button>
+                        </div>
+                        <div class="card-body pb-1" id="svcAccContainer">
+                            <div class="svc-acc-row row g-2 align-items-center mb-2">
+                                <div class="col-md-5">
+                                    <select name="svc_acc[]" class="form-select form-select-sm">
+                                        <option value="">— nie pobieraj —</option>
+                                        <?php foreach ($svcAvailableAccessories as $sa): $srem = (int)$sa['remaining']; ?>
+                                        <option value="<?= $sa['id'] ?>" <?= $srem <= 0 ? 'disabled' : '' ?>>
+                                            <?= h($sa['name']) ?> (dost.: <?= max(0,$srem) ?> szt.)
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="number" name="svc_acc_qty[]" class="form-control form-control-sm" min="1" value="1" placeholder="Ilość">
+                                </div>
+                                <div class="col-md-4">
+                                    <input type="text" name="svc_acc_note[]" class="form-control form-control-sm" placeholder="Uwagi do pobrania">
+                                </div>
+                                <div class="col-md-1">
+                                    <button type="button" class="btn btn-outline-danger btn-sm svc-acc-remove" disabled><i class="fas fa-times"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div><!-- /col-lg-4 accessories -->
+                <?php endif; ?>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i><?= $action === 'add' ? 'Zarejestruj serwis' : 'Zapisz zmiany' ?></button>
+                    <a href="services.php" class="btn btn-outline-secondary ms-2">Anuluj</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+<?php if ($action === 'add'): ?>
+<script>
+(function() {
+    var svcAccOpts = <?= json_encode(array_map(fn($a) => ['id' => $a['id'], 'name' => $a['name'], 'rem' => max(0,(int)$a['remaining'])], $svcAvailableAccessories ?? [])) ?>;
+    function buildSvcAccOpts() {
+        var html = '<option value="">— nie pobieraj —</option>';
+        svcAccOpts.forEach(function(a) {
+            html += '<option value="' + a.id + '"' + (a.rem <= 0 ? ' disabled' : '') + '>' + a.name.replace(/</g,'&lt;') + ' (dost.: ' + a.rem + ' szt.)</option>';
+        });
+        return html;
+    }
+    var addBtn = document.getElementById('svcAddAccRow');
+    if (addBtn) {
+        addBtn.addEventListener('click', function() {
+            var container = document.getElementById('svcAccContainer');
+            var div = document.createElement('div');
+            div.className = 'svc-acc-row row g-2 align-items-center mb-2';
+            div.innerHTML = '<div class="col-md-5"><select name="svc_acc[]" class="form-select form-select-sm">' + buildSvcAccOpts() + '</select></div>' +
+                '<div class="col-md-2"><input type="number" name="svc_acc_qty[]" class="form-control form-control-sm" min="1" value="1" placeholder="Ilość"></div>' +
+                '<div class="col-md-4"><input type="text" name="svc_acc_note[]" class="form-control form-control-sm" placeholder="Uwagi do pobrania"></div>' +
+                '<div class="col-md-1"><button type="button" class="btn btn-outline-danger btn-sm svc-acc-remove"><i class="fas fa-times"></i></button></div>';
+            container.appendChild(div);
+            updateSvcRemoveBtns();
+        });
+    }
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.svc-acc-remove')) {
+            e.target.closest('.svc-acc-row').remove();
+            updateSvcRemoveBtns();
+        }
+    });
+    function updateSvcRemoveBtns() {
+        var rows = document.querySelectorAll('#svcAccContainer .svc-acc-row');
+        rows.forEach(function(r) { var b = r.querySelector('.svc-acc-remove'); if(b) b.disabled = rows.length <= 1; });
+    }
+})();
+</script>
+<?php endif; ?>
+<script>
+(function () {
+    var svcTypeSelect = document.getElementById('svcTypeSelect');
+    var svcRepWrapper = document.getElementById('svcReplacementWrapper');
+    if (svcTypeSelect && svcRepWrapper) {
+        svcTypeSelect.addEventListener('change', function () {
+            svcRepWrapper.style.display = (this.value === 'wymiana') ? '' : 'none';
+        });
+    }
+}());
+</script>
+<?php endif; ?>
+
+<?php if ($action === 'print' && isset($service)): ?>
+<?php
+$svcClientLabel = $service['company_name'] ?: ($service['contact_name'] ?: '—');
+$svcTechName    = $service['technician_name'] ?? '—';
+$svcDate        = $service['planned_date'] ?? date('Y-m-d');
+$svcOrderNum    = $service['order_number'] ?? '—';
+$svcClientAddr  = trim(($service['client_address'] ?? '') . ', ' . ($service['client_postal_code'] ?? '') . ' ' . ($service['client_city'] ?? ''), ', ');
+$svcCompanyName = '';
+$svcCompanyAddr = '';
+$svcCompanyPhone= '';
+try {
+    $svcSettings = $db->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('company_name','company_address','company_city','company_postal_code','company_phone')")->fetchAll();
+    $sCfg = [];
+    foreach ($svcSettings as $s) { $sCfg[$s['key']] = $s['value']; }
+    $svcCompanyName  = $sCfg['company_name'] ?? '';
+    $svcCompanyAddr  = trim(($sCfg['company_address'] ?? '') . ', ' . ($sCfg['company_postal_code'] ?? '') . ' ' . ($sCfg['company_city'] ?? ''), ', ');
+    $svcCompanyPhone = $sCfg['company_phone'] ?? '';
+} catch (Exception $e) {}
+$typeLabels = ['przeglad'=>'Przegląd','naprawa'=>'Naprawa','wymiana'=>'Wymiana','aktualizacja'=>'Aktualizacja firmware','inne'=>'Inne'];
+?>
+<style>
+.svc-print-doc { background:#fff; color:#1a1a2e; font-family:'DM Sans','Segoe UI',system-ui,sans-serif; max-width:900px; margin:0 auto; }
+.svc-print-header { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:18px; margin-bottom:22px; border-bottom:3px solid #f97316; }
+.svc-print-logo { font-size:1.5rem; font-weight:800; color:#1a1a2e; letter-spacing:-0.5px; }
+.svc-print-logo span { color:#f97316; }
+.svc-print-title { font-size:1.25rem; font-weight:700; color:#f97316; letter-spacing:1px; text-transform:uppercase; }
+.svc-print-meta { font-size:.83rem; color:#666; margin-top:2px; }
+.svc-section-label { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#f97316; margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+.svc-section-label::after { content:''; flex:1; height:1px; background:#fde8d0; }
+.svc-info-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; margin-bottom:24px; }
+.svc-info-box { background:#fff8f3; border:1px solid #fde8d0; border-radius:8px; padding:12px 14px; }
+.svc-info-box .label { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:#f97316; margin-bottom:4px; }
+.svc-info-box .value { font-size:.9rem; font-weight:600; color:#1a1a2e; }
+.svc-info-box .sub   { font-size:.78rem; color:#666; margin-top:2px; }
+.svc-detail-table { width:100%; border-collapse:collapse; margin-bottom:24px; font-size:.88rem; }
+.svc-detail-table th { text-align:left; padding:8px 12px; width:38%; font-weight:700; font-size:.78rem; text-transform:uppercase; letter-spacing:.5px; color:#888; border-bottom:1px solid #fde8d0; }
+.svc-detail-table td { padding:8px 12px; border-bottom:1px solid #fde8d0; color:#1a1a2e; }
+.svc-sig-row { display:flex; gap:32px; margin-top:40px; }
+.svc-sig-box { flex:1; text-align:center; }
+.svc-sig-line { border-top:2px solid #1a1a2e; padding-top:6px; margin-top:52px; font-size:.78rem; color:#444; }
+.svc-print-footer { text-align:center; font-size:.72rem; color:#999; margin-top:30px; padding-top:12px; border-top:1px solid #fde8d0; }
+@media print {
+    .no-print { display:none !important; }
+    body { background:#fff !important; }
+    .navbar, footer { display:none !important; }
+    .container-fluid { padding:0 !important; }
+    .svc-print-doc { max-width:100%; }
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 no-print">
+    <h5 class="mb-0"><i class="fas fa-file-alt me-2 text-warning"></i>Zlecenie serwisowe — podgląd wydruku</h5>
+    <div>
+        <button type="button" class="btn btn-warning me-2" onclick="window.print()">
+            <i class="fas fa-print me-2"></i>Drukuj / PDF
+        </button>
+        <a href="services.php?action=view&id=<?= $service['id'] ?>" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-1"></i>Powrót
+        </a>
+    </div>
+</div>
+
+<div class="svc-print-doc p-4 card">
+    <!-- ── Header ─────────────────────────── -->
+    <div class="svc-print-header">
+        <div>
+            <?php if ($svcCompanyName): ?>
+            <div class="svc-print-logo"><?= h($svcCompanyName) ?></div>
+            <?php if ($svcCompanyAddr): ?><div style="font-size:.82rem;color:#666;margin-top:3px"><?= h($svcCompanyAddr) ?></div><?php endif; ?>
+            <?php if ($svcCompanyPhone): ?><div style="font-size:.82rem;color:#666">Tel: <?= h($svcCompanyPhone) ?></div><?php endif; ?>
+            <?php else: ?>
+            <div class="svc-print-logo">Fleet<span>Link</span></div>
+            <div style="font-size:.82rem;color:#666">System zarządzania urządzeniami GPS</div>
+            <?php endif; ?>
+        </div>
+        <div style="text-align:right">
+            <div class="svc-print-title">Zlecenie serwisowe</div>
+            <div class="svc-print-meta">Nr zlecenia: <strong><?= h($svcOrderNum) ?></strong></div>
+            <div class="svc-print-meta">Data: <strong><?= formatDate($svcDate) ?></strong></div>
+            <div class="svc-print-meta">Typ: <strong><?= h($typeLabels[$service['type']] ?? ucfirst($service['type'])) ?></strong></div>
+        </div>
+    </div>
+
+    <!-- ── Info grid ──────────────────────── -->
+    <div class="svc-info-grid">
+        <div class="svc-info-box">
+            <div class="label">Klient</div>
+            <div class="value"><?= h($svcClientLabel) ?></div>
+            <?php if ($service['client_phone'] ?? ''): ?>
+            <div class="sub"><i class="fas fa-phone me-1" style="color:#f97316;font-size:.7rem"></i><?= h($service['client_phone']) ?></div>
+            <?php endif; ?>
+            <?php if ($svcClientAddr): ?>
+            <div class="sub"><i class="fas fa-map-marker-alt me-1" style="color:#f97316;font-size:.7rem"></i><?= h($svcClientAddr) ?></div>
+            <?php endif; ?>
+        </div>
+        <div class="svc-info-box">
+            <div class="label">Pojazd</div>
+            <div class="value"><?= $service['registration'] ? h($service['registration']) : '<span style="color:#999">—</span>' ?></div>
+            <?php if ($service['make'] ?? ''): ?>
+            <div class="sub"><?= h($service['make']) ?></div>
+            <?php endif; ?>
+        </div>
+        <div class="svc-info-box">
+            <div class="label">Technik</div>
+            <div class="value"><?= h($svcTechName) ?></div>
+            <?php if ($service['completed_date']): ?>
+            <div class="sub">Zrealizowano: <?= formatDate($service['completed_date']) ?></div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- ── Device details ─────────────────── -->
+    <div class="svc-section-label">Urządzenie GPS</div>
+    <table class="svc-detail-table" style="margin-bottom:20px">
+        <tr>
+            <th>Producent / Model</th>
+            <td><strong><?= h($service['manufacturer_name'] . ' ' . $service['model_name']) ?></strong></td>
+            <th>Nr seryjny</th>
+            <td><?= h($service['serial_number']) ?></td>
+        </tr>
+        <tr>
+            <th>IMEI</th>
+            <td><?= h($service['imei'] ?? '—') ?></td>
+            <th>Status serwisu</th>
+            <td><?= getStatusBadge($service['status'], 'service') ?></td>
+        </tr>
+    </table>
+
+    <!-- ── Description / Resolution ──────── -->
+    <?php if ($service['description']): ?>
+    <div class="svc-section-label">Opis / Problem</div>
+    <div style="font-size:.87rem;color:#333;margin-bottom:18px;padding:10px 14px;background:#fff8f3;border-radius:6px;border:1px solid #fde8d0">
+        <?= h($service['description']) ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($service['resolution']): ?>
+    <div class="svc-section-label">Rozwiązanie / Wynik prac</div>
+    <div style="font-size:.87rem;color:#333;margin-bottom:18px;padding:10px 14px;background:#fff8f3;border-radius:6px;border:1px solid #fde8d0">
+        <?= h($service['resolution']) ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($service['cost'] > 0): ?>
+    <div style="text-align:right;font-size:1rem;font-weight:700;margin-bottom:20px">
+        Koszt serwisu: <span style="color:#f97316"><?= formatMoney($service['cost']) ?></span>
+    </div>
+    <?php endif; ?>
+
+    <!-- ── Signatures ─────────────────────── -->
+    <div class="svc-sig-row">
+        <div class="svc-sig-box">
+            <div class="svc-sig-line">Podpis technika<br><strong><?= h($svcTechName) ?></strong></div>
+        </div>
+        <div class="svc-sig-box">
+            <div class="svc-sig-line">Podpis klienta / odbiór<br><strong><?= h($svcClientLabel) ?></strong></div>
+        </div>
+    </div>
+
+    <div class="svc-print-footer">
+        Dokument wygenerowany przez <?= $svcCompanyName ? h($svcCompanyName) : 'FleetLink System GPS' ?> &mdash; <?= date('d.m.Y H:i') ?> &mdash; <a href="https://www.fleetlink.pl" style="color:inherit;text-decoration:none">www.fleetlink.pl</a>
+    </div>
+</div>
+<?php endif; ?>
+
+<script>
+(function () {
+    var searchInput = document.getElementById('deviceSearch');
+    var deviceSelect = document.getElementById('deviceSelect');
+    if (!searchInput || !deviceSelect) return;
+
+    // Pre-select and show label for current value
+    var currentOption = deviceSelect.selectedIndex > 0 ? deviceSelect.options[deviceSelect.selectedIndex] : null;
+    if (currentOption && currentOption.value) {
+        searchInput.value = currentOption.textContent.trim();
+    }
+
+    searchInput.addEventListener('input', function () {
+        var term = this.value.toLowerCase().trim();
+        var options = deviceSelect.querySelectorAll('option[data-search]');
+        options.forEach(function (opt) {
+            var match = !term || opt.dataset.search.includes(term);
+            opt.style.display = match ? '' : 'none';
+            opt.parentElement.style.display = '';
+        });
+        // Hide empty optgroups
+        deviceSelect.querySelectorAll('optgroup').forEach(function (grp) {
+            var visible = Array.from(grp.querySelectorAll('option[data-search]')).some(function (o) { return o.style.display !== 'none'; });
+            grp.style.display = visible ? '' : 'none';
+        });
+        // Deselect if text doesn't match selection
+        if (deviceSelect.selectedIndex > 0) {
+            var sel = deviceSelect.options[deviceSelect.selectedIndex];
+            if (sel && sel.style.display === 'none') {
+                deviceSelect.value = '';
+            }
+        }
+    });
+
+    // When user selects a device from the list, update the text input
+    deviceSelect.addEventListener('change', function () {
+        var sel = this.options[this.selectedIndex];
+        if (sel && sel.value) {
+            searchInput.value = sel.textContent.trim();
+        }
+        // Auto-select matching installation
+        var installSel = document.getElementById('editInstallSelect');
+        if (!installSel) return;
+        var deviceId = this.value;
+        var allOpts = installSel.querySelectorAll('option[data-device-id]');
+        var matching = [];
+        allOpts.forEach(function(opt) {
+            if (!deviceId || opt.dataset.deviceId === deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
+            else { opt.style.display = 'none'; }
+        });
+        if (deviceId && matching.length === 1 && !installSel.value) matching[0].selected = true;
+        else if (!deviceId) { allOpts.forEach(function(opt) { opt.style.display = ''; }); }
+    });
+}());
+</script>
+
+<?php if ($action === 'list'): ?>
+<!-- Modal: Nowy serwis (lista serwisów) -->
+<div class="modal fade" id="svcListAddModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="services.php" id="svcListAddForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-wrench me-2 text-warning"></i>Nowy serwis</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Klient (filtr urządzeń GPS)</label>
+                            <select id="svcListClientFilter" class="form-select">
+                                <option value="">— wszystkie urządzenia —</option>
+                                <?php foreach ($svcClients as $cl): ?>
+                                <option value="<?= $cl['id'] ?>"><?= h(($cl['company_name'] ? $cl['company_name'] . ' — ' : '') . $cl['contact_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Urządzenie GPS</label>
+                            <input type="text" id="svcListDevSearch" class="form-control form-control-sm mb-1"
+                                   placeholder="Szukaj urządzenia (nr seryjny, model…)" autocomplete="off">
+                            <select name="device_id" id="svcListDevSelect" class="form-select" required size="4" style="height:auto">
+                                <option value="">— wybierz urządzenie —</option>
+                                <?php
+                                $slGroup = '';
+                                foreach ($allDevices as $d):
+                                    $grp = $d['manufacturer_name'] . ' ' . $d['model_name'];
+                                    if ($grp !== $slGroup) {
+                                        if ($slGroup) echo '</optgroup>';
+                                        echo '<optgroup label="' . h($grp) . '">';
+                                        $slGroup = $grp;
+                                    }
+                                ?>
+                                <option value="<?= $d['id'] ?>"
+                                        data-client="<?= (int)$d['client_id'] ?>"
+                                        data-search="<?= h(strtolower($d['serial_number'] . ' ' . $d['model_name'] . ' ' . $d['manufacturer_name'] . ' ' . ($d['active_registration'] ?? ''))) ?>">
+                                    <?= h($d['serial_number']) ?> — <?= h($d['manufacturer_name'] . ' ' . $d['model_name']) ?><?= $d['active_registration'] ? ' [' . h($d['active_registration']) . ']' : '' ?>
+                                </option>
+                                <?php endforeach; if ($slGroup) echo '</optgroup>'; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Powiązany montaż (aktywny)</label>
+                            <select name="installation_id" class="form-select">
+                                <option value="">— brak —</option>
+                                <?php foreach ($activeInstallations as $inst): ?>
+                                <option value="<?= $inst['id'] ?>"
+                                        data-device-id="<?= $inst['device_id'] ?>"><?= h($inst['registration'] . ' — ' . $inst['serial_number']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Typ serwisu</label>
+                            <select name="type" id="svcListTypeSelect" class="form-select">
+                                <option value="przeglad" selected>Przegląd</option>
+                                <option value="naprawa">Naprawa</option>
+                                <option value="wymiana">Wymiana</option>
+                                <option value="aktualizacja">Aktualizacja firmware</option>
+                                <option value="inne">Inne</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Status</label>
+                            <select name="status" class="form-select">
+                                <option value="zaplanowany" selected>Zaplanowany</option>
+                                <option value="w_trakcie">W trakcie</option>
+                                <option value="zakończony">Zakończony</option>
+                                <option value="anulowany">Anulowany</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required-star">Data zaplanowana</label>
+                            <input type="date" name="planned_date" id="svcListPlannedDate" class="form-control" required>
+                        </div>
+                        <?php if (!empty($users)): ?>
+                        <div class="col-md-6">
+                            <label class="form-label">Technik</label>
+                            <select name="technician_id" class="form-select">
+                                <option value="">— aktualny użytkownik —</option>
+                                <?php foreach ($users as $u): ?>
+                                <option value="<?= $u['id'] ?>"><?= h($u['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php endif; ?>
+                        <div class="col-12">
+                            <label class="form-label">Opis / Problem</label>
+                            <textarea name="description" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-warning btn-sm text-white"><i class="fas fa-save me-1"></i>Zarejestruj serwis</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var modal = document.getElementById('svcListAddModal');
+    if (!modal) return;
+    function filterSvcDevices() {
+        var q = (document.getElementById('svcListDevSearch').value || '').toLowerCase().trim();
+        var clientId = document.getElementById('svcListClientFilter').value;
+        document.querySelectorAll('#svcListDevSelect option').forEach(function (o) {
+            if (!o.value) { o.style.display = ''; return; }
+            var matchSearch = !q || (o.dataset.search || '').includes(q);
+            var matchClient = !clientId || String(o.dataset.client || '0') === clientId;
+            o.style.display = (matchSearch && matchClient) ? '' : 'none';
+        });
+    }
+    modal.addEventListener('show.bs.modal', function () {
+        document.getElementById('svcListDevSearch').value = '';
+        document.getElementById('svcListDevSelect').value = '';
+        document.getElementById('svcListClientFilter').value = '';
+        document.querySelectorAll('#svcListDevSelect option').forEach(function (o) { o.style.display = ''; });
+        document.getElementById('svcListPlannedDate').value = new Date().toISOString().slice(0, 10);
+    });
+    var search = document.getElementById('svcListDevSearch');
+    if (search) { search.addEventListener('input', filterSvcDevices); }
+    var clientFilter = document.getElementById('svcListClientFilter');
+    if (clientFilter) { clientFilter.addEventListener('change', filterSvcDevices); }
+    // Auto-select installation when device selected in modal
+    var svcListDevSel = document.getElementById('svcListDevSelect');
+    var svcListInstSel = modal.querySelector('select[name="installation_id"]');
+    if (svcListDevSel && svcListInstSel) {
+        svcListDevSel.addEventListener('change', function() {
+            var deviceId = this.value;
+            var allOpts = svcListInstSel.querySelectorAll('option[data-device-id]');
+            var matching = [];
+            allOpts.forEach(function(opt) {
+                if (!deviceId || opt.dataset.deviceId === deviceId) { opt.style.display = ''; if (deviceId) matching.push(opt); }
+                else { opt.style.display = 'none'; }
+            });
+            if (deviceId && matching.length === 1) svcListInstSel.value = matching[0].value;
+            else if (!deviceId) svcListInstSel.value = '';
+        });
+    }
+}());
+</script>
+<?php endif; ?>
+
+<?php if (in_array($action, ['list','archive'], true)): ?>
+<!-- Service Preview Modal (shared for list and archive) -->
+<div class="modal fade" id="servicePreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:92vw">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="servicePreviewTitle"><i class="fas fa-wrench me-2 text-warning"></i>Serwis</h5>
+                <div class="ms-auto d-flex align-items-center gap-2 me-3" id="servicePreviewFullLink"></div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="servicePreviewBody">
+                <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>
+            </div>
+            <div class="modal-footer">
+                <a href="#" id="servicePreviewOpenFull" class="btn btn-outline-primary btn-sm" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Pełny widok</a>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Zamknij</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function openServiceModal(serviceId) {
+    var modal = new bootstrap.Modal(document.getElementById('servicePreviewModal'));
+    document.getElementById('servicePreviewTitle').innerHTML = '<i class="fas fa-wrench me-2 text-warning"></i>Serwis #' + serviceId;
+    document.getElementById('servicePreviewOpenFull').href = 'services.php?action=view&id=' + serviceId;
+    document.getElementById('servicePreviewBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Ładowanie...</p></div>';
+    modal.show();
+    fetch('services.php?action=view&id=' + serviceId + '&ajax=1')
+        .then(function(r) { return r.text(); })
+        .then(function(html) { document.getElementById('servicePreviewBody').innerHTML = html; })
+        .catch(function() { document.getElementById('servicePreviewBody').innerHTML = '<p class="text-danger p-3">Błąd ładowania danych serwisu.</p>'; });
+}
+</script>
+<?php endif; ?>
+
+<?php include __DIR__ . '/includes/footer.php'; ?>
