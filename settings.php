@@ -60,9 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $stmt = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
         $stmt->execute(['api_enabled', $apiEnabled, $apiEnabled]);
-        if ($apiToken !== '') {
-            $stmt->execute(['api_token', $apiToken, $apiToken]);
-        }
+        $stmt->execute(['api_token', $apiToken, $apiToken]);
         flashSuccess('Ustawienia API zostały zapisane.');
         redirect(getBaseUrl() . 'settings.php');
     }
