@@ -60,8 +60,9 @@ function hasVehiclesApiUniqueIndex(PDO $db): bool {
               AND table_name = 'vehicles'
               AND non_unique = 0
             GROUP BY index_name
-            HAVING SUM(CASE WHEN column_name='client_id' THEN 1 ELSE 0 END) > 0
-               AND SUM(CASE WHEN column_name='registration' THEN 1 ELSE 0 END) > 0
+            HAVING COUNT(*) = 2
+               AND SUM(CASE WHEN column_name='client_id' THEN 1 ELSE 0 END) = 1
+               AND SUM(CASE WHEN column_name='registration' THEN 1 ELSE 0 END) = 1
             LIMIT 1
         ");
         $existsStmt->execute();
@@ -124,7 +125,17 @@ $jsonError = json_last_error();
 if (strpos($apiContentType, 'application/json') !== false && trim((string)$rawBody) !== '' && $jsonError !== JSON_ERROR_NONE) {
     apiJson(400, ['ok' => false, 'error' => 'Nieprawidłowy JSON w treści żądania.']);
 }
-$input = is_array($decoded) ? $decoded : $_POST;
+if (strpos($apiContentType, 'application/json') !== false) {
+    if (trim((string)$rawBody) === '') {
+        apiJson(400, ['ok' => false, 'error' => 'Puste body JSON.']);
+    }
+    if (!is_array($decoded)) {
+        apiJson(400, ['ok' => false, 'error' => 'Body JSON musi być obiektem.']);
+    }
+    $input = $decoded;
+} else {
+    $input = $_POST;
+}
 apiRequireIntegrationToken($db);
 $action = sanitize($input['action'] ?? '');
 
@@ -223,11 +234,20 @@ if ($action === 'activate_vehicle') {
         apiJson(422, ['ok' => false, 'error' => 'Pole vehicle_id jest wymagane.']);
     }
 
-    $vehStmt = $db->prepare("SELECT id, client_id, registration, active FROM vehicles WHERE id = ? LIMIT 1");
+    $vehStmt = $db->prepare("
+        SELECT v.id, v.client_id, v.registration, v.active, COALESCE(c.active, 0) AS client_active
+        FROM vehicles v
+        LEFT JOIN clients c ON c.id = v.client_id
+        WHERE v.id = ?
+        LIMIT 1
+    ");
     $vehStmt->execute([$vehicleId]);
     $vehicle = $vehStmt->fetch();
     if (!$vehicle) {
         apiJson(404, ['ok' => false, 'error' => 'Pojazd nie istnieje.']);
+    }
+    if ((int)$vehicle['client_id'] > 0 && (int)$vehicle['client_active'] !== 1) {
+        apiJson(409, ['ok' => false, 'error' => 'Nie można aktywować pojazdu — przypisana firma jest nieaktywna.']);
     }
 
     if ((int)$vehicle['active'] === 1) {
