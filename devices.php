@@ -3230,6 +3230,8 @@ window.openListActionsModal = (function () {
         var button = document.createElement('button');
         button.type = 'button';
         button.className = 'list-group-item list-group-item-action ' + (opts.extraClass || '');
+        button.setAttribute('role', 'menuitem');
+        button.setAttribute('aria-label', opts.label || 'Akcja');
         var icon = document.createElement('i');
         icon.className = (opts.iconClass || '') + ' me-2';
         button.appendChild(icon);
@@ -3242,8 +3244,17 @@ window.openListActionsModal = (function () {
     function openListPreviewModal(cfgSnapshot) {
         if (!cfgSnapshot || !cfgSnapshot.id) return;
         var previewDeviceId = cfgSnapshot.id;
+        var currentFilters = new URLSearchParams(window.location.search || '');
+        var previewUrl = new URL('devices.php', window.location.href);
+        previewUrl.searchParams.set('action', 'preview_data');
+        previewUrl.searchParams.set('id', String(previewDeviceId));
+        ['search', 'model', 'status', 'tacho'].forEach(function (key) {
+            if (currentFilters.has(key)) {
+                previewUrl.searchParams.set(key, currentFilters.get(key));
+            }
+        });
         listActionsAfterClose(function () {
-            fetch('devices.php?action=preview_data&id=' + encodeURIComponent(previewDeviceId), {
+            fetch(previewUrl.toString(), {
                 credentials: 'same-origin',
                 headers: { 'Accept': 'application/json' }
             })
@@ -3298,6 +3309,8 @@ window.openListActionsModal = (function () {
         var labelEl = document.getElementById('listActionsDeviceLabel');
         var body = document.getElementById('listActionsBody');
         if (!labelEl || !body) return;
+        body.setAttribute('role', 'menu');
+        body.setAttribute('aria-label', 'Lista akcji dla urządzenia');
         labelEl.textContent = (selectedCfg.serial || ('ID ' + (selectedCfg.id || '')));
         var actionCount = 0;
         body.innerHTML = '';
