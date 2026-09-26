@@ -10,6 +10,15 @@ require_once __DIR__ . '/includes/functions.php';
 
 date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
+function canAccessDevicesData(): bool {
+    $user = getCurrentUser();
+    if (!$user) return false;
+    return in_array((string)($user['role'] ?? ''), ['admin', 'technician', 'user'], true);
+}
+if (!canAccessDevicesData()) {
+    flashError('Brak uprawnień do modułu urządzeń.');
+    redirect(getBaseUrl() . 'dashboard.php');
+}
 
 $db = getDb();
 $action = sanitize($_GET['action'] ?? 'list');
@@ -101,7 +110,7 @@ if ($action === 'config_download' && $id > 0) {
 
 if ($action === 'preview_data' && $id > 0) {
     header('Content-Type: application/json; charset=utf-8');
-    if (!isLoggedIn()) {
+    if (!canAccessDevicesData()) {
         http_response_code(403);
         echo json_encode(['error' => 'Brak uprawnień.']);
         exit;
