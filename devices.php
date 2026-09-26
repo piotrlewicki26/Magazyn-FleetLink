@@ -1504,7 +1504,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                                 <?php if ($d['status'] === 'zamontowany'): ?>
                                 <li>
                                     <button type="button" class="dropdown-item"
-                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['active_vehicle_registration'] ?? '')) ?>)">
+                                            onclick="openListChangeRegModal(<?= $d['id'] ?>, <?= json_encode($d['active_vehicle_registration'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>)">
                                         <i class="fas fa-hashtag me-2 text-info"></i>Zmień nr rejestracyjny
                                     </button>
                                 </li>
