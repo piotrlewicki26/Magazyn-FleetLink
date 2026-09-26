@@ -12,21 +12,6 @@ date_default_timezone_set(APP_TIMEZONE);
 requireLogin();
 $action = sanitize($_GET['action'] ?? 'list');
 $id = (int)($_GET['id'] ?? 0);
-function canAccessDevicesData(): bool {
-    $user = getCurrentUser();
-    if (!$user) return false;
-    return in_array((string)($user['role'] ?? ''), ['admin', 'technician', 'user'], true);
-}
-if (!canAccessDevicesData()) {
-    if ($action === 'preview_data') {
-        header('Content-Type: application/json; charset=utf-8');
-        http_response_code(403);
-        echo json_encode(['error' => 'Brak uprawnień.']);
-        exit;
-    }
-    flashError('Brak uprawnień do modułu urządzeń.');
-    redirect(getBaseUrl() . 'dashboard.php');
-}
 
 $db = getDb();
 ensureTachoColumns($db);
@@ -1559,6 +1544,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'can_move' => $isMountedLike,
                             'can_uninstall' => $canUninstallFromData,
                             'can_change_reg' => $statusValue === 'zamontowany',
+                            'can_tacho' => stripos($modelNameValue, 'ECAN') === false,
                         ];
                         ?>
                         <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -3340,16 +3326,18 @@ window.openListActionsModal = (function () {
             }
         });
         actionCount++;
-        appendListActionButton(body, {
-            label: 'Tachograf',
-            iconClass: 'fas fa-plug ' + (listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary'),
-            onClick: function () {
-                listActionsAfterClose(function () {
-                    openTachoModal(listActionsCfg.id, listActionsCfg.tacho_connected ? 1 : 0, listActionsCfg.tacho_firmware_version || '');
-                });
-            }
-        });
-        actionCount++;
+        if (listActionsCfg.can_tacho) {
+            appendListActionButton(body, {
+                label: 'Tachograf',
+                iconClass: 'fas fa-plug ' + (listActionsCfg.tacho_connected ? 'text-primary' : 'text-secondary'),
+                onClick: function () {
+                    listActionsAfterClose(function () {
+                        openTachoModal(listActionsCfg.id, listActionsCfg.tacho_connected ? 1 : 0, listActionsCfg.tacho_firmware_version || '');
+                    });
+                }
+            });
+            actionCount++;
+        }
         if (listActionsCfg.can_delete) {
             if (actionCount > 0) {
                 var dividerWrap = document.createElement('div');
