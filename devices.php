@@ -25,9 +25,26 @@ function canShowDeviceUninstallAction(array $deviceData, array $installationData
 }
 function canAccessDeviceById(PDO $db, int $deviceId): bool {
     if ($deviceId <= 0 || !isLoggedIn()) return false;
-    $role = (string)(getCurrentUser()['role'] ?? '');
-    if (!in_array($role, ['admin', 'technician', 'user'], true)) return false;
-    $checkStmt = $db->prepare("SELECT 1 FROM devices WHERE id=? LIMIT 1");
+    // Keep preview endpoint visibility aligned with the list source query scope.
+    $checkStmt = $db->prepare("
+        SELECT d.id
+        FROM devices d
+        JOIN models m ON m.id = d.model_id
+        JOIN manufacturers mf ON mf.id = m.manufacturer_id
+        LEFT JOIN (
+            SELECT i4.device_id, i4.id
+            FROM installations i4
+            WHERE i4.status = 'aktywna'
+              AND i4.id = (
+                  SELECT MAX(i5.id)
+                  FROM installations i5
+                  WHERE i5.device_id = i4.device_id
+                    AND i5.status = 'aktywna'
+              )
+        ) ai ON ai.device_id = d.id
+        WHERE d.id = ?
+        LIMIT 1
+    ");
     $checkStmt->execute([$deviceId]);
     return (bool)$checkStmt->fetchColumn();
 }
