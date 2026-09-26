@@ -99,6 +99,81 @@ if ($action === 'config_download' && $id > 0) {
     exit;
 }
 
+if ($action === 'preview_data' && $id > 0) {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $previewStmt = $db->prepare("
+            SELECT
+                d.id,
+                d.serial_number,
+                d.imei,
+                d.sim_number,
+                d.ble_id,
+                d.major,
+                d.minor,
+                d.mac_address,
+                d.status,
+                mf.name AS manufacturer_name,
+                m.name AS model_name,
+                ai.registration AS active_vehicle_registration,
+                ai.installation_date AS active_installation_date,
+                c.company_name AS active_company_name,
+                c.contact_name AS active_contact_name,
+                d.purchase_date,
+                d.sale_date,
+                d.notes,
+                d.tacho_connected,
+                d.tacho_firmware_version
+            FROM devices d
+            JOIN models m ON d.model_id = m.id
+            JOIN manufacturers mf ON m.manufacturer_id = mf.id
+            LEFT JOIN device_installations ai ON ai.id = (
+                SELECT di2.id
+                FROM device_installations di2
+                WHERE di2.device_id = d.id AND di2.uninstallation_date IS NULL
+                ORDER BY di2.installation_date DESC, di2.id DESC
+                LIMIT 1
+            )
+            LEFT JOIN clients c ON ai.client_id = c.id
+            WHERE d.id = ?
+            LIMIT 1
+        ");
+        $previewStmt->execute([$id]);
+        $row = $previewStmt->fetch();
+        if (!$row) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Urządzenie nie istnieje.']);
+            exit;
+        }
+        echo json_encode([
+            'id' => (int)$row['id'],
+            'serial_number' => (string)$row['serial_number'],
+            'imei' => (string)($row['imei'] ?? ''),
+            'sim_number' => (string)($row['sim_number'] ?? ''),
+            'ble_id' => (string)($row['ble_id'] ?? ''),
+            'major' => $row['major'] !== null ? (int)$row['major'] : null,
+            'minor' => $row['minor'] !== null ? (int)$row['minor'] : null,
+            'mac_address' => (string)($row['mac_address'] ?? ''),
+            'status' => (string)$row['status'],
+            'manufacturer_name' => (string)$row['manufacturer_name'],
+            'model_name' => (string)$row['model_name'],
+            'vehicle_registration' => (string)($row['active_vehicle_registration'] ?? ''),
+            'client' => (string)($row['active_company_name'] ?: ($row['active_contact_name'] ?? '')),
+            'installation_date' => (string)($row['active_installation_date'] ?? ''),
+            'purchase_date' => (string)($row['purchase_date'] ?? ''),
+            'sale_date' => (string)($row['sale_date'] ?? ''),
+            'notes' => (string)($row['notes'] ?? ''),
+            'tacho_connected' => (int)($row['tacho_connected'] ?? 0),
+            'tacho_firmware_version' => (string)($row['tacho_firmware_version'] ?? ''),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Nie udało się pobrać danych podglądu.']);
+        exit;
+    }
+}
+
 // Handle POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -3105,6 +3180,26 @@ function _appendListActionButton(container, opts) {
     }
     container.appendChild(button);
 }
+function openListPreviewModal() {
+    if (!_listActionsCfg || !_listActionsCfg.id) return;
+    _listActionsAfterClose(function () {
+        fetch('devices.php?action=preview_data&id=' + encodeURIComponent(_listActionsCfg.id), {
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' }
+        })
+        .then(function (response) { return response.json(); })
+        .then(function (data) {
+            if (data && !data.error) {
+                showDevicePreview(data);
+                return;
+            }
+            alert((data && data.error) ? data.error : 'Nie udało się pobrać podglądu urządzenia.');
+        })
+        .catch(function () {
+            alert('Nie udało się pobrać podglądu urządzenia.');
+        });
+    });
+}
 function openListActionsModal(cfg) {
     _listActionsCfg = cfg || {};
     document.getElementById('listActionsDeviceLabel').textContent = (_listActionsCfg.serial || ('ID ' + (_listActionsCfg.id || '')));
@@ -3113,11 +3208,7 @@ function openListActionsModal(cfg) {
     _appendListActionButton(body, {
         label: 'Podgląd',
         iconClass: 'fas fa-eye text-info',
-        onClick: function () {
-            _listActionsAfterClose(function () {
-                window.location.href = 'devices.php?action=view&id=' + encodeURIComponent(_listActionsCfg.id);
-            });
-        }
+        onClick: openListPreviewModal
     });
     if (_listActionsCfg.can_edit) {
         _appendListActionButton(body, {
