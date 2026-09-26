@@ -25,27 +25,43 @@ function canShowDeviceUninstallAction(array $deviceData, array $installationData
 }
 function canAccessDeviceById(PDO $db, int $deviceId): bool {
     if ($deviceId <= 0 || !isLoggedIn()) return false;
-    // Keep preview endpoint visibility aligned with the list source query scope.
-    $checkStmt = $db->prepare("
+    $search = sanitize($_GET['search'] ?? '');
+    $filterModel = (int)($_GET['model'] ?? 0);
+    $filterStatus = sanitize($_GET['status'] ?? '');
+    $filterTacho = sanitize($_GET['tacho'] ?? '');
+
+    // Keep preview endpoint visibility aligned with the current list query scope.
+    $sql = "
         SELECT d.id
         FROM devices d
         JOIN models m ON m.id = d.model_id
         JOIN manufacturers mf ON mf.id = m.manufacturer_id
-        LEFT JOIN (
-            SELECT i4.device_id, i4.id
-            FROM installations i4
-            WHERE i4.status = 'aktywna'
-              AND i4.id = (
-                  SELECT MAX(i5.id)
-                  FROM installations i5
-                  WHERE i5.device_id = i4.device_id
-                    AND i5.status = 'aktywna'
-              )
-        ) ai ON ai.device_id = d.id
         WHERE d.id = ?
-        LIMIT 1
-    ");
-    $checkStmt->execute([$deviceId]);
+    ";
+    $params = [$deviceId];
+    if ($search !== '') {
+        $sql .= " AND (d.serial_number LIKE ? OR d.imei LIKE ? OR m.name LIKE ? OR mf.name LIKE ?)";
+        $params[] = "%$search%";
+        $params[] = "%$search%";
+        $params[] = "%$search%";
+        $params[] = "%$search%";
+    }
+    if ($filterModel > 0) {
+        $sql .= " AND d.model_id = ?";
+        $params[] = $filterModel;
+    }
+    if ($filterStatus !== '') {
+        $sql .= " AND d.status = ?";
+        $params[] = $filterStatus;
+    }
+    if ($filterTacho === '1') {
+        $sql .= " AND COALESCE(d.tacho_connected,0)=1";
+    } elseif ($filterTacho === '0') {
+        $sql .= " AND COALESCE(d.tacho_connected,0)=0";
+    }
+    $sql .= " LIMIT 1";
+    $checkStmt = $db->prepare($sql);
+    $checkStmt->execute($params);
     return (bool)$checkStmt->fetchColumn();
 }
 
