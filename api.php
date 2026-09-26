@@ -25,6 +25,52 @@ function apiAuthHeader(): string {
         $headers = apache_request_headers();
         if (isset($headers['Authorization'])) return (string)$headers['Authorization'];
     }
+
+    function ensureVehiclesApiUniqueIndex(PDO $db): bool {
+        static $checked = false;
+        static $ready = false;
+        if ($checked) return $ready;
+        $checked = true;
+
+        try {
+            $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+            if ($driver === 'sqlite') {
+                $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_client_registration_unique ON vehicles(client_id, registration)");
+                $idxRows = $db->query("PRAGMA index_list('vehicles')")->fetchAll();
+                foreach ($idxRows as $idx) {
+                    if ((string)($idx['name'] ?? '') === 'idx_vehicles_client_registration_unique' && (int)($idx['unique'] ?? 0) === 1) {
+                        $ready = true;
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            $existsStmt = $db->prepare("
+                SELECT COUNT(*)
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'vehicles'
+                  AND index_name = 'uniq_vehicles_client_registration'
+                  AND non_unique = 0
+            ");
+            $existsStmt->execute();
+            if ((int)$existsStmt->fetchColumn() > 0) {
+                $ready = true;
+                return true;
+            }
+
+            try {
+                $db->exec("ALTER TABLE vehicles ADD UNIQUE KEY uniq_vehicles_client_registration (client_id, registration)");
+            } catch (Throwable $e) {}
+
+            $existsStmt->execute();
+            $ready = (int)$existsStmt->fetchColumn() > 0;
+            return $ready;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
     return '';
 }
 
@@ -62,7 +108,6 @@ if ($method === 'GET') {
         'ok' => true,
         'service' => 'fleetlink-api',
         'version' => defined('APP_VERSION') ? APP_VERSION : '1.0.0',
-        'actions' => ['create_company', 'add_vehicle', 'activate_vehicle'],
     ]);
 }
 if ($method !== 'POST') {
@@ -133,6 +178,9 @@ if ($action === 'add_vehicle') {
     if ($clientId <= 0 || $registration === '') {
         apiJson(422, ['ok' => false, 'error' => 'Pola client_id i registration są wymagane.']);
     }
+    if (!ensureVehiclesApiUniqueIndex($db)) {
+        apiJson(500, ['ok' => false, 'error' => 'Brak wymaganego unikalnego indeksu dla pojazdów (client_id + registration).']);
+    }
 
     $clientCheck = $db->prepare("SELECT id FROM clients WHERE id = ? LIMIT 1");
     $clientCheck->execute([$clientId]);
@@ -140,19 +188,17 @@ if ($action === 'add_vehicle') {
         apiJson(404, ['ok' => false, 'error' => 'Klient nie istnieje.']);
     }
 
-    $stmt = $db->prepare("
-        INSERT INTO vehicles (client_id, registration, make, model_name, year, vin, notes, active)
-        SELECT ?,?,?,?,?,?,?,?
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM vehicles
-            WHERE registration = ? AND client_id = ?
-            LIMIT 1
-        )
-    ");
-    $stmt->execute([$clientId, $registration, $make, $modelName, $year, $vin, $notes, $active, $registration, $clientId]);
-    if ((int)$stmt->rowCount() < 1) {
-        apiJson(409, ['ok' => false, 'error' => 'Pojazd o tym numerze rejestracyjnym już istnieje dla tego klienta.']);
+    try {
+        $stmt = $db->prepare("INSERT INTO vehicles (client_id, registration, make, model_name, year, vin, notes, active) VALUES (?,?,?,?,?,?,?,?)");
+        $stmt->execute([$clientId, $registration, $make, $modelName, $year, $vin, $notes, $active]);
+    } catch (PDOException $e) {
+        $sqlState = (string)$e->getCode();
+        $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
+        $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
+        if ($isDuplicate) {
+            apiJson(409, ['ok' => false, 'error' => 'Pojazd o tym numerze rejestracyjnym już istnieje dla tego klienta.']);
+        }
+        apiJson(500, ['ok' => false, 'error' => 'Nie udało się dodać pojazdu.']);
     }
     $newId = (int)$db->lastInsertId();
 

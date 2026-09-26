@@ -54,13 +54,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($postAction === 'save_api') {
         $apiEnabled = !empty($_POST['api_enabled']) ? '1' : '0';
         $apiToken = trim((string)($_POST['api_token'] ?? ''));
-        if ($apiEnabled === '1' && $apiToken === '') {
+        $clearApiToken = !empty($_POST['clear_api_token']);
+        $currentApiTokenStmt = $db->prepare("SELECT `value` FROM settings WHERE `key`='api_token' LIMIT 1");
+        $currentApiTokenStmt->execute();
+        $currentApiToken = (string)($currentApiTokenStmt->fetchColumn() ?: '');
+
+        if ($clearApiToken) {
+            $apiTokenToSave = '';
+        } elseif ($apiToken !== '') {
+            $apiTokenToSave = $apiToken;
+        } else {
+            $apiTokenToSave = $currentApiToken;
+        }
+
+        if ($apiEnabled === '1' && $apiTokenToSave === '') {
             flashError('Aby włączyć API integracyjne, podaj token API.');
             redirect(getBaseUrl() . 'settings.php');
         }
         $stmt = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
         $stmt->execute(['api_enabled', $apiEnabled, $apiEnabled]);
-        $stmt->execute(['api_token', $apiToken, $apiToken]);
+        $stmt->execute(['api_token', $apiTokenToSave, $apiTokenToSave]);
         flashSuccess('Ustawienia API zostały zapisane.');
         redirect(getBaseUrl() . 'settings.php');
     }
@@ -488,8 +501,14 @@ $schemaFields = [
                             </div>
                             <div class="col-md-8">
                                 <label class="form-label">Token API</label>
-                                <input type="text" name="api_token" class="form-control" value="<?= h($settings['api_token'] ?? '') ?>" placeholder="Wprowadź silny token integracyjny">
-                                <small class="text-muted">Przekazuj token w nagłówku Authorization.</small>
+                                <input type="password" name="api_token" class="form-control" value="" placeholder="Wprowadź nowy token (pozostaw puste, aby nie zmieniać)">
+                                <small class="text-muted">Nagłówek autoryzacji: Authorization + prefiks ****** token API.</small>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check mt-4 pt-2">
+                                    <input class="form-check-input" type="checkbox" name="clear_api_token" id="clear_api_token" value="1">
+                                    <label class="form-check-label" for="clear_api_token">Wyczyść aktualny token</label>
+                                </div>
                             </div>
                             <div class="col-12">
                                 <label class="form-label">Endpoint</label>
