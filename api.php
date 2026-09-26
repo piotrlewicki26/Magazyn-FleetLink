@@ -28,7 +28,7 @@ function apiAuthHeader(): string {
     return '';
 }
 
-function ensureVehiclesApiUniqueIndex(PDO $db): bool {
+function hasVehiclesApiUniqueIndex(PDO $db): bool {
     static $checked = false;
     static $ready = false;
     if ($checked) return $ready;
@@ -37,7 +37,6 @@ function ensureVehiclesApiUniqueIndex(PDO $db): bool {
     try {
         $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
         if ($driver === 'sqlite') {
-            $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_client_registration_unique ON vehicles(client_id, registration)");
             $idxRows = $db->query("PRAGMA index_list('vehicles')")->fetchAll();
             foreach ($idxRows as $idx) {
                 if ((string)($idx['name'] ?? '') === 'idx_vehicles_client_registration_unique' && (int)($idx['unique'] ?? 0) === 1) {
@@ -61,14 +60,7 @@ function ensureVehiclesApiUniqueIndex(PDO $db): bool {
             $ready = true;
             return true;
         }
-
-        try {
-            $db->exec("ALTER TABLE vehicles ADD UNIQUE KEY uniq_vehicles_client_registration (client_id, registration)");
-        } catch (Throwable $e) {}
-
-        $existsStmt->execute();
-        $ready = (int)$existsStmt->fetchColumn() > 0;
-        return $ready;
+        return false;
     } catch (Throwable $e) {
         return false;
     }
@@ -110,7 +102,6 @@ if ($method === 'GET') {
         'ok' => true,
         'service' => 'fleetlink-api',
         'version' => defined('APP_VERSION') ? APP_VERSION : '1.0.0',
-        'actions' => ['create_company', 'add_vehicle', 'activate_vehicle'],
     ]);
 }
 if ($method !== 'POST') {
@@ -181,7 +172,7 @@ if ($action === 'add_vehicle') {
     if ($clientId <= 0 || $registration === '') {
         apiJson(422, ['ok' => false, 'error' => 'Pola client_id i registration są wymagane.']);
     }
-    if (!ensureVehiclesApiUniqueIndex($db)) {
+    if (!hasVehiclesApiUniqueIndex($db)) {
         apiJson(500, ['ok' => false, 'error' => 'Brak wymaganego unikalnego indeksu dla pojazdów (client_id + registration).']);
     }
 

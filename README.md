@@ -163,13 +163,15 @@ Kompleksowa aplikacja webowa PHP/MySQL do zarządzania urządzeniami GPS — od 
 
 Udostępniony endpoint: `api.php`
 
-- **GET** `api.php` — status API i lista akcji
+- **GET** `api.php` — status API
 - **POST** `api.php` — wywołanie akcji integracyjnej
 
 Autoryzacja:
 - API musi być włączone w **Ustawienia → System → API integracyjne**
 - token API przekazywany w nagłówku `Authorization`
-- format nagłówka: `Authorization: ******`
+- akceptowane formaty:
+  - sam token w `Authorization`
+  - `Authorization` z prefiksem `Bearer` i tokenem
 
 Dostępne akcje (`POST`, JSON):
 
