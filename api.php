@@ -101,7 +101,6 @@ if ($method === 'GET') {
     apiJson(200, [
         'ok' => true,
         'service' => 'fleetlink-api',
-        'version' => defined('APP_VERSION') ? APP_VERSION : '1.0.0',
     ]);
 }
 if ($method !== 'POST') {
@@ -188,7 +187,7 @@ if ($action === 'add_vehicle') {
     } catch (PDOException $e) {
         $sqlState = (string)$e->getCode();
         $driverErrorCode = (int)($e->errorInfo[1] ?? 0);
-        $isDuplicate = $sqlState === '23000' || in_array($driverErrorCode, [1062, 1555, 2067], true);
+        $isDuplicate = in_array($sqlState, ['23000', '23505'], true) || in_array($driverErrorCode, [1062, 1555, 2067], true);
         if ($isDuplicate) {
             apiJson(409, ['ok' => false, 'error' => 'Pojazd o tym numerze rejestracyjnym już istnieje dla tego klienta.']);
         }
