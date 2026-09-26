@@ -1551,7 +1551,7 @@ $activeModelFilter = (int)($_GET['model'] ?? 0);
                             'registration' => (string)($d['active_vehicle_registration'] ?? ''),
                             'tacho_connected' => (int)($d['tacho_connected'] ?? 0),
                             'tacho_firmware_version' => (string)($d['tacho_firmware_version'] ?? ''),
-                            'can_edit' => true,
+                            'can_edit' => isAdmin(),
                             'can_delete' => isAdmin(),
                             'can_install' => in_array($d['status'], ['nowy', 'sprawny']) && stripos($d['model_name'], 'ECAN') === false,
                             'can_move' => $isMountedLike,
